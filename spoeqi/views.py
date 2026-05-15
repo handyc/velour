@@ -249,9 +249,17 @@ def create(request):
         'horizon_pref': horizon_pref,
     }
 
+    # Repopulate the form from POST when the user is submitting, or
+    # from GET when the user just clicked a horizon_pref radio (which
+    # GET-submits the whole form so the candidate list re-renders).
+    # The actual save/validate path stays gated on POST below.
     if request.method == 'POST':
         form.update({k: request.POST.get(k, form.get(k, '')) for k in form})
+    elif request.method == 'GET' and request.GET:
+        form.update({k: request.GET.get(k, form.get(k, '')) for k in form
+                      if k in request.GET})
 
+    if request.method == 'POST':
         if not form['name'].strip():
             errors.append('A name is required.')
 
@@ -946,12 +954,36 @@ def album_new(request, slug=None):
             images_bytes = [f.read() for f in files]
             targets = _album.quantize_album(images_bytes,
                                              side=COMPONENT_GRID)
+
+            # Same album hash → same seed + rule + palette + initial
+            # grids. Re-creating would just be a duplicate Pact, and
+            # collide on Pact.name (UNIQUE) when the user accepted the
+            # default name. Reuse the existing one and redirect.
+            existing = Pact.objects.filter(
+                album_hash=targets.album_hash).first()
+            if existing is not None:
+                messages.info(request,
+                    f'Album already exists as pact "{existing.name}" '
+                    f'(album hash {targets.album_hash[:12]}…) — '
+                    f'redirecting to it.')
+                return redirect('spoeqi:detail', slug=existing.slug)
+
             seed, rule = _album.derive_seed_and_rule(targets.album_hash)
             palette = _album.palette_to_pact_palette(targets.palette_rgb)
             initial_grids = _album.targets_to_initial_grids(targets)
 
+            # Even with no album-hash collision, a manually-typed name
+            # may collide with an existing pact (any source). Suffix in
+            # that case so the create succeeds.
+            base_name = form['name'] or f'album-{targets.album_hash[:8]}'
+            name = base_name
+            suffix = 2
+            while Pact.objects.filter(name=name).exists():
+                name = f'{base_name}-{suffix}'
+                suffix += 1
+
             pact = Pact(
-                name=form['name'] or f'album-{targets.album_hash[:8]}',
+                name=name,
                 party_a=form['party_a'],
                 party_b=form['party_b'],
                 clock_model=form['clock_model'],
@@ -1066,6 +1098,118 @@ def chain(request, slug):
         'token_mappings': token_mappings,
         'components':     list(range(COMPONENTS)),
     })
+
+
+_DEFAULT_EVOLVE_INPUTS = (
+    'attention is all you need',
+    'the quick brown fox jumps over the lazy dog',
+    'a rose by any other name would smell as sweet',
+)
+
+
+def evolve(request, slug):
+    """Run a small GA over textmask head-ensembles.  See
+    spoeqi/evolution.py for the substrate; this view is just a thin
+    form + result renderer.
+    """
+    from . import evolution as ev
+
+    pact = get_object_or_404(Pact, slug=slug)
+
+    form_defaults = {
+        'inputs':         '\n'.join(_DEFAULT_EVOLVE_INPUTS),
+        'ensemble_size':  '4',
+        'n_population':   '8',
+        'n_generations':  '6',
+        'mutation_rate':  '0.25',
+        'crossover_rate': '0.5',
+        'n_elite':        '1',
+        'tournament_k':   '3',
+        'gen_lo':         '0',
+        'gen_hi':         '12',
+        'fitness':        'lexical_diversity',
+        'rng_seed':       '',
+    }
+    form = dict(form_defaults)
+    result = None
+    error = None
+
+    if request.method == 'POST':
+        for k in form:
+            form[k] = request.POST.get(k, form_defaults[k])
+        try:
+            inputs = [s for s in (form['inputs'] or '').splitlines() if s.strip()]
+            if not inputs:
+                raise ValueError('at least one non-empty input line is required')
+            fitness_name = form['fitness']
+            if fitness_name not in ev.FITNESS_REGISTRY:
+                raise ValueError(f'unknown fitness {fitness_name!r}')
+            seed_raw = form['rng_seed'].strip()
+            rng_seed = int(seed_raw) if seed_raw else None
+            result = ev.evolve(
+                pact,
+                inputs=inputs,
+                ensemble_size=int(form['ensemble_size']),
+                n_population=int(form['n_population']),
+                n_generations=int(form['n_generations']),
+                mutation_rate=float(form['mutation_rate']),
+                crossover_rate=float(form['crossover_rate']),
+                n_elite=int(form['n_elite']),
+                tournament_k=int(form['tournament_k']),
+                gen_window=(int(form['gen_lo']), int(form['gen_hi'])),
+                fitness=ev.FITNESS_REGISTRY[fitness_name],
+                rng_seed=rng_seed,
+            )
+        except (ValueError, TypeError) as e:
+            error = f'bad input: {e}'
+        except Exception as e:  # noqa: BLE001
+            error = f'{type(e).__name__}: {e}'
+
+    # Pre-render result rows so the template stays simple.
+    history_rows = None
+    final_rows   = None
+    if result is not None:
+        history_rows = []
+        for g in result.history:
+            history_rows.append({
+                'gen':         g.gen,
+                'best_score':  round(g.best_score, 4),
+                'mean_score':  round(g.mean_score, 4),
+                'best_heads':  [_head_chip(h) for h in g.best_heads],
+                'sample':      g.best_sample_concat,
+            })
+        final_rows = []
+        for rank, (heads, score, sample) in enumerate(zip(
+                result.final_population,
+                result.final_scores,
+                result.final_sample_concats), start=1):
+            final_rows.append({
+                'rank':   rank,
+                'score':  round(score, 4),
+                'heads':  [_head_chip(h) for h in heads],
+                'sample': sample,
+            })
+
+    return render(request, 'spoeqi/evolve.html', {
+        'pact':          pact,
+        'form':          form,
+        'fitness_choices': list(ev.FITNESS_REGISTRY.keys()),
+        'history_rows':  history_rows,
+        'final_rows':    final_rows,
+        'error':         error,
+        'result':        result,
+    })
+
+
+def _head_chip(h):
+    """Compact dict the template can render as a single chip."""
+    return {
+        'mode':       h.mode,
+        'table_name': h.table_name,
+        'component':  h.component,
+        'generation': h.generation,
+        'tag':        f'{h.mode}/{h.table_name}·c{h.component:02d}·g{h.generation}',
+    }
 
 
 def keystream_tap(request, slug, component, generation, n_bytes):

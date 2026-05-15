@@ -68,6 +68,9 @@
   <a class="badge" style="color:#cfc; text-decoration:none;"
      href="{% url 'spoeqi:chain' pact.slug %}"
      title="Chain multiple textmask stages — pipeline preprocessing for the LLM">chain →</a>
+  <a class="badge" style="color:#cfc; text-decoration:none;"
+     href="{% url 'spoeqi:evolve' pact.slug %}"
+     title="Evolve populations of head ensembles via GA over textmask transforms">evolve →</a>
 </div>
 
 <p class="spoeqi-meta" style="max-width: 64em;">
@@ -426,7 +429,7 @@
   // Layout: 8 components horizontally, each gets TILE_PX wide; 4 px
   // gutter between component tiles.
   var COMPONENTS_PER_ROW = 8;
-  var GUTTER = 6;
+  var GUTTER = 3;
   var TILE_PX = Math.floor((canvas.width - GUTTER * (COMPONENTS_PER_ROW + 1))
                             / COMPONENTS_PER_ROW);
   var HEX_R = TILE_PX / (2 * (GRID + 0.5));

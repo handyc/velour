@@ -181,22 +181,28 @@
       <span style="color:#ace; font-size: 0.78rem;">
         Horizon-band search
       </span>
+      {% comment %}
+        Each radio re-submits the form as GET so the candidate list
+        re-renders without losing the rest of the user's typed values.
+        The view repopulates from request.GET on GET, so every field
+        round-trips through the URL.
+      {% endcomment %}
       <label class="radio" style="margin: 0;">
         <input type="radio" name="horizon_pref" value="any"
                {% if horizon_pref == "any" %}checked{% endif %}
-               onchange="window.location.search='?horizon_pref=any'">
+               onchange="this.form.method='get'; this.form.submit();">
         off (rank by class-4 score, default)
       </label>
       <label class="radio" style="margin: 0;">
         <input type="radio" name="horizon_pref" value="prefer"
                {% if horizon_pref == "prefer" %}checked{% endif %}
-               onchange="window.location.search='?horizon_pref=prefer'">
+               onchange="this.form.method='get'; this.form.submit();">
         prefer (banded candidates float to top)
       </label>
       <label class="radio" style="margin: 0;">
         <input type="radio" name="horizon_pref" value="only"
                {% if horizon_pref == "only" %}checked{% endif %}
-               onchange="window.location.search='?horizon_pref=only'">
+               onchange="this.form.method='get'; this.form.submit();">
         only (banded ≥ 0.15)
       </label>
       <span class="hint" style="margin-left: auto;">

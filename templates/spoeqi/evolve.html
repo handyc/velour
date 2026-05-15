@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block title %}evolve — {{ pact.name }}{% endblock %}
+{% block content %}
+<style>
+  .ev-page { max-width: 78em; }
+  .ev-page h1 { margin: 0 0 4px; }
+  .ev-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 18px; }
+  .ev-page .crumbs a { color: #ace; }
+  .ev-page p.intro { color: #aaa; max-width: 52em; }
+  .ev-page p.intro code { color: #ddd; padding: 0 4px; background: #1a1a1a; }
+
+  .ev-form { padding: 14px 16px; border: 1px solid #1f1f1f; background: #0a0a0a; }
+  .ev-form textarea { width: 100%; background: #111; color: #ddd;
+                       border: 1px solid #333; padding: 6px;
+                       font-family: monospace; min-height: 4em; box-sizing: border-box; }
+  .ev-form .grid { display: grid;
+                    grid-template-columns: repeat(4, 1fr); gap: 10px 14px;
+                    margin-top: 10px; }
+  .ev-form .grid label { display: block; color: #888; font-size: 0.7rem;
+                          text-transform: uppercase; letter-spacing: 0.06em;
+                          margin-bottom: 2px; }
+  .ev-form input[type=text], .ev-form input[type=number], .ev-form select {
+    background: #111; color: #ddd; border: 1px solid #333;
+    padding: 4px 6px; font-family: inherit; width: 100%; box-sizing: border-box;
+  }
+  .ev-form .submit { text-align: right; margin-top: 12px; }
+  .ev-form button { background: #222; color: #cfc; border: 1px solid #555;
+                     padding: 6px 18px; font-family: inherit; cursor: pointer; }
+  .ev-form button:hover { border-color: #8b949e; }
+  .ev-help { color: #666; font-size: 0.75rem; margin-top: 2px; }
+
+  .ev-err { color: #f88; margin: 14px 0; padding: 8px 10px;
+             border: 1px solid #4a1d1d; background: #1a0a0a; }
+
+  .ev-panel { margin-top: 22px; padding: 14px 16px;
+               border: 1px solid #1f1f1f; background: #0a0a0a; }
+  .ev-panel h2 { margin: 0 0 6px; font-size: 1rem; color: #cfc;
+                  font-weight: normal; letter-spacing: 0.04em; }
+  .ev-meta { color: #888; font-size: 0.75rem; margin-bottom: 10px; }
+  .ev-meta code { color: #ddd; }
+
+  .ev-table { width: 100%; border-collapse: collapse;
+               font-family: monospace; font-size: 0.82rem; }
+  .ev-table th, .ev-table td { padding: 4px 8px; vertical-align: top;
+                                 border-bottom: 1px solid #161616; }
+  .ev-table th { text-align: left; color: #888; font-weight: normal;
+                  font-size: 0.7rem; letter-spacing: 0.05em;
+                  text-transform: uppercase; }
+  .ev-table td.num   { color: #cfc; text-align: right; white-space: nowrap; }
+  .ev-table td.score { color: #fff; text-align: right; white-space: nowrap; font-weight: 600; }
+  .ev-table tr.elite td.score { color: #6f6; }
+  .ev-table td.heads { line-height: 1.6; }
+  .ev-table td.sample { color: #ddd; word-break: break-word;
+                         max-width: 32em; }
+
+  .ev-chip { display: inline-block; padding: 1px 6px; margin-right: 4px;
+              border: 1px solid #2a2a2a; background: #111; color: #ddd;
+              font-size: 0.75rem; line-height: 1.6; border-radius: 2px; }
+  .ev-chip.char  { border-left: 3px solid #6cf; }
+  .ev-chip.token { border-left: 3px solid #fc6; }
+
+  .ev-spark { display: inline-block; font-family: monospace;
+               color: #cfc; padding: 2px 6px; background: #050505;
+               border: 1px solid #161616; }
+</style>
+
+<div class="ev-page">
+  <div class="crumbs">
+    <a href="{% url 'spoeqi:index' %}">spoeqi</a> ›
+    <a href="{% url 'spoeqi:detail' pact.slug %}">{{ pact.name }}</a> ›
+    <a href="{% url 'spoeqi:textmask' pact.slug %}">text mask</a> ›
+    evolve
+  </div>
+  <h1>evolve head ensembles</h1>
+  <p class="intro">
+    A <em>head</em> is one textmask transform —
+    <code>(mode, table, component, generation)</code>.  An <em>ensemble</em>
+    is K heads applied together to one input; outputs stack and concatenate.
+    The GA evolves a population of M ensembles by tournament selection +
+    crossover + per-head mutation.  Default fitness rewards
+    <em>lexical diversity</em> across the stacked outputs (cheap, no LLM).
+    The next phase swaps in an LLM perplexity scorer.
+  </p>
+
+  {% if error %}<div class="ev-err">{{ error }}</div>{% endif %}
+
+  <form method="post" class="ev-form">
+    {% csrf_token %}
+    <label style="color:#cfc;font-size:0.85rem;">input strings · one per line</label>
+    <textarea name="inputs" rows="4">{{ form.inputs }}</textarea>
+    <div class="ev-help">
+      Each input gets evaluated by every ensemble; fitness averages across
+      inputs.  Keep this small — fitness cost scales with N×M×K×inputs.
+    </div>
+
+    <div class="grid">
+      <div>
+        <label>ensemble size (K heads)</label>
+        <input type="number" name="ensemble_size" min="1" max="16" value="{{ form.ensemble_size }}">
+      </div>
+      <div>
+        <label>population (M ensembles)</label>
+        <input type="number" name="n_population" min="2" max="64" value="{{ form.n_population }}">
+      </div>
+      <div>
+        <label>generations</label>
+        <input type="number" name="n_generations" min="1" max="64" value="{{ form.n_generations }}">
+      </div>
+      <div>
+        <label>fitness</label>
+        <select name="fitness">
+          {% for f in fitness_choices %}
+            <option value="{{ f }}" {% if form.fitness == f %}selected{% endif %}>{{ f }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label>mutation rate</label>
+        <input type="text" name="mutation_rate" value="{{ form.mutation_rate }}">
+      </div>
+      <div>
+        <label>crossover rate</label>
+        <input type="text" name="crossover_rate" value="{{ form.crossover_rate }}">
+      </div>
+      <div>
+        <label>elites</label>
+        <input type="number" name="n_elite" min="0" max="64" value="{{ form.n_elite }}">
+      </div>
+      <div>
+        <label>tournament k</label>
+        <input type="number" name="tournament_k" min="2" max="16" value="{{ form.tournament_k }}">
+      </div>
+
+      <div>
+        <label>gen window lo</label>
+        <input type="number" name="gen_lo" min="0" value="{{ form.gen_lo }}">
+      </div>
+      <div>
+        <label>gen window hi</label>
+        <input type="number" name="gen_hi" min="0" value="{{ form.gen_hi }}">
+        <div class="ev-help">small window keeps keystream walks cheap</div>
+      </div>
+      <div>
+        <label>rng seed (blank = derive from pact)</label>
+        <input type="text" name="rng_seed" value="{{ form.rng_seed }}">
+      </div>
+      <div></div>
+    </div>
+
+    <div class="submit">
+      <button type="submit">evolve</button>
+    </div>
+  </form>
+
+  {% if result %}
+    <div class="ev-panel">
+      <h2>history</h2>
+      <div class="ev-meta">
+        rng_seed = <code>{{ result.rng_seed }}</code> ·
+        cache hits = <code>{{ result.cache_hits }}</code> /
+        misses = <code>{{ result.cache_misses }}</code> ·
+        inputs = <code>{{ result.inputs|length }}</code>
+      </div>
+      <table class="ev-table">
+        <thead>
+          <tr>
+            <th>gen</th>
+            <th>best</th>
+            <th>mean</th>
+            <th>best heads</th>
+            <th>best sample (input&nbsp;0)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in history_rows %}
+            <tr>
+              <td class="num">{{ row.gen }}</td>
+              <td class="score">{{ row.best_score }}</td>
+              <td class="num">{{ row.mean_score }}</td>
+              <td class="heads">
+                {% for h in row.best_heads %}
+                  <span class="ev-chip {{ h.mode }}">{{ h.tag }}</span>
+                {% endfor %}
+              </td>
+              <td class="sample">{{ row.sample|truncatechars:120 }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="ev-panel">
+      <h2>final population (best first)</h2>
+      <table class="ev-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>score</th>
+            <th>heads</th>
+            <th>sample (input&nbsp;0)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in final_rows %}
+            <tr {% if row.rank == 1 %}class="elite"{% endif %}>
+              <td class="num">{{ row.rank }}</td>
+              <td class="score">{{ row.score }}</td>
+              <td class="heads">
+                {% for h in row.heads %}
+                  <span class="ev-chip {{ h.mode }}">{{ h.tag }}</span>
+                {% endfor %}
+              </td>
+              <td class="sample">{{ row.sample|truncatechars:160 }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}
