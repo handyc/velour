@@ -68,10 +68,15 @@ def parse_params(params_spec: List[Param], raw_dict: dict) -> dict:
 # Imported lazily so a syntax error in one illusion doesn't crash
 # the catalogue page.
 
-from . import cafe_wall, autostereogram   # noqa: E402
+from . import (cafe_wall, hermann_grid, ehrenstein,
+                bezold, munker_white, autostereogram)   # noqa: E402
 
 REGISTRY = {
     cafe_wall.SLUG:       cafe_wall,
+    hermann_grid.SLUG:    hermann_grid,
+    ehrenstein.SLUG:      ehrenstein,
+    bezold.SLUG:          bezold,
+    munker_white.SLUG:    munker_white,
     autostereogram.SLUG:  autostereogram,
 }
 
