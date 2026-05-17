@@ -103,6 +103,69 @@
     </div>
   </div>
 
+  <h2>Structure tags
+    <a href="{% url 'taxon:structures' %}"
+        style="font-size:0.7em; font-weight:400; color:#8b949e;
+                margin-left:0.6em; text-decoration:none;">browse all →</a>
+  </h2>
+  <div style="display:flex; gap:0.4rem; flex-wrap:wrap;
+                align-items:center; margin: 0.4rem 0 0.8rem;">
+    {% for a in structure_assignments %}
+      <span style="display:inline-flex; align-items:center;
+                     padding:0.2rem 0.55rem; border-radius:11px;
+                     background:#0d1117;
+                     border:1px solid {{ a.tag.color_hex }};
+                     color:{{ a.tag.color_hex }};
+                     font-size:0.78rem; font-family:ui-monospace,monospace;">
+        <a href="{% url 'taxon:structure_detail' slug=a.tag.slug %}"
+            style="color:{{ a.tag.color_hex }}; text-decoration:none;"
+            title="{{ a.notes }}">{{ a.tag.name }}</a>
+        {% if a.source == 'auto' %}
+          <span style="color:#6e7681; margin-left:0.4em;
+                         font-size:0.7em;">auto</span>
+        {% endif %}
+        <form method="post"
+                action="{% url 'taxon:rule_untag' slug=rule.slug tag_slug=a.tag.slug %}"
+                style="display:inline; margin:0;">
+          {% csrf_token %}
+          <button type="submit"
+                    style="background:none; border:none; cursor:pointer;
+                            color:#6e7681; margin-left:0.4em; padding:0;
+                            font-size:0.8em;"
+                    title="remove tag">×</button>
+        </form>
+      </span>
+    {% empty %}
+      <span style="color:#6e7681; font-size:0.85rem;">No structure tags assigned.</span>
+    {% endfor %}
+
+    {% if available_tags %}
+      <form method="post" action="{% url 'taxon:rule_tag' slug=rule.slug %}"
+              style="display:inline-flex; gap:0.3rem; margin-left:0.6rem;
+                      align-items:center;">
+        {% csrf_token %}
+        <select name="tag" required
+                  style="background:#0d1117; color:#c9d1d9;
+                          border:1px solid #30363d; padding:0.2rem 0.4rem;
+                          font-family:ui-monospace,monospace; font-size:0.78rem;">
+          <option value="">+ add tag…</option>
+          {% for t in available_tags %}
+            <option value="{{ t.slug }}">{{ t.name }}</option>
+          {% endfor %}
+        </select>
+        <input type="text" name="notes" placeholder="optional note"
+                style="background:#0d1117; color:#c9d1d9;
+                        border:1px solid #30363d; padding:0.2rem 0.4rem;
+                        font-family:inherit; font-size:0.78rem;
+                        max-width: 14em;">
+        <button type="submit"
+                  style="background:#238636; color:#fff; border:none;
+                          padding:0.2rem 0.7rem; cursor:pointer;
+                          font-family:inherit; font-size:0.78rem;">tag</button>
+      </form>
+    {% endif %}
+  </div>
+
   <h2>Metrics</h2>
   <table style="width:100%; border-collapse:collapse;">
     <thead><tr style="border-bottom:1px solid #30363d;">

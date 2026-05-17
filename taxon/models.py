@@ -281,6 +281,92 @@ class Classification(models.Model):
         return f'{self.rule.slug} → class {self.wolfram_class}{q}'
 
 
+class StructureTag(models.Model):
+    """A category for the visual / dynamical shape a rule produces.
+
+    Orthogonal to Wolfram class.  Where Wolfram class describes
+    long-term statistical behaviour ("settles to fixed", "chaotic",
+    etc.), a StructureTag captures the *kind of stuff that moves
+    around* — what the rule's particle zoo looks like.  A class-4 rule
+    might be tagged "flowers" (6-petal hex solitons), "wires" (long
+    quiescent chains that conduct), "gears" (interlocking rotators),
+    etc.  A class-2 rule might be tagged "static" (still lives only)
+    or "blinkers" (small periodic oscillators).
+
+    These tags are subjective — the kind of thing a human notices
+    looking at a 16-tick render.  They're stored manually by default,
+    but the schema leaves room for automatic taggers (via
+    ``RuleStructureTag.source='auto'``).
+
+    Seed slugs (loaded by migration 0007):
+      flowers, gardens, gliders, oscillators, wires, gears, pistons,
+      rotators, static, dissolving, chaotic, periodic, exploding,
+      crystals, fractals
+    """
+    slug = models.SlugField(max_length=40, unique=True)
+    name = models.CharField(max_length=80)
+    description = models.TextField(
+        blank=True,
+        help_text='What this tag means and what to look for visually.',
+    )
+    # Free-form colour for the chip / legend.
+    color_hex = models.CharField(
+        max_length=7, default='#7ee787',
+        help_text='Hex (#rrggbb) used on category chips and the legend.',
+    )
+    sort_order = models.PositiveSmallIntegerField(
+        default=100,
+        help_text='Lower = shown first on the structures index.',
+    )
+
+    references = models.TextField(
+        blank=True,
+        help_text='Citations, links, or one-line notes on prior art for '
+                  'this kind of structure.',
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    rules = models.ManyToManyField(
+        Rule, through='RuleStructureTag', related_name='structure_tags',
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ('sort_order', 'name')
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class RuleStructureTag(models.Model):
+    """Through-table for Rule × StructureTag, with assignment context."""
+    SOURCE_MANUAL = 'manual'
+    SOURCE_AUTO   = 'auto'
+    SOURCE_CHOICES = [
+        (SOURCE_MANUAL, 'Manually assigned'),
+        (SOURCE_AUTO,   'Auto-detected'),
+    ]
+    rule = models.ForeignKey(Rule, on_delete=models.CASCADE,
+                                related_name='structure_tag_assignments')
+    tag  = models.ForeignKey(StructureTag, on_delete=models.CASCADE,
+                                related_name='rule_assignments')
+    source = models.CharField(max_length=10,
+                                  choices=SOURCE_CHOICES, default=SOURCE_MANUAL)
+    confidence = models.FloatField(
+        default=1.0,
+        help_text='1.0 for manual assignments; lower for noisy auto-taggers.',
+    )
+    notes = models.TextField(blank=True)
+    assigned_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        unique_together = ('rule', 'tag')
+        ordering = ('-assigned_at',)
+
+    def __str__(self) -> str:
+        return f'{self.rule.slug} ⟶ {self.tag.slug} ({self.source})'
+
+
 class AutoSearch(models.Model):
     """Background loop that hunts for K=4 packed-positional rules of a
     target Wolfram class. Settings drive: how rules are minted (random,
@@ -407,3 +493,4 @@ class EvolutionRun(models.Model):
         else:
             tgt = f'{self.target_metric}={self.target_value}'
         return f'{self.name or self.slug} → {tgt}'
+

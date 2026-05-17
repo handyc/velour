@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}{{ tag.name }} — Structures — Taxon{% endblock %}
+{% block extra_head %}
+<style>
+  .sd-page { max-width: 80em; }
+  .sd-page h1 { margin: 0 0 0.4rem; color: {{ tag.color_hex }}; }
+  .sd-page .lede { color: #aaa; font-size: 0.92rem; max-width: 52em;
+                     line-height: 1.55; }
+  .sd-page .refs { color: #6e7681; font-size: 0.82rem; max-width: 52em;
+                     margin-top: 0.4rem; font-style: italic; }
+
+  .sd-related { margin: 0.8rem 0; }
+  .sd-related a { display: inline-block; padding: 0.15rem 0.6rem;
+                    margin-right: 0.4rem; background: #161b22;
+                    border: 1px solid #234; text-decoration: none;
+                    font-size: 0.78rem; color: #c9d1d9; }
+  .sd-related a:hover { background: #21262d; }
+
+  .sd-rule-grid { display: grid;
+                    grid-template-columns: repeat(auto-fill, minmax(15em, 1fr));
+                    gap: 0.8rem; margin: 1.2rem 0; }
+  .sd-rule-card { padding: 0.6rem 0.8rem; background: #0d1117;
+                    border: 1px solid #234; }
+  .sd-rule-card .name { color: #c9d1d9; font-weight: 600; }
+  .sd-rule-card .name a { color: #79c0ff; text-decoration: none; }
+  .sd-rule-card .meta { color: #8b949e; font-size: 0.74rem;
+                          font-family: ui-monospace, monospace;
+                          margin-top: 0.2rem; }
+  .sd-rule-card img.thumb { display: block; width: 96px; height: 96px;
+                              image-rendering: pixelated;
+                              border: 1px solid #30363d; background: #000;
+                              margin: 0.3rem 0; }
+  .sd-rule-card .notes { color: #aaa; font-size: 0.78rem;
+                            line-height: 1.4; margin-top: 0.3rem;
+                            font-style: italic; }
+  .sd-rule-card .src { color: #6e7681; font-size: 0.7rem;
+                          margin-top: 0.2rem; }
+  .sd-empty { color: #8b949e; padding: 1.5rem; text-align: center;
+                background: #0d1117; border: 1px dashed #234; }
+</style>
+{% endblock extra_head %}
+
+{% block content %}
+<div class="sd-page">
+  <p style="font-size:0.85rem;">
+    <a href="{% url 'taxon:structures' %}" style="color:#8b949e;">← all structures</a>
+  </p>
+  <h1>{{ tag.name }}</h1>
+  <p class="lede">{{ tag.description|linebreaksbr }}</p>
+  {% if tag.references %}
+    <p class="refs"><strong>References:</strong> {{ tag.references }}</p>
+  {% endif %}
+
+  {% if related %}
+    <div class="sd-related">
+      <span style="color:#8b949e; font-size:0.8rem;">commonly co-tagged with:</span>
+      {% for r in related %}
+        <a href="{% url 'taxon:structure_detail' slug=r.tag.slug %}"
+            style="border-color:{{ r.tag.color_hex }};">{{ r.tag.name }}
+          <span style="color:#6e7681; margin-left:0.3em;">×{{ r.n }}</span>
+        </a>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <h2 style="font-size:1rem; color:#c9d1d9; margin-top:1.2rem;">
+    {{ n_rules }} rule{{ n_rules|pluralize }} tagged
+  </h2>
+
+  {% if rules %}
+    <div class="sd-rule-grid">
+      {% for r in rules %}
+        <div class="sd-rule-card">
+          <div class="name">
+            <a href="{% url 'taxon:rule_detail' slug=r.rule.slug %}">{{ r.rule.name|default:r.rule.slug }}</a>
+          </div>
+          <div class="meta">{{ r.rule.kind }} · {{ r.rule.sha1|slice:":10" }}…</div>
+          <a href="{% url 'taxon:rule_detail' slug=r.rule.slug %}">
+            <img class="thumb"
+                  src="{% url 'taxon:rule_preview_png' slug=r.rule.slug %}"
+                  alt="{{ r.rule.slug }}">
+          </a>
+          {% if r.notes %}
+            <div class="notes">{{ r.notes|truncatechars:160 }}</div>
+          {% endif %}
+          <div class="src">
+            {{ r.source }}
+            {% if r.source == 'auto' %} · conf {{ r.confidence|floatformat:2 }}{% endif %}
+            · {{ r.assigned|date:"Y-m-d" }}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="sd-empty">
+      No rules tagged with <strong>{{ tag.name }}</strong> yet.
+      Open any rule's detail page to assign this tag.
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

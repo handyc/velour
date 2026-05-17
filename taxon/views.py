@@ -24,6 +24,7 @@ from .metrics import META as METRIC_META, list_metrics, run_all
 from .models import (
     Agent, AutoSearch,
     Classification, EvolutionRun, MetricRun, Rule, WOLFRAM_CLASSES,
+    StructureTag, RuleStructureTag,
 )
 
 
@@ -359,6 +360,17 @@ def rule_detail(request, slug: str):
             break
 
     agents = list(rule.agents.all())
+
+    # Structure-tag assignments + the full tag catalogue for the
+    # "add a tag" picker.
+    structure_assignments = list(
+        rule.structure_tag_assignments
+            .select_related('tag')
+            .order_by('-confidence', '-assigned_at'))
+    assigned_tag_ids = {a.tag_id for a in structure_assignments}
+    available_tags = list(
+        StructureTag.objects.exclude(pk__in=assigned_tag_ids))
+
     return render(request, 'taxon/detail.html', {
         'rule': rule,
         'card': card,
@@ -370,6 +382,8 @@ def rule_detail(request, slug: str):
         'class_choices': [(n, lbl) for n, lbl in WOLFRAM_CLASSES],
         'agents': agents,
         'quine_card': quine_card,
+        'structure_assignments': structure_assignments,
+        'available_tags':        available_tags,
     })
 
 
@@ -1398,3 +1412,104 @@ def wang_tileset_view(request, slug: str):
         'tiles': tiles,
         'k': len(ts.palette) or 4,
     })
+
+
+# ─── StructureTag — categorise rules by visual / dynamical shape ────
+
+@login_required
+def structures_index(request):
+    """Browse the full StructureTag catalogue: card per tag with the
+    count + a preview thumbnail of the top-rated member rule.
+    """
+    tags = list(StructureTag.objects.all())
+    cards = []
+    for t in tags:
+        # Use the through-table to count and to find a representative
+        # member rule for the preview thumb.
+        n = t.rule_assignments.count()
+        sample = (t.rule_assignments
+                       .select_related('rule')
+                       .order_by('-confidence', '-assigned_at')
+                       .first())
+        cards.append({
+            'tag':     t,
+            'count':   n,
+            'sample_rule': sample.rule if sample else None,
+        })
+    return render(request, 'taxon/structures_index.html', {
+        'cards': cards,
+    })
+
+
+@login_required
+def structure_detail(request, slug: str):
+    """All rules tagged with this structure category."""
+    tag = get_object_or_404(StructureTag, slug=slug)
+    assignments = (tag.rule_assignments
+                       .select_related('rule')
+                       .order_by('-confidence', '-assigned_at'))
+    rules = []
+    for a in assignments:
+        rules.append({
+            'rule':       a.rule,
+            'source':     a.source,
+            'confidence': a.confidence,
+            'notes':      a.notes,
+            'assigned':   a.assigned_at,
+        })
+    # Related tags: which other tags do members of this tag also have?
+    related_counts: dict[int, int] = {}
+    member_pks = [r['rule'].pk for r in rules]
+    if member_pks:
+        for st in (StructureTag.objects
+                       .filter(rule_assignments__rule_id__in=member_pks)
+                       .exclude(pk=tag.pk)
+                       .annotate(n=Count('rule_assignments'))):
+            related_counts[st.pk] = (related_counts.get(st.pk, 0)
+                                          + (st.n or 0))
+    related = sorted(
+        ({'tag': StructureTag.objects.get(pk=pk), 'n': n}
+            for pk, n in related_counts.items()),
+        key=lambda x: -x['n'])[:6]
+
+    return render(request, 'taxon/structure_detail.html', {
+        'tag':     tag,
+        'rules':   rules,
+        'n_rules': len(rules),
+        'related': related,
+    })
+
+
+@login_required
+@require_POST
+def rule_tag(request, slug: str):
+    """Attach a structure tag to a rule.  Idempotent (update-or-create)."""
+    rule = get_object_or_404(Rule, slug=slug)
+    tag_slug = (request.POST.get('tag') or '').strip()
+    if not tag_slug:
+        return JsonResponse({'ok': False, 'error': 'no tag'}, status=400)
+    tag = get_object_or_404(StructureTag, slug=tag_slug)
+    note = (request.POST.get('notes') or '').strip()[:500]
+    obj, created = RuleStructureTag.objects.update_or_create(
+        rule=rule, tag=tag,
+        defaults={
+            'source': RuleStructureTag.SOURCE_MANUAL,
+            'confidence': 1.0,
+            'notes': note,
+        })
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JsonResponse({'ok': True, 'created': created,
+                                'tag': tag.slug, 'tag_name': tag.name})
+    return redirect('taxon:rule_detail', slug=rule.slug)
+
+
+@login_required
+@require_POST
+def rule_untag(request, slug: str, tag_slug: str):
+    """Remove a structure tag from a rule."""
+    rule = get_object_or_404(Rule, slug=slug)
+    tag  = get_object_or_404(StructureTag, slug=tag_slug)
+    RuleStructureTag.objects.filter(rule=rule, tag=tag).delete()
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JsonResponse({'ok': True})
+    return redirect('taxon:rule_detail', slug=rule.slug)

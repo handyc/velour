@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Structures — Taxon{% endblock %}
+{% block extra_head %}
+<style>
+  .st-page { max-width: 80em; }
+  .st-page h1 { margin: 0 0 0.4rem; }
+  .st-page .lede { color: #aaa; max-width: 52em; font-size: 0.92rem;
+                     line-height: 1.55; }
+  .st-grid { display: grid;
+               grid-template-columns: repeat(auto-fill, minmax(13.5em, 1fr));
+               gap: 0.8rem; margin: 1.2rem 0; }
+  .st-card { padding: 0.7rem 0.9rem; background: #0d1117;
+               border: 1px solid #234; border-top: 4px solid #444;
+               text-decoration: none; display: block; color: inherit; }
+  .st-card:hover { background: #161b22; border-color: #79c0ff; }
+  .st-card .title { font-weight: 600; color: #c9d1d9; margin-bottom: 0.2rem; }
+  .st-card .desc { color: #8b949e; font-size: 0.78rem; line-height: 1.4;
+                     min-height: 4em; margin-bottom: 0.4rem; }
+  .st-card .count { color: #ffd866; font-family: ui-monospace, monospace;
+                      font-size: 0.78rem; }
+  .st-card img.thumb { display: block; width: 64px; height: 64px;
+                          image-rendering: pixelated;
+                          border: 1px solid #30363d; background: #000;
+                          margin-top: 0.3rem; }
+</style>
+{% endblock extra_head %}
+
+{% block content %}
+<div class="st-page">
+  <p style="font-size:0.85rem;">
+    <a href="{% url 'taxon:index' %}" style="color:#8b949e;">← Taxon</a>
+  </p>
+  <h1>Rule structures</h1>
+  <p class="lede">
+    Categories for the kinds of <em>moving things</em> a rule produces —
+    orthogonal to its Wolfram class.  A class-4 rule might be tagged
+    <strong>flowers</strong> (6-petal hex solitons) or <strong>wires</strong>
+    (signal-conducting quiescent chains); a class-2 rule might be
+    <strong>static</strong> (still lives) or <strong>periodic</strong>
+    (short global cycles).  Tags are subjective and overlapping; rules
+    can carry several.
+  </p>
+
+  <div class="st-grid">
+    {% for c in cards %}
+      <a class="st-card"
+          href="{% url 'taxon:structure_detail' slug=c.tag.slug %}"
+          style="border-top-color: {{ c.tag.color_hex }};">
+        <div class="title" style="color:{{ c.tag.color_hex }};">{{ c.tag.name }}</div>
+        <div class="desc">{{ c.tag.description|truncatechars:180 }}</div>
+        <div class="count">{{ c.count }} rule{{ c.count|pluralize }}</div>
+        {% if c.sample_rule %}
+          <img class="thumb"
+                src="{% url 'taxon:rule_preview_png' slug=c.sample_rule.slug %}"
+                alt="{{ c.sample_rule.slug }}">
+        {% endif %}
+      </a>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

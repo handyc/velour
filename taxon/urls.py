@@ -36,6 +36,14 @@ urlpatterns = [
     path('rules/<slug:slug>/to-device/', views.rule_to_device, name='rule_to_device'),
     path('rules/<slug:slug>/to-gridprint/', views.rule_to_gridprint, name='rule_to_gridprint'),
 
+    # StructureTags — categorise rules by visual / dynamical shape
+    # (flowers, gliders, wires, …).  Orthogonal to Wolfram class.
+    path('structures/', views.structures_index, name='structures'),
+    path('structures/<slug:slug>/', views.structure_detail, name='structure_detail'),
+    path('rules/<slug:slug>/tag/', views.rule_tag, name='rule_tag'),
+    path('rules/<slug:slug>/untag/<slug:tag_slug>/',
+                                       views.rule_untag, name='rule_untag'),
+
     # AutoSearch — background hunt for a target Wolfram class.
     path('autosearch/',                      views.autosearch_view,   name='autosearch'),
     path('autosearch/start/',                views.autosearch_start,  name='autosearch_start'),
