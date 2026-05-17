@@ -94,6 +94,7 @@ def ca_transformer_block_qkv(states: List[np.ndarray], *,
                               norm_rule: Optional[np.ndarray] = None,
                               norm_ticks: int = 2,
                               causal: bool = True,
+                              top_k: int = 1,
                               trace: Optional[list] = None,
                               ) -> List[np.ndarray]:
     """One transformer block, every sub-step a CA tick.
@@ -124,7 +125,7 @@ def ca_transformer_block_qkv(states: List[np.ndarray], *,
     attended = ca_self_attention(normed,
                                    q_rule=q_rule, k_rule=k_rule, v_rule=v_rule,
                                    score_rule=score_rule, mix_rule=mix_rule,
-                                   causal=causal, trace=trace)
+                                   causal=causal, top_k=top_k, trace=trace)
     states_a = [ca_residual_merge(orig, attn, merge_rule)
                  for orig, attn in zip(states, attended)]
     if trace is not None:
@@ -309,6 +310,7 @@ def ca_forward_qkv(token_ids: List[int], *,
                     side: int = 16,
                     base_seed: int = 0xCAF0FE,
                     output_ticks: int = 2,
+                    top_k: int = 1,
                     trace: Optional[list] = None,
                     ) -> np.ndarray:
     """End-to-end fully-CA forward pass.  Every step is a CA tick:
@@ -360,6 +362,7 @@ def ca_forward_qkv(token_ids: List[int], *,
                                             merge_rule=r['merge'],
                                             mlp_rule=r['mlp'],
                                             norm_rule=norm_rule,
+                                            top_k=top_k,
                                             trace=block_trace)
         if trace is not None:
             for item in block_trace:

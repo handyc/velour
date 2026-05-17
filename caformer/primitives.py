@@ -491,21 +491,25 @@ def ca_self_attention(states, *,
                        score_rule: np.ndarray,
                        mix_rule: np.ndarray,
                        causal: bool = True,
+                       top_k: int = 1,
                        trace: Optional[list] = None):
-    """Full CA Q/K/V self-attention.
+    """CA Q/K/V self-attention with optional top-k soft blending.
 
     For each token i:
       Q_i = ca_qkv_project(states[i], q_rule)
       K_i = ca_qkv_project(states[i], k_rule)
       V_i = ca_qkv_project(states[i], v_rule)
       For each j (≤ i if causal): w_ij = ca_attention_score(Q_i, K_j, score_rule)
-      j*  = argmax_j w_ij                          # hard attention
-      out_i = hex_ca_step(V_{j*} XOR states[i], mix_rule)
 
-    Hard attention (argmax) is the simpler attention used by
-    early sparse-attention papers; it makes the whole attention layer
-    a deterministic function of the rule tables, which is what the GA
-    needs to evolve a stable attention specialist.
+    Then for top-k attention (k>=1):
+      pick the k highest-scoring j's (ties broken by smallest index)
+      blend their V_j states cell-wise via plurality vote (ties → smaller colour)
+      out_i = hex_ca_step(V_blend XOR states[i], mix_rule)
+
+    top_k=1 (default) recovers the original hard-attention behaviour
+    exactly; top_k>1 carries information from multiple attended tokens
+    through a single CA-pure blend, the closest CA-native analogue of
+    soft attention's weighted sum.
 
     When ``trace`` is a list, records the Q/K/V/score/mix grids for the
     *last* token position (the one the next-token prediction depends on)
@@ -520,34 +524,52 @@ def ca_self_attention(states, *,
     Ks = [ca_qkv_project(s, k_rule) for s in states]
     Vs = [ca_qkv_project(s, v_rule) for s in states]
     out = []
-    last_j_star = None
+    last_j_stars: Optional[list] = None
     last_score_grid = None
     for i in range(T):
         end = i + 1 if causal else T
-        scores = [ca_attention_score(Qs[i], Ks[j], score_rule)
-                   for j in range(end)]
-        # Hard attention: pick the j with the highest score.  Ties broken
-        # by the smallest index (most distant past) so the choice is
-        # deterministic and the sequence walk reproducible.
-        j_star = int(np.argmax(scores))
-        attended = (Vs[j_star] ^ states[i].astype(np.uint8)) & 3
+        scores = np.array([ca_attention_score(Qs[i], Ks[j], score_rule)
+                            for j in range(end)])
+        k = max(1, min(top_k, end))
+        if k == 1:
+            j_stars = [int(np.argmax(scores))]
+        else:
+            # argsort descending, tie-break by index for determinism
+            order = np.lexsort((np.arange(end), -scores))
+            j_stars = [int(j) for j in order[:k]]
+        v_blend = _plurality_blend([Vs[j] for j in j_stars])
+        attended = (v_blend ^ states[i].astype(np.uint8)) & 3
         out.append(hex_ca_step(attended, mix_rule))
-        last_j_star = j_star
-        # Capture the score grid for the chosen j (the one the readout
-        # actually used). ca_attention_score returns a scalar in the
-        # current primitive set; we replay it as a state-shaped grid
-        # so the live panel has something visual to render.
+        last_j_stars = j_stars
         if trace is not None and i == T - 1:
+            # Use the top j for the trace grid (most-relevant key for prediction)
             last_score_grid = hex_ca_step(
-                (Qs[i] ^ Ks[j_star]) & 3, score_rule)
+                (Qs[i] ^ Ks[j_stars[0]]) & 3, score_rule)
     if trace is not None:
         trace.append({'name': 'q',      'grid': Qs[-1]})
         trace.append({'name': 'k',      'grid': Ks[-1]})
         trace.append({'name': 'v',      'grid': Vs[-1]})
         trace.append({'name': 'score',  'grid': last_score_grid,
-                       'note': f'j*={last_j_star}/{T - 1}'})
+                       'note': f'top-{len(last_j_stars or [])}: j*={last_j_stars}/{T - 1}'})
         trace.append({'name': 'mix',    'grid': out[-1]})
     return out
+
+
+def _plurality_blend(grids: list) -> np.ndarray:
+    """Cellwise plurality vote across a list of K=4 grids of the same
+    shape.  Ties break to the smaller colour (deterministic).  k=1
+    short-circuits to the single grid.  This is the CA-native analogue
+    of attention's weighted-sum: each cell's output is the colour most
+    of the input grids agree on at that cell.
+    """
+    if not grids:
+        raise ValueError('need at least one grid')
+    if len(grids) == 1:
+        return grids[0].astype(np.uint8) & 3
+    stacked = np.stack([g.astype(np.uint8) & 3 for g in grids], axis=0)
+    # counts[c, ...] = number of grids with colour c at each cell
+    counts = np.stack([(stacked == c).sum(axis=0) for c in range(4)], axis=-1)
+    return np.argmax(counts, axis=-1).astype(np.uint8)
 
 
 def ca_residual_merge(state_a: np.ndarray, state_b: np.ndarray,

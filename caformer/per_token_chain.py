@@ -716,6 +716,7 @@ def corpus_argmax_matches(base: Dict[str, np.ndarray],
                            n_blocks_by_pair: Dict[int, int],
                            argmax_bonus: float = 0.0,
                            fitness_mode: str = 'matches',
+                           top_k: int = 1,
                            ) -> Tuple[int, float]:
     """Score a candidate base across a corpus.  Two modes:
 
@@ -753,7 +754,8 @@ def corpus_argmax_matches(base: Dict[str, np.ndarray],
                     embed_rule=base['embed'],
                     block_rules=block_template,
                     norm_rule=base['norm'],
-                    output_rule=rule, vocab_size=256)
+                    output_rule=rule, vocab_size=256,
+                    top_k=top_k)
                 shifted = logits - float(logits.max())
                 exp = np.exp(shifted)
                 denom = float(exp.sum())
@@ -791,6 +793,7 @@ class CoevolveConfig:
     mutation_rate: float = 0.003          # per-byte flip prob (over fired keys if smart_mutation)
     fitness_mode:  str = 'lp'             # 'lp' (smooth) or 'matches' (legacy)
     smart_mutation: bool = True           # restrict flips to keys that actually fire on corpus
+    top_k:         int = 1                # top-k soft attention (1 = hard, default; 4-8 = soft blend)
     rng_seed:      int = 0xC0E0_0001
     log:           Callable[[str], None] = print
 
