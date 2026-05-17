@@ -688,6 +688,159 @@ def search_stop(request):
     return redirect('ouroboros:search')
 
 
+# ─── Cross-app handoffs ──────────────────────────────────────────────
+
+
+def _default_palette_ansi() -> bytes:
+    """4-byte ANSI-256 palette used when handing a quine off to apps
+    that need one but don't have a saved palette themselves.  Matches
+    the colours used in ouroboros's ruleset PNGs (vermilion/azure/
+    verdant/amber)."""
+    return bytes([196, 27, 35, 220])
+
+
+@login_required
+def to_taxon(request, pk: int):
+    """Catalogue this ouroboros quine in Taxon as a hex_k4_lut Rule
+    and redirect to its rule detail page in Taxon.  Idempotent on
+    sha1 — re-clicking the same quine just reopens the existing rule
+    and refreshes its classification."""
+    from taxon.importers import upsert_hex_lut
+    from taxon.models import Classification
+    from spoeqi.metachain import (
+        classify_rule, probe_activity, sr_arbitrary_sigma,
+        self_reproduce_score, walk_chain)
+    from django.shortcuts import redirect
+
+    c = get_object_or_404(_quine_qs(), pk=pk)
+    lut = bytes(c.rules_blob)
+    meta = _quine_meta(c)
+    name = meta.get('display_name') or f'ouroboros quine #{c.pk}'
+    sref_bits = [f'ouroboros={c.pk}', f'sha={_short_sha(lut)}']
+    if meta.get('origin'):
+        sref_bits.append(f'origin={meta["origin"]}')
+    rule = upsert_hex_lut(
+        lut, _default_palette_ansi(),
+        name=name, source='ouroboros',
+        source_ref='; '.join(sref_bits),
+    )
+
+    # Classify the rule using the live metrics so the Taxon detail
+    # shows it with the right Wolfram class + quine tags from the start.
+    cls, c4 = classify_rule(lut, probe_ticks=16)
+    act = probe_activity(lut, ticks=12)
+    sr_strict = self_reproduce_score(lut, ticks=16)
+    sr_arbs = sr_arbitrary_sigma(lut, ticks=16)
+    sub_chain = walk_chain(lut, depth=20)
+    Classification.objects.create(
+        rule=rule, wolfram_class=int(cls),
+        confidence=float(c4),
+        basis_json={'c4': c4, 'activity': act,
+                     'probe_ticks': 16, 'probe_size': 128,
+                     'source': 'ouroboros->taxon'},
+        is_quine=bool(sr_strict >= 0.30 or sr_arbs >= 0.85),
+        sr_strict=float(sr_strict),
+        sr_arbsigma=float(sr_arbs),
+        nest_depth=int(sub_chain.get('class4_run_length', 0)),
+        quine_origin=f'ouroboros #{c.pk}',
+    )
+    return redirect('taxon:rule_detail', slug=rule.slug)
+
+
+@login_required
+def to_automaton(request, pk: int):
+    """Send this ouroboros quine to the Automaton as a runnable RuleSet
+    + Simulation.  Packs the 16,384-byte LUT into HXC4 format
+    (4-byte magic + 4-byte palette + 4,096-byte packed K=4 genome) and
+    creates a RuleSet via the same code path as automaton's
+    import-from-s3lab.  Idempotent on the packed sha1.
+    """
+    import random
+    from django.contrib.auth.decorators import login_required as _li  # noqa
+    from django.db import transaction
+    from django.shortcuts import redirect
+    from django.urls import reverse
+
+    from automaton.models import RuleSet, ExactRule, Simulation
+    from automaton.packed import (
+        PackedRuleset, parse_genome_bin, encode_genome_bin,
+        ansi256_to_hex,
+    )
+    from spoeqi.metachain import pack_k4_stream
+
+    c = get_object_or_404(_quine_qs(), pk=pk)
+    lut = bytes(c.rules_blob)
+    if len(lut) != 16384:
+        return HttpResponse(f'expected 16,384-byte LUT, got {len(lut)}',
+                              status=400)
+    packed_bytes = pack_k4_stream(lut)
+    if len(packed_bytes) != 4096:
+        return HttpResponse(
+            f'packed K=4 stream is {len(packed_bytes)}B, expected 4096',
+            status=500)
+    palette_ansi = _default_palette_ansi()
+    ruleset_obj = PackedRuleset(n_colors=4, data=packed_bytes)
+    blob = encode_genome_bin(palette_ansi, ruleset_obj)
+    _palette, packed = parse_genome_bin(blob)            # round-trip sanity
+    blob_sha1 = hashlib.sha1(packed.data).hexdigest()
+
+    existing = RuleSet.objects.filter(
+        source_metadata__blob_sha1=blob_sha1).first()
+    if existing:
+        sim = existing.simulations.order_by('-created_at').first()
+        if sim:
+            return redirect('automaton:run', slug=sim.slug)
+        return redirect('automaton:home')
+
+    meta = _quine_meta(c)
+    name = meta.get('display_name') or f'ouroboros #{c.pk}'
+    palette_css = [ansi256_to_hex(idx) for idx in palette_ansi]
+    explicit = packed.to_explicit(skip_identity=True)
+    n_explicit = len(explicit)
+    with transaction.atomic():
+        ruleset = RuleSet.objects.create(
+            name=name,
+            description=(
+                f'Sent from ouroboros (#{c.pk}, sha {blob_sha1[:10]}…). '
+                f'{n_explicit} non-identity 7-tuples out of '
+                f'{4**7:,}.'),
+            n_colors=4,
+            source='operator',
+            palette=palette_css,
+            source_metadata={
+                'origin':           'imported',
+                'source':           'ouroboros',
+                'source_ref':       f'ouroboros={c.pk}',
+                'blob_sha1':        blob_sha1,
+                'palette_hex':      palette_ansi.hex(),
+                'palette_ansi256':  list(palette_ansi),
+                'palette_css':      palette_css,
+                'n_explicit':       n_explicit,
+            },
+        )
+        ExactRule.objects.bulk_create([
+            ExactRule(
+                ruleset=ruleset,
+                self_color=er['s'],
+                n0_color=er['n'][0], n1_color=er['n'][1],
+                n2_color=er['n'][2], n3_color=er['n'][3],
+                n4_color=er['n'][4], n5_color=er['n'][5],
+                result_color=er['r'],
+                priority=i,
+            )
+            for i, er in enumerate(explicit)
+        ])
+        sim_w, sim_h = 16, 16
+        grid = [[random.randint(0, 3) for _ in range(sim_w)]
+                for _ in range(sim_h)]
+        sim = Simulation.objects.create(
+            name=name, ruleset=ruleset,
+            width=sim_w, height=sim_h,
+            palette=palette_css, grid_state=grid,
+        )
+    return redirect('automaton:run', slug=sim.slug)
+
+
 @login_required
 def search_tail(request):
     """JSON endpoint for the status page to poll the latest log tail."""

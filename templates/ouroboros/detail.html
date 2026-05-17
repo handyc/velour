@@ -198,6 +198,17 @@
           ·
           <a href="{% url 'ouroboros:walk_json' pk=pk %}?depth=200">walk.json</a>
         </p>
+        <p style="margin-top:0.4rem; font-size:0.85rem;">
+          send to →
+          <a href="{% url 'ouroboros:to_taxon' pk=pk %}"
+              style="color:#7ee787; padding:0.15em 0.6em; border:1px solid #234;
+                      text-decoration:none; margin-right:0.4em;"
+              title="catalogue this quine in Taxon and open its rule page">Taxon</a>
+          <a href="{% url 'ouroboros:to_automaton' pk=pk %}"
+              style="color:#79c0ff; padding:0.15em 0.6em; border:1px solid #234;
+                      text-decoration:none;"
+              title="pack the LUT to HXC4 and open it as a runnable RuleSet+Simulation in Automaton">Automaton</a>
+        </p>
       </div>
     </div>
 

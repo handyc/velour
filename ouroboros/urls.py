@@ -18,4 +18,7 @@ urlpatterns = [
                                 views.chain_level_png,
                                 name='chain_level_png'),
     path('<int:pk>/walk.json',  views.walk_json,     name='walk_json'),
+    path('<int:pk>/to-taxon/',  views.to_taxon,      name='to_taxon'),
+    path('<int:pk>/to-automaton/',
+                                views.to_automaton,  name='to_automaton'),
 ]
