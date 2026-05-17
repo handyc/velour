@@ -297,7 +297,9 @@ async def dmn_stream(request):
     from .transformer import nano_gpt
     from .dmn import CADMNStep, dmn_observables
 
-    grid_side    = _clamp_int(request.GET.get('grid_side'),    12, 6, 32)
+    # 128 cap lets a user opt into the LUT-as-grid bijection (4^7 =
+    # 16,384 = 128²); default stays at 12 to keep the live view snappy.
+    grid_side    = _clamp_int(request.GET.get('grid_side'),    12, 6, 128)
     vocab_size   = _clamp_int(request.GET.get('vocab_size'),   32, 4, 128)
     n_blocks     = _clamp_int(request.GET.get('n_blocks'),      1, 1, 4)
     # Default lowered 200 → 60: at the post-optimisation ~18 ms/step

@@ -165,8 +165,11 @@ class Simulation(models.Model):
     tileset = models.ForeignKey('tiles.TileSet', on_delete=models.SET_NULL,
                                 null=True, blank=True,
                                 help_text='Initial conditions from this tileset.')
-    width = models.PositiveIntegerField(default=32)
-    height = models.PositiveIntegerField(default=32)
+    # 128 (default) so the simulation grid matches a K=4 hex CA's rule
+    # LUT exactly (4^7 = 16,384 = 128²).  Existing simulations keep
+    # their stored size; only new ones default to 128.
+    width = models.PositiveIntegerField(default=128)
+    height = models.PositiveIntegerField(default=128)
     palette = models.JSONField(default=list, blank=True,
         help_text='4 color hex codes for the cell colors.')
     grid_state = models.JSONField(default=list, blank=True,

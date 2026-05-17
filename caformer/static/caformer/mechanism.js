@@ -118,7 +118,10 @@
     constructor(canvas, opts) {
       this.canvas  = canvas;
       this.ctx     = canvas.getContext('2d');
-      this.side    = (opts && opts.side)    || 16;
+      // Default side bumped 16 → 128 so the canvas matches a K=4 hex
+      // CA's rule LUT exactly (4^7 = 16,384 = 128²).  Callers may
+      // override via opts.side for smaller demos.
+      this.side    = (opts && opts.side)    || 128;
       this.palette = (opts && opts.palette) || PALETTE_CFA;
       this.cellPx  = (opts && opts.cellPx)  || null;
       // Auto-size cellPx if not specified: fit the side to canvas width.

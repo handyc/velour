@@ -31,8 +31,10 @@ class Sequence(models.Model):
 
     shape        = models.CharField(max_length=8, choices=SHAPE_CHOICES,
                                        default=SHAPE_HEX)
-    grid_w       = models.PositiveSmallIntegerField(default=64)
-    grid_h       = models.PositiveSmallIntegerField(default=64)
+    # 128 matches a K=4 hex CA's rule LUT exactly (4^7 = 16,384 = 128²),
+    # so the frame canvas IS the rule's own LUT-as-image at full res.
+    grid_w       = models.PositiveSmallIntegerField(default=128)
+    grid_h       = models.PositiveSmallIntegerField(default=128)
     n_colors     = models.PositiveSmallIntegerField(default=4)
     n_frames     = models.PositiveSmallIntegerField(default=60)
 
