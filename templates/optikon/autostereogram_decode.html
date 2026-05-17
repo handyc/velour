@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}optikon — autostereogram decode{% endblock %}
+{% block content %}
+<style>
+  .as-decode { max-width: 60em; }
+  .as-decode h1 { margin: 0 0 0.6rem 0; }
+  .as-decode p.lede { color: #aaa; font-size: 0.9rem; max-width: 48em; }
+  .as-decode form { display: flex; gap: 0.6rem; align-items: center;
+                       flex-wrap: wrap; margin: 1rem 0;
+                       padding: 0.8rem 1rem; border: 1px solid #234;
+                       background: #0d1117; }
+  .as-decode label { color: #8b949e; font-size: 0.85rem; }
+  .as-decode input[type=number] { width: 5rem; background: #0d1117;
+                                       color: #c9d1d9; border: 1px solid #30363d;
+                                       padding: 0.2rem 0.4rem; }
+  .as-decode button { background: #238636; color: #fff; border: 0;
+                         padding: 0.3rem 0.9rem; cursor: pointer;
+                         font-family: inherit; }
+  .as-decode .err { color: #ff7b72; font-family: ui-monospace, monospace;
+                       font-size: 0.85rem; padding: 0.6rem 0.8rem;
+                       background: #2a0d12; border: 1px solid #422; }
+  .as-decode .pair { display: grid; grid-template-columns: 1fr 1fr;
+                        gap: 1rem; margin-top: 1rem; }
+  .as-decode .pair figure { margin: 0; padding: 0; }
+  .as-decode .pair img { max-width: 100%; height: auto;
+                            border: 1px solid #234; image-rendering: pixelated; }
+  .as-decode .pair figcaption { color: #8b949e; font-size: 0.85rem;
+                                    margin-top: 0.4rem; }
+  .as-decode dl.stats { display: grid;
+                            grid-template-columns: auto 1fr;
+                            gap: 0.2rem 0.8rem; margin: 0.8rem 0 0 0;
+                            font-family: ui-monospace, monospace;
+                            font-size: 0.85rem; }
+  .as-decode dl.stats dt { color: #8b949e; }
+  .as-decode dl.stats dd { color: #c9d1d9; margin: 0; }
+</style>
+
+<div class="as-decode">
+  <h1>autostereogram → depth map</h1>
+  <p class="lede">
+    Upload a rendered autostereogram (PNG / JPEG / any common raster) and
+    recover the depth map that drove it.  Works on the SVGs exported via
+    <code>/gridprint/print/?from_optikon=autostereogram</code> (rasterise first)
+    AND on stereograms from anywhere else — the algorithm is the standard
+    autocorrelation + per-pixel shift search used by SIRDS analysis tools.
+  </p>
+
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <label>image
+      <input type="file" name="image"
+              accept="image/png,image/jpeg,image/webp,image/gif" required>
+    </label>
+    <label title="Longest-edge cap. Lower = faster, less detail. Cap 1024.">max dim
+      <input type="number" name="max_dim" value="{{ max_dim|default:640 }}"
+              min="64" max="1024">
+    </label>
+    <label title="Apply a 3x3 median filter to clean up JPEG noise.">
+      <input type="checkbox" name="smooth" value="1"
+              {% if smooth or smooth is None %}checked{% endif %}>
+      smooth
+    </label>
+    <button type="submit">▶ decode</button>
+  </form>
+
+  {% if error %}
+  <p class="err">{{ error }}</p>
+  {% endif %}
+
+  {% if depth_b64 %}
+  <div class="pair">
+    <figure>
+      <img src="data:image/png;base64,{{ orig_b64 }}" alt="input">
+      <figcaption>input ({{ filename }}, {{ width }}×{{ height }})</figcaption>
+    </figure>
+    <figure>
+      <canvas id="depth-canvas" style="max-width:100%; height:auto;
+              border:1px solid #234; image-rendering:pixelated;"></canvas>
+      <img id="depth-source"
+            src="data:image/png;base64,{{ depth_b64 }}"
+            style="display:none;" alt="recovered depth (greyscale source)">
+      <figcaption>
+        recovered depth map
+        <span style="color:#cfc;">(lighter = closer)</span>
+        <span style="display:inline-flex; gap:0.4rem; margin-left:0.6rem;">
+          <button type="button" id="palette-roll"
+                  style="background:#1f2d40; color:#cfa; border:1px solid #345;
+                         padding:0.15rem 0.6rem; cursor:pointer; font-size:0.8rem;">
+            🎨 random palette
+          </button>
+          <label style="color:#8b949e; font-size:0.85rem;">
+            <input type="checkbox" id="palette-grey" checked>
+            grayscale
+          </label>
+          <label style="color:#8b949e; font-size:0.85rem;">levels
+            <input type="number" id="palette-n" value="6" min="2" max="16"
+                   style="width:3.2rem; background:#0d1117; color:#c9d1d9;
+                          border:1px solid #30363d; padding:0.1rem 0.3rem;">
+          </label>
+        </span>
+      </figcaption>
+    </figure>
+  </div>
+  <script>
+  (function(){
+    // Re-paint the depth canvas, mapping greyscale → a generated
+    // palette (or pass-through greyscale when the checkbox is on).
+    const src = document.getElementById('depth-source');
+    const canvas = document.getElementById('depth-canvas');
+    const ctx = canvas.getContext('2d');
+    const rollBtn = document.getElementById('palette-roll');
+    const greyChk = document.getElementById('palette-grey');
+    const nIn     = document.getElementById('palette-n');
+    let seed = Date.now() & 0xFFFFFFFF;
+
+    function lcg(s){ s = (s * 1664525 + 1013904223) >>> 0; return s; }
+
+    function hsvToRgb(h, s, v){
+      // h in [0,1), s,v in [0,1]
+      const i = Math.floor(h * 6);
+      const f = h * 6 - i;
+      const p = v * (1 - s);
+      const q = v * (1 - f * s);
+      const t = v * (1 - (1 - f) * s);
+      let r, g, b;
+      switch (i % 6) {
+        case 0: r=v; g=t; b=p; break;
+        case 1: r=q; g=v; b=p; break;
+        case 2: r=p; g=v; b=t; break;
+        case 3: r=p; g=q; b=v; break;
+        case 4: r=t; g=p; b=v; break;
+        case 5: r=v; g=p; b=q; break;
+      }
+      return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
+    }
+
+    function generatePalette(seed, n){
+      // HSV-evenly-spread palette with seeded jitter.  N entries.
+      let s = seed >>> 0;
+      const out = [];
+      const baseHue = (s & 0xFFFF) / 0xFFFF;
+      for (let i = 0; i < n; i++) {
+        s = lcg(s);
+        const jitter = ((s & 0xFFFF) / 0xFFFF - 0.5) * 0.05;
+        const h = (baseHue + i / n + jitter + 1) % 1;
+        s = lcg(s);
+        const sat = 0.55 + ((s & 0xFFFF) / 0xFFFF) * 0.35;
+        s = lcg(s);
+        const val = 0.55 + ((s & 0xFFFF) / 0xFFFF) * 0.40;
+        out.push(hsvToRgb(h, sat, val));
+      }
+      return out;
+    }
+
+    function repaint(){
+      if (!src.complete || src.naturalWidth === 0) {
+        src.addEventListener('load', repaint, { once: true });
+        return;
+      }
+      canvas.width = src.naturalWidth;
+      canvas.height = src.naturalHeight;
+      ctx.drawImage(src, 0, 0);
+      if (greyChk.checked) return;  // leave as greyscale
+      const n = Math.max(2, Math.min(16, parseInt(nIn.value, 10) || 6));
+      const palette = generatePalette(seed, n);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = img.data;
+      for (let i = 0; i < d.length; i += 4) {
+        // Greyscale value 0..255 → bucket index 0..n-1
+        const idx = Math.min(n - 1, (d[i] * n) >> 8);
+        const [r, g, b] = palette[idx];
+        d[i  ] = r; d[i+1] = g; d[i+2] = b;
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+
+    rollBtn.addEventListener('click', function(){
+      seed = (seed * 1103515245 + 12345 + Date.now()) >>> 0;
+      greyChk.checked = false;
+      repaint();
+    });
+    greyChk.addEventListener('change', repaint);
+    nIn.addEventListener('change', repaint);
+    repaint();
+  })();
+  </script>
+  <dl class="stats">
+    <dt>detected repeat period</dt>     <dd>{{ period }} px</dd>
+    <dt>shift search range</dt>          <dd>±{{ max_shift }} px</dd>
+    <dt>observed shift extremes</dt>     <dd>{{ depth_min }} … {{ depth_max }}</dd>
+    <dt>output dimensions</dt>           <dd>{{ width }} × {{ height }}</dd>
+  </dl>
+  <p style="color:#888; font-size:0.85rem; margin-top:0.8rem;">
+    Tip: if the recovered depth looks like noise, the input may have
+    been rasterised with a tile size that washed out the column-shift
+    pattern.  Try regenerating at higher SVG resolution or a larger
+    <code>hex_size</code>.  The decoder assumes the depth shape pops
+    forward (positive shifts) but reports the full ±range so a
+    receding-shape stereogram will show as negative values.
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

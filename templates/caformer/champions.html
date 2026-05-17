@@ -1,0 +1,367 @@
+{% extends "base.html" %}
+{% block title %}Champions · CAformer autotournament{% endblock %}
+{% block content %}
+<style>
+  .ch-page { max-width: 86em; }
+  .ch-page h1 { margin: 0 0 4px; }
+  .ch-intro { color: #aaa; max-width: 60em; font-size: 0.88rem; }
+  .ch-knobs { display: flex; flex-wrap: wrap; gap: 14px; align-items: end;
+              margin: 14px 0; padding: 12px 14px; background: #0a0a0a;
+              border: 1px solid #1f1f1f; }
+  .ch-knobs label { color: #aaa; font-size: 0.78rem;
+                    display: flex; flex-direction: column; gap: 2px; }
+  .ch-knobs input { width: 6em; background: #111; color: #ddd;
+                    border: 1px solid #333; padding: 3px 6px;
+                    font-family: inherit; font-size: 0.85rem; }
+  .ch-knobs label.cb { flex-direction: row; align-items: center; gap: 6px; }
+  .ch-go   { background: #1f4f1f; color: #cfc; border: 1px solid #4a8;
+              padding: 6px 16px; cursor: pointer; font-family: inherit;
+              font-weight: bold; }
+  .ch-stop { background: #4f1f1f; color: #fcc; border: 1px solid #a48;
+              padding: 6px 14px; cursor: pointer; font-family: inherit; }
+  .ch-status { color: #888; font-size: 0.82rem; padding-left: 8px; flex: 1;
+               text-align: right; }
+
+  .ch-board { display: grid; gap: 10px;
+              grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+              margin-top: 16px; }
+  .ch-card  { padding: 10px 12px; background: #0a0a0a; border: 1px solid #1f1f1f;
+              border-left-width: 3px; border-left-color: #2a3; }
+  .ch-card.active { border-color: #cfa; }
+  .ch-card.improved { border-left-color: #6f6; }
+  .ch-card h3 { color: #fff; font-size: 0.95rem; margin: 0; font-weight: normal; }
+  .ch-card .fit   { color: #cfa; font-family: ui-monospace, monospace;
+                     font-size: 1.05rem; margin: 4px 0; }
+  .ch-card .meta  { color: #888; font-size: 0.72rem; font-family: ui-monospace, monospace; }
+  .ch-card .desc  { color: #aaa; font-size: 0.78rem; margin: 4px 0;
+                     line-height: 1.4; }
+  .ch-card .lineage { color: #888; font-size: 0.72rem; font-family: ui-monospace, monospace;
+                       margin-top: 4px; }
+  .ch-card .lineage span { color: #cfa; }
+
+  .ch-log { background: #050505; border: 1px solid #161616;
+            padding: 8px 10px; font: 0.78rem ui-monospace, monospace;
+            color: #aaa; height: 18em; overflow: auto;
+            white-space: pre-wrap; margin-top: 16px; }
+  .ch-log .ok { color: #cfc; }
+  .ch-log .skip { color: #888; }
+  .ch-log .imp  { color: #6f6; }
+  .ch-log .err  { color: #f86; }
+
+  .ch-compose-row { display: flex; align-items: center; gap: 12px;
+                     margin: 10px 0 4px; padding: 8px 12px;
+                     background: #0a1a14; border: 1px solid #4a8; }
+  .ch-compose-btn { background: #1f4f1f; color: #cfc;
+                     border: 1px solid #4a8; padding: 6px 14px;
+                     cursor: pointer; font-family: inherit;
+                     font-weight: bold; font-size: 0.85rem; }
+  .ch-compose-status { color: #aaa; font-size: 0.78rem; flex: 1; }
+  .ch-compose-result { margin: 4px 0 12px; padding: 10px 14px;
+                        background: #0a0a0a; border: 1px solid #1f1f1f;
+                        font: 0.82rem ui-monospace, monospace; color: #aaa; }
+  .ch-compose-result a { color: #cfa; }
+  .ch-compose-result table { width: 100%; border-collapse: collapse;
+                              margin-top: 6px; }
+  .ch-compose-result td { padding: 2px 6px; border-bottom: 1px solid #161616;
+                          font-size: 0.78rem; }
+  .ch-compose-result td:first-child { color: #cfa; }
+  .ch-compose-result .src-random { color: #f86; }
+  .ch-compose-result .src-evolved { color: #cfc; }
+</style>
+
+<div class="ch-page">
+  <p><a href="{% url 'caformer:index' %}" style="color:#888;">← caformer</a></p>
+  <h1>Champions · per-component autotournament</h1>
+  <p class="ch-intro">
+    Every cycle rotates through the 8 components.  For each, the GA
+    warm-starts from the current champion and runs ``--pop × --gens``
+    evaluations against that component's own custom fitness metric.
+    A new champion is saved <strong>only</strong> when it beats the
+    parent's fitness, so the leaderboard is monotone-improving and
+    the lineage chain is queryable.  Total saved across all
+    components: <strong>{{ total }}</strong>.
+    <a href="{% url 'caformer:champions_library' %}" style="color:#cfa;">
+      → Browse full library (every champion ever saved)
+    </a>
+  </p>
+
+  <!-- Compose: stitch the current per-component champions into one
+       runnable TrainedModel.  Each rule is pulled from its most-
+       specific available champion; missing components fall back to
+       random rules.  After saving, the model can be chatted with. -->
+  <div class="ch-compose-row">
+    <button type="button" id="ch-compose" class="ch-compose-btn"
+            title="Build a complete CAformer from the current best champion of each component.">
+      🧬 Compose latest champions → TrainedModel
+    </button>
+    <span id="ch-compose-status" class="ch-compose-status">
+      stitches the 10 forward-pass rules from per-component champions.
+    </span>
+  </div>
+  <div id="ch-compose-result" class="ch-compose-result" hidden></div>
+
+  <form id="ch-form" onsubmit="return false;">
+    <div class="ch-knobs">
+      <label>pop size <input type="number" name="pop"  min="4" max="32" value="8"></label>
+      <label>generations <input type="number" name="gens" min="1" max="30" value="6"></label>
+      <label>cycles <input type="number" name="cycles" min="1" max="100" value="1"
+                            title="number of rotations through the 8 components"></label>
+      <label>budget (s) <input type="number" name="budget" min="0" max="86400" value="0"
+                                 title="wall-clock cap; 0 = unlimited (use --cycles instead)"></label>
+      <label>mutation <input type="number" name="mutation" min="0.001" max="0.05"
+                                step="0.001" value="0.005"></label>
+      <label>seed <input type="number" name="seed" min="1" max="2147483647" value="3372220618"></label>
+      <label>label <input type="text" name="label" value="web" style="width:8em;"></label>
+      <label class="cb">
+        <input type="checkbox" id="ch-continuous">
+        continuous (auto-restart after every run completes)
+      </label>
+      <label class="cb" title="Save every scored individual as a ComponentChampion (not just parent-beating ones). Fastest path to a large library — adds ~pop·gens rows per component per cycle.">
+        <input type="checkbox" name="save_all" id="ch-save-all" value="1">
+        save every individual (grow library)
+      </label>
+      <button type="button" id="ch-go" class="ch-go">▶ Run autotournament</button>
+      <button type="button" id="ch-stop" class="ch-stop" disabled>■ stop</button>
+      <span id="ch-status" class="ch-status">idle</span>
+    </div>
+  </form>
+
+  <div class="ch-board" id="ch-board">
+    {% for row in rows %}
+      <div class="ch-card" data-component="{{ row.slug }}">
+        <h3>
+          {{ row.spec.slug }}
+          <span style="color:#666; font-size:0.7rem; padding-left:6px;">
+            {{ row.spec.rules|join:", " }}
+          </span>
+        </h3>
+        <p class="desc">{{ row.spec.description }}</p>
+        {% if row.best %}
+          <div class="fit" data-best>{{ row.best.fitness|floatformat:4 }}</div>
+          <div class="meta">
+            generation {{ row.best.generation }} ·
+            saved {{ row.best.created_at|date:"D d M H:i" }} ·
+            {{ row.count }} champion{{ row.count|pluralize }} ever
+          </div>
+        {% else %}
+          <div class="fit" data-best style="color:#666;">—</div>
+          <div class="meta">no champion yet — run a cycle to evolve one</div>
+        {% endif %}
+        {% if row.recent|length > 1 %}
+          <div class="lineage">
+            recent:
+            {% for c in row.recent %}
+              <span title="{{ c.run_label }} · {{ c.created_at|date:"D d M H:i" }}">
+                g{{ c.generation }}/{{ c.fitness|floatformat:3 }}
+              </span>{% if not forloop.last %} → {% endif %}
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="ch-log" id="ch-log">tournament log will appear here…</div>
+</div>
+
+<script>
+(function () {
+  const form     = document.getElementById('ch-form');
+  const goBtn    = document.getElementById('ch-go');
+  const stopBtn  = document.getElementById('ch-stop');
+  const statusEl = document.getElementById('ch-status');
+  const logEl    = document.getElementById('ch-log');
+  const continuousCb = document.getElementById('ch-continuous');
+  const cards    = {};
+  for (const c of document.querySelectorAll('.ch-card')) {
+    cards[c.dataset.component] = c;
+  }
+  let evtSrc = null;
+  let stopRequested = false;
+  let runIdx = 0;
+
+  function log(msg, cls) {
+    const ts = new Date().toLocaleTimeString();
+    const node = document.createElement('span');
+    node.textContent = '[' + ts + '] ' + msg + '\n';
+    if (cls) node.className = cls;
+    logEl.appendChild(node);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function deactivateAll() {
+    for (const k in cards) cards[k].classList.remove('active');
+  }
+
+  function startTournament() {
+    runIdx += 1;
+    stopRequested = false;
+    const fd = new FormData(form);
+    const params = new URLSearchParams();
+    for (const [k, v] of fd) params.append(k, v);
+    if (evtSrc) evtSrc.close();
+    deactivateAll();
+    goBtn.disabled = true; stopBtn.disabled = false;
+    statusEl.textContent = 'run ' + runIdx + ' connecting…';
+    log('▶ tournament run ' + runIdx + ' starting', 'ok');
+
+    const url = "{% url 'caformer:champions_stream' %}?" + params;
+    evtSrc = new EventSource(url);
+
+    evtSrc.addEventListener('tournament_begin', e => {
+      const d = JSON.parse(e.data);
+      log('  cfg: pop=' + d.pop_size + ' gens=' + d.generations
+          + ' budget=' + d.max_seconds + 's cycles=' + d.max_cycles);
+    });
+    evtSrc.addEventListener('cycle_begin', e => {
+      const d = JSON.parse(e.data);
+      deactivateAll();
+      if (cards[d.component]) cards[d.component].classList.add('active');
+      statusEl.textContent = 'run ' + runIdx + ' · cycle ' + d.cycle
+                              + ' · ' + d.component;
+      log('  ▸ cycle ' + d.cycle + ' · ' + d.component
+          + ' (parent ' + d.parent_fitness.toFixed(4)
+          + ' g' + d.parent_generation + ')');
+    });
+    evtSrc.addEventListener('generation', e => {
+      const d = JSON.parse(e.data);
+      statusEl.textContent = 'run ' + runIdx + ' · cycle ' + d.cycle
+                              + ' · ' + d.component
+                              + ' · gen ' + d.gen
+                              + ' best=' + d.best.toFixed(3);
+    });
+    // Per-individual events fire after every single fitness eval (so
+    // ~pop_size × generations per cycle). They keep the status line
+    // ticking so the user can see the run is still alive even mid-cycle.
+    let lastIndAt = 0;
+    evtSrc.addEventListener('individual', e => {
+      const d = JSON.parse(e.data);
+      const now = performance.now();
+      // Throttle DOM writes — at most ~5/s — but compute every event so
+      // a slow fitness still bumps the counter when it does fire.
+      if (now - lastIndAt < 180) return;
+      lastIndAt = now;
+      statusEl.textContent = 'run ' + runIdx + ' · ' + d.component
+                              + ' · gen ' + d.gen + ' · ind '
+                              + d.ind + ' fit=' + d.fitness.toFixed(3)
+                              + ' · ' + (d.elapsed_ms / 1000).toFixed(1) + 's';
+    });
+    evtSrc.addEventListener('cycle_end', e => {
+      const d = JSON.parse(e.data);
+      const card = cards[d.component];
+      if (card) {
+        card.classList.remove('active');
+        if (d.improved) {
+          card.classList.add('improved');
+          const bestEl = card.querySelector('[data-best]');
+          if (bestEl) {
+            bestEl.textContent = d.final_fitness.toFixed(4);
+            bestEl.style.color = '#cfa';
+          }
+          setTimeout(() => card.classList.remove('improved'), 1200);
+          log('  ✓ SAVED ' + d.component + ' final=' + d.final_fitness.toFixed(4)
+              + '  (Δ=' + (d.final_fitness - d.parent_fitness).toFixed(4) + ')',
+              'imp');
+        } else {
+          log('  · skip  ' + d.component + ' final=' + d.final_fitness.toFixed(4)
+              + ' (no improvement)', 'skip');
+        }
+      }
+    });
+    evtSrc.addEventListener('error', e => {
+      const d = e.data ? JSON.parse(e.data) : null;
+      if (d) log('ERROR: ' + (d.msg || JSON.stringify(d)), 'err');
+    });
+    evtSrc.addEventListener('end', e => {
+      const d = JSON.parse(e.data);
+      log('★ run ' + runIdx + ' end · ' + d.cycles + ' cycle(s), '
+          + d.improvements + ' improvement(s), '
+          + d.total_seconds.toFixed(1) + 's', 'ok');
+      evtSrc.close(); evtSrc = null;
+      deactivateAll();
+      if (continuousCb.checked && !stopRequested) {
+        statusEl.textContent = 'restarting in 1s… (continuous mode)';
+        log('  ↻ continuous mode: chaining next run');
+        setTimeout(startTournament, 1000);
+      } else {
+        statusEl.textContent = 'done (run ' + runIdx + ')';
+        goBtn.disabled = false; stopBtn.disabled = true;
+      }
+    });
+    evtSrc.onerror = () => {
+      log('SSE connection error', 'err');
+      goBtn.disabled = false; stopBtn.disabled = true;
+    };
+  }
+
+  function stopTournament() {
+    stopRequested = true;
+    if (evtSrc) { evtSrc.close(); evtSrc = null; }
+    deactivateAll();
+    statusEl.textContent = 'stopped';
+    log('⏹ stopped by user (continuous mode disabled too)');
+    goBtn.disabled = false; stopBtn.disabled = true;
+  }
+
+  goBtn  .addEventListener('click', startTournament);
+  stopBtn.addEventListener('click', stopTournament);
+
+  // ── Compose champions → TrainedModel ──────────────────────────
+  const composeBtn  = document.getElementById('ch-compose');
+  const composeStat = document.getElementById('ch-compose-status');
+  const composeRes  = document.getElementById('ch-compose-result');
+
+  composeBtn.addEventListener('click', async () => {
+    composeBtn.disabled = true;
+    composeStat.textContent = 'composing…';
+    const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+    let j;
+    try {
+      const r = await fetch("{% url 'caformer:champions_compose' %}", {
+        method: 'POST', headers: {'X-CSRFToken': csrf},
+        credentials: 'same-origin',
+      });
+      j = await r.json();
+    } catch (err) {
+      composeStat.textContent = 'compose failed: ' + err.message;
+      composeBtn.disabled = false;
+      return;
+    }
+    if (!j.ok) {
+      composeStat.textContent = 'compose failed: ' + (j.error || '?');
+      composeBtn.disabled = false;
+      return;
+    }
+    composeStat.textContent = '✓ saved as ' + j.slug + ' · '
+                              + j.n_real + '/10 rules evolved · '
+                              + j.n_random + ' random fallback'
+                              + (j.n_random === 1 ? '' : 's');
+    // Build a per-rule resolution table.
+    const rows = j.resolution.map(r => {
+      const cls = r.random ? 'src-random' : 'src-evolved';
+      const note = r.random
+        ? '— random fallback (no champion exists)'
+        : ('from ' + r.source + ' g' + r.generation
+            + ' · fit ' + r.fitness.toFixed(4)
+            + ' (sub-rule ' + r.sub_rule + ')');
+      return '<tr><td>' + r.rule + '</td><td class="' + cls + '">'
+              + note + '</td></tr>';
+    }).join('');
+    composeRes.innerHTML =
+      '<div><b style="color:#cfa;">' + j.name + '</b> '
+      + '<span style="color:#888;">(' + j.slug + ')</span></div>'
+      + '<div style="margin:4px 0;">'
+      + '<a href="/caformer/chat/?model=' + encodeURIComponent(j.slug) + '"'
+      + ' target="_blank">→ Chat with it</a> · '
+      + '<a href="/caformer/pipeline/?model=' + encodeURIComponent(j.slug) + '"'
+      + ' target="_blank">→ Pipeline view</a> · '
+      + '<a href="/caformer/export/' + encodeURIComponent(j.slug) + '/"'
+      + ' target="_blank">⤓ 64 KB binary</a>'
+      + '</div>'
+      + '<table>' + rows + '</table>';
+    composeRes.hidden = false;
+    composeBtn.disabled = false;
+  });
+})();
+</script>
+{% endblock %}

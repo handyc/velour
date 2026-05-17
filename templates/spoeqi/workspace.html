@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}spoeqi — {{ pact.name }} workspace{% endblock %}
+{% block content %}
+<style>
+  .ws-page  { max-width: 60em; }
+  .ws-page h1 { margin: 0 0 4px; }
+  .ws-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 12px; }
+  .ws-page .crumbs a { color: #ace; }
+  .ws-page p.intro { color: #aaa; max-width: 46em; }
+  .ws-page table { border-collapse: collapse; margin-top: 14px;
+                    font-family: ui-monospace, monospace;
+                    font-size: 0.85rem; width: 100%; }
+  .ws-page th, .ws-page td { border: 1px solid #1f1f1f;
+                              padding: 4px 8px; vertical-align: top; }
+  .ws-page th { background: #0a0a0a; color: #888;
+                 font-weight: normal; text-transform: uppercase;
+                 letter-spacing: 0.05em; font-size: 0.7rem; }
+  .ws-page td .app-name { color: #cfa; }
+  .ws-page td .app-desc { color: #888; font-size: 0.78rem; }
+  .ws-page td a.tick { color: #ace; text-decoration: none;
+                        margin-right: 0.6em; }
+  .ws-page td a.tick:hover { text-decoration: underline; }
+  .ws-cmd  { background: #050505; border: 1px solid #1a1a1a;
+              padding: 8px 12px; margin-top: 10px; color: #cfc;
+              font-family: ui-monospace, monospace; font-size: 0.78rem;
+              white-space: pre-wrap; word-break: break-all; }
+  .ws-tok  { background: #0a0a0a; border: 1px solid #1f1f1f;
+              padding: 6px 10px; margin-top: 10px;
+              font-family: ui-monospace, monospace; font-size: 0.78rem;
+              color: #fc6; word-break: break-all; }
+  .ws-section { margin-top: 18px; }
+  .ws-section h2 { font-size: 0.95rem; color: #aaa; margin: 0 0 4px;
+                    text-transform: uppercase; letter-spacing: 0.05em; }
+</style>
+<div class="ws-page">
+  <div class="crumbs">
+    <a href="{% url 'spoeqi:index' %}">spoeqi</a> ›
+    <a href="{% url 'spoeqi:detail' slug=pact.slug %}">{{ pact.slug }}</a> ›
+    workspace
+  </div>
+  <h1>workspace — {{ pact.name }}</h1>
+  <p class="intro">
+    Each app is a real 4096-byte Linux x86_64 ELF, deterministically
+    derived from this pact's CA bytes at the requested tick.  Two
+    researchers running the same pact at the same tick get
+    byte-identical files — verifiable with <code>sha256sum</code>.
+  </p>
+
+  <table>
+    <thead><tr>
+      <th>app</th><th>ticks (click to download — uses your session)</th>
+    </tr></thead>
+    {% for app_slug, meta in apps.items %}
+      <tr>
+        <td>
+          <div class="app-name">{{ app_slug }}</div>
+          <div class="app-desc">{{ meta.description }}</div>
+        </td>
+        <td>
+          {% for t in ticks %}
+            <a class="tick"
+               href="{% url 'spoeqi:workspace_app_elf' slug=pact.slug app=app_slug tick=t %}">
+              {{ t }}
+            </a>
+          {% endfor %}
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+
+  <div class="ws-section">
+    <h2>Share token (for curl / cross-machine download)</h2>
+    <p style="color:#aaa; font-size:0.82rem; max-width:46em; margin:4px 0;">
+      Anyone with this pact's <code>slug</code> + <code>token</code> can
+      fetch the ELFs without a Velour login.  Treat it like a password —
+      rotate by re-running <code>save()</code> after clearing the field.
+    </p>
+    <div class="ws-tok">{{ pact.workspace_share_token }}</div>
+  </div>
+
+  <div class="ws-section">
+    <h2>Curl recipe (token-based, works from any machine)</h2>
+    <div class="ws-cmd">F={{ pact.slug }}-app0_greeter-tick00000.elf
+URL="{{ scheme_host }}{% url 'spoeqi:workspace_app_elf_token' slug=pact.slug token=pact.workspace_share_token app='app0_greeter' tick=0 %}"
+curl -fsSL "$URL" -o "$F"
+chmod +x "$F"
+./"$F"</div>
+    <p style="color:#666; font-size:0.78rem; margin-top:8px;">
+      Filename and URL are kept independent so you can verify each
+      step by eye.  <code>-fsSL</code>: fail on HTTP errors, silent
+      progress, follow redirects.  Verify with
+      <code>sha256sum "$F"</code> and compare with another researcher
+      who runs the same recipe — same pact + same tick → identical
+      SHA-256.
+    </p>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,630 @@
+{% extends "base.html" %}
+{% block title %}Ouroboros — quine #{{ pk }}{% endblock %}
+
+{% block content %}
+<style>
+  .oud-page { max-width: 78em; }
+  .oud-page h1 { margin: 0 0 0.3rem 0; }
+  .oud-page h2 { margin-top: 1.4rem; font-size: 1.05rem; }
+  .oud-page h3 { margin-top: 1.1rem; font-size: 0.92rem; color: #c9d1d9; }
+  .oud-page a { color: #79c0ff; }
+  .oud-page .back { color: #79c0ff; text-decoration: none;
+                       font-size: 0.85rem; }
+
+  .featured-banner {
+    margin: 0.6rem 0 1rem 0; padding: 0.7rem 1rem;
+    background: #101a14; border: 1px solid #2a4a32;
+    border-left: 4px solid #6ebb50; border-radius: 5px;
+    color: #c9d1d9; font-size: 0.9rem;
+  }
+  .featured-banner b { color: #7ee787; }
+
+  .oud-grid {
+    display: grid; grid-template-columns: 540px 1fr;
+    gap: 1.2rem; align-items: start;
+  }
+  .panel { background: #0d1117; border: 1px solid #234;
+              border-radius: 4px; padding: 0.7rem 0.9rem; }
+  .panel h3 { margin-top: 0; }
+
+  .ruleset-display { text-align: center; }
+  .ruleset-display img { width: 512px; height: 512px;
+                             image-rendering: pixelated;
+                             border: 1px solid #234; }
+  .ruleset-display .caption {
+    color: #8b949e; font-size: 0.78rem; margin-top: 0.3rem;
+  }
+
+  dl.stats { display: grid; grid-template-columns: auto 1fr;
+                gap: 0.2rem 0.8rem; font-family: ui-monospace, monospace;
+                font-size: 0.85rem; margin: 0.4rem 0; }
+  dl.stats dt { color: #8b949e; }
+  dl.stats dd { color: #c9d1d9; margin: 0; }
+
+  .lineage { font-family: ui-monospace, monospace; font-size: 0.85rem; }
+  .lineage .gen { padding: 0.25rem 0; }
+  .lineage .arrow { color: #6e7681; padding: 0 0.4rem; }
+  .lineage img.thumb { width: 32px; height: 32px; vertical-align: middle;
+                          image-rendering: pixelated; border: 1px solid #234; }
+  .lineage .this-row { background: rgba(110, 187, 80, 0.06);
+                            border-left: 3px solid #6ebb50;
+                            padding-left: 0.4rem; }
+
+  .levels-table { width: 100%; border-collapse: collapse;
+                       font-family: ui-monospace, monospace;
+                       font-size: 0.78rem; }
+  .levels-table th, .levels-table td {
+    padding: 0.18rem 0.5rem; border-bottom: 1px solid #21262d;
+    text-align: right;
+  }
+  .levels-table th { color: #8b949e; text-transform: uppercase;
+                            font-size: 0.6rem; letter-spacing: 0.05em; }
+  .levels-table tr.ok td { background: rgba(110, 187, 80, 0.06); }
+  .levels-table tr.fp td { background: rgba(245, 165, 36, 0.12);
+                              color: #f9c674; }
+  .levels-table tr.broken td { color: #f9c; }
+  .levels-table td.note { text-align: left; color: #aaa; font-size: 0.72rem; }
+
+  .level-strip { display: flex; gap: 4px; overflow-x: auto;
+                      padding: 4px 0; margin-top: 0.4rem; }
+  .level-strip .cell {
+    flex-shrink: 0; text-align: center; font-size: 0.65rem;
+    color: #8b949e; font-family: ui-monospace, monospace;
+  }
+  .level-strip .cell img {
+    width: 64px; height: 64px; image-rendering: pixelated;
+    border: 1px solid #234;
+    cursor: pointer;
+  }
+  .level-strip .cell.ok img { border-color: #2a6b3a; }
+  .level-strip .cell.fp img { border-color: #f9c674; box-shadow: 0 0 8px #f9c674; }
+
+  .play { background: #1f6feb; color: #fff; border: 0;
+             padding: 0.3rem 0.9rem; cursor: pointer;
+             font-family: inherit; font-size: 0.85rem; }
+  #live-canvas {
+    width: 512px; height: 512px;
+    image-rendering: pixelated;
+    background: #000; border: 1px solid #234;
+    display: block; margin: 0.5rem 0;
+  }
+</style>
+
+<div class="oud-page">
+  <p><a class="back" href="{% url 'ouroboros:index' %}">← all quines</a></p>
+  <h1>quine #{{ pk }}
+    {% if display_name %}
+      <span id="quine-name-display" style="color:#d2a8ff; font-weight:500;">
+        "{{ display_name }}"
+      </span>
+    {% endif %}
+    <span style="color:#7ee787; font-family:ui-monospace,monospace;
+                  font-size:0.95rem; font-weight:400;">
+      sha:{{ sha }} · SR={{ champion.fitness|floatformat:4 }}
+    </span>
+    {% if is_featured %} <span style="color:#7ee787;">★</span>{% endif %}
+    <a href="#annotate" id="quine-name-edit-btn"
+        style="font-size:0.75rem; color:#79c0ff; text-decoration:none;
+                  margin-left:0.4rem;">{% if display_name %}✎ edit{% else %}+ name{% endif %}</a>
+  </h1>
+
+  <form method="post" action="{% url 'ouroboros:annotate' pk=pk %}"
+         id="annotate-form" class="panel"
+         style="display:none; margin:0.4rem 0 0.8rem 0; padding:0.6rem 0.9rem;">
+    {% csrf_token %}
+    <div style="display:flex; gap:0.6rem; flex-wrap:wrap; align-items:flex-start;">
+      <label style="display:flex; flex-direction:column; gap:2px; flex:0 0 auto;">
+        <span style="color:#8b949e; font-size:0.72rem;">name</span>
+        <input type="text" name="display_name" value="{{ display_name }}"
+                maxlength="120" placeholder="The ouroboros"
+                style="width:18em; background:#0d1117; color:#c9d1d9;
+                          border:1px solid #30363d; padding:4px 8px;
+                          font-family:inherit;">
+      </label>
+      <label style="display:flex; flex-direction:column; gap:2px; flex:1 1 24em;">
+        <span style="color:#8b949e; font-size:0.72rem;">notes (free text)</span>
+        <textarea name="user_note" rows="3" maxlength="4000"
+                     placeholder="why this quine matters, what to remember…"
+                     style="background:#0d1117; color:#c9d1d9;
+                              border:1px solid #30363d; padding:4px 8px;
+                              font-family:inherit; min-height:3.6em;
+                              resize:vertical;">{{ user_note }}</textarea>
+      </label>
+    </div>
+    <div style="margin-top:0.6rem; display:flex; gap:0.4rem;">
+      <button type="submit" style="background:#1f6feb; color:#fff;
+                                          border:0; padding:5px 14px;
+                                          cursor:pointer; font-size:0.82rem;
+                                          font-family:inherit;">save</button>
+      <button type="button" id="annotate-cancel"
+              style="background:#21262d; color:#aaa; border:1px solid #30363d;
+                       padding:5px 14px; cursor:pointer; font-size:0.82rem;
+                       font-family:inherit;">cancel</button>
+    </div>
+  </form>
+
+  {% if user_note %}
+  <div class="panel" style="margin:0.4rem 0 0.8rem 0;
+                                  background:#161b22; border-color:#30363d;
+                                  white-space:pre-wrap; font-size:0.85rem;
+                                  color:#c9d1d9;">{{ user_note }}</div>
+  {% endif %}
+
+  <script>
+    (function () {
+      const btn  = document.getElementById('quine-name-edit-btn');
+      const form = document.getElementById('annotate-form');
+      const cancel = document.getElementById('annotate-cancel');
+      if (!btn || !form) return;
+      btn.addEventListener('click', e => {
+        e.preventDefault();
+        const showing = form.style.display !== 'none';
+        form.style.display = showing ? 'none' : 'block';
+        if (!showing) form.querySelector('input[name="display_name"]').focus();
+      });
+      cancel.addEventListener('click', () => { form.style.display = 'none'; });
+      // Auto-open if URL ends with #annotate
+      if (window.location.hash === '#annotate') {
+        form.style.display = 'block';
+        form.querySelector('input[name="display_name"]').focus();
+      }
+    })();
+  </script>
+
+  {% if is_featured %}
+  <div class="featured-banner">
+    <b>★ This is the class-4 fixed-point quine.</b>
+    Its chain converges at <b>level {{ fixed_point_level }}</b> to a
+    rule R* such that <code>CA<sup>16</sup>(R*).LUT = R*.LUT</code> —
+    a true metachain fixed point — and that R* is itself class-4.
+    The chain stays at the edge of chaos forever.  Effective depth is
+    unbounded.
+  </div>
+  {% endif %}
+
+  <div class="oud-grid">
+    <div>
+      <div class="panel ruleset-display">
+        <h3>The ruleset as its own initial condition</h3>
+        <img src="{% url 'ouroboros:ruleset_png' pk=pk %}?scale=4"
+              alt="Quine #{{ pk }} LUT as 128×128 image">
+        <div class="caption">
+          16,384 bytes (= 128²) painted with the 4-colour palette.
+          This image, fed back into the rule's own dynamics, produces
+          the next level of the chain.
+        </div>
+        <p style="margin-top:0.6rem; font-size:0.85rem;">
+          <a href="{% url 'ouroboros:seed_bytes' pk=pk %}">⬇ download seed.bin</a>
+          ·
+          <a href="{% url 'ouroboros:walk_json' pk=pk %}?depth=200">walk.json</a>
+        </p>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h3>Metrics + meta</h3>
+        <dl class="stats">
+          <dt>strict SR (16 ticks)</dt>      <dd>{{ champion.fitness|floatformat:4 }}</dd>
+          <dt>SR (arbitrary σ)</dt>          <dd>{{ meta.arbsigma|default_if_none:0|floatformat:4 }}</dd>
+          <dt>class-4 score</dt>             <dd>{{ meta.c4|default_if_none:0|floatformat:4 }}</dd>
+          <dt>probe activity</dt>            <dd>{{ meta.act|default_if_none:0|floatformat:4 }}</dd>
+          <dt>class-4 chain run (walk)</dt>  <dd>{{ best_streak }} consecutive levels
+              {% if best_start %}(starting at L{{ best_start }}){% endif %}</dd>
+          {% if fixed_point_level %}
+          <dt>fixed point reached</dt>       <dd>level {{ fixed_point_level }}
+              {% if cycle_period and cycle_period != 1 %}
+                  (cycle period {{ cycle_period }})
+              {% endif %}
+              {% if fp_is_class4 %}
+                  · <span style="color:#7ee787;">CLASS-4 → ∞ depth</span>
+              {% endif %}
+          </dd>
+          {% endif %}
+          <dt>origin</dt>                    <dd>{{ meta.origin|default:"?" }}</dd>
+          <dt>parent rule</dt>               <dd>
+              {% if parent %}
+                  <a href="{% url 'ouroboros:detail' pk=parent.pk %}">
+                      #{{ parent.pk }}</a> ({{ parent.sha }})
+              {% else %}—{% endif %}
+          </dd>
+          <dt>created</dt>                   <dd>{{ champion.created_at|date:"D d M Y H:i" }}</dd>
+        </dl>
+        {% if children_nodes %}
+        <p style="font-size:0.85rem; color:#aaa;">
+          Descendants: {% for ch in children_nodes %}
+            <a href="{% url 'ouroboros:detail' pk=ch.pk %}">#{{ ch.pk }}</a>
+            {% if not forloop.last %}·{% endif %}
+          {% endfor %}
+        </p>
+        {% endif %}
+      </div>
+
+      <div class="panel" style="margin-top:0.8rem;">
+        <h3>Live self-application demo</h3>
+        <p style="font-size:0.85rem; color:#aaa; margin-top:0;">
+          The rule's own LUT image, fed back through its own dynamics.
+          One tick of the metachain takes 16 CA steps.  Watch the burst
+          option for a single chain level; the continuous option keeps
+          stepping forever so you can watch the chain enter its
+          attractor.
+        </p>
+        <canvas id="live-canvas" width="256" height="256"></canvas>
+        <div id="live-status" style="font-family:ui-monospace,monospace;
+                                          font-size:0.78rem; color:#8b949e;
+                                          margin: 0.2rem 0 0.4rem 0;">
+          tick 0 · idle
+        </div>
+        <div style="display:flex; gap:0.4rem; align-items:center;
+                       margin-bottom:0.4rem; font-size:0.78rem; color:#8b949e;
+                       flex-wrap:wrap;">
+          <span>initial condition:</span>
+          <select id="init-source" style="background:#0d1117; color:#c9d1d9;
+                                                border:1px solid #30363d;
+                                                padding:0.15rem 0.3rem;
+                                                font-family:inherit;">
+            <option value="lut">LUT (self-application)</option>
+            <option value="random">deterministic random</option>
+            <option value="center">single centre pulse</option>
+            <option value="noise-spot">random noise patch (32²)</option>
+          </select>
+        </div>
+        <div style="display:flex; gap:0.4rem; flex-wrap:wrap;
+                       align-items:center;">
+          <button class="play" id="play-burst-btn">▶ run 16 ticks</button>
+          <button class="play" id="play-cont-btn"
+                  style="background:#5a4cbd;">▶ run continuously</button>
+          <button class="play" id="pause-btn"
+                  style="background:#444; color:#fff;" disabled>⏸ pause</button>
+          <button class="play" id="reset-btn"
+                  style="background:#21262d; color:#79c0ff;">↻ reset</button>
+          <button class="play" id="palette-btn"
+                  style="background:#21262d; color:#7ee787;"
+                  title="Reroll the 4-colour palette. Keeps the dynamics; just repaints.">🎨 reroll palette</button>
+        </div>
+        <div style="display:flex; gap:0.4rem; align-items:center;
+                       margin-top:0.5rem; font-size:0.78rem; color:#8b949e;">
+          <label for="speed">step delay:</label>
+          <input type="range" id="speed" min="0" max="500" value="120" step="10"
+                  style="flex:1; max-width:160px;">
+          <span id="speed-val">120 ms</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Ancestry chain</h2>
+  <div class="panel lineage">
+    {% for a in ancestry %}
+      <div class="gen{% if a.pk == pk %} this-row{% endif %}">
+        <a href="{% url 'ouroboros:detail' pk=a.pk %}">
+          <img class="thumb" src="{% url 'ouroboros:ruleset_png' pk=a.pk %}?scale=1"
+                alt="">
+          #{{ a.pk }}
+        </a>
+        <span style="color:#888;">sha {{ a.sha }}</span>
+        <span style="color:#888;">SR {{ a.fitness|floatformat:3 }}</span>
+        <span style="color:#aaa;">{{ a.origin }}</span>
+        {% if not forloop.last %}<div class="arrow">↓</div>{% endif %}
+      </div>
+    {% endfor %}
+    {% if children_nodes %}
+      <div class="arrow">↓</div>
+      <div style="color:#8b949e; font-size:0.82rem;">
+        descendants: {% for ch in children_nodes %}
+          <a href="{% url 'ouroboros:detail' pk=ch.pk %}">#{{ ch.pk }}</a>
+          ({{ ch.sha }}){% if not forloop.last %},{% endif %}
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+
+  <h2>Chain walk — first {{ walk_depth }} levels</h2>
+  <p style="color:#888; font-size:0.82rem;">
+    Green rows are class-4 by criterion <code>cls==4 AND
+    act∈[0.05,0.85] AND sr<sub>arbσ</sub>≥0.85</code>.
+    Amber row marks the fixed point or cycle entry.  Click a
+    thumbnail below to view that chain level as its own image.
+    Adjust depth: <a href="?depth=64">64</a> ·
+    <a href="?depth=200">200</a> · <a href="?depth=500">500</a> ·
+    <a href="?depth=1000">1000</a>.
+  </p>
+
+  <div class="level-strip">
+    {% for l in levels|slice:":40" %}
+      <div class="cell{% if l.ok %} ok{% endif %}{% if l.note %} fp{% endif %}">
+        <img src="{% url 'ouroboros:chain_level_png' pk=pk level=l.level %}?scale=1"
+              alt="L{{ l.level }}"
+              title="L{{ l.level }}{% if l.class %} · cls={{ l.class }}{% endif %}">
+        L{{ l.level }}{% if l.note %} ★{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+
+  <table class="levels-table" style="margin-top:1rem;">
+    <thead>
+      <tr>
+        <th>L</th>
+        <th>sha</th>
+        <th>cls</th>
+        <th>c4</th>
+        <th>act</th>
+        <th>SR<sub>str</sub></th>
+        <th>SR<sub>arbσ</sub></th>
+        <th class="note">flags</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for l in levels %}
+      <tr class="{% if l.note %}fp{% elif l.ok %}ok{% else %}broken{% endif %}">
+        <td>{{ l.level }}</td>
+        <td style="color:#888;">{{ l.sha }}</td>
+        <td>{% if l.class %}{{ l.class }}{% else %}—{% endif %}</td>
+        <td>{% if l.c4 is not None %}{{ l.c4|floatformat:3 }}{% else %}—{% endif %}</td>
+        <td>{% if l.act is not None %}{{ l.act|floatformat:3 }}{% else %}—{% endif %}</td>
+        <td>{% if l.sr_strict is not None %}{{ l.sr_strict|floatformat:3 }}{% else %}—{% endif %}</td>
+        <td>{% if l.sr_arbsigma is not None %}{{ l.sr_arbsigma|floatformat:3 }}{% else %}—{% endif %}</td>
+        <td class="note">
+          {% if l.note %}{{ l.note }}{% elif l.ok %}ok{% else %}out of band{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+(function () {
+  // Live self-application demo: load the rule LUT once, then
+  // run it as a 128×128 CA on its own LUT-as-image for 16 ticks
+  // and draw each frame.
+  const PK = {{ pk }};
+  let PAL = [
+    [220,  80,  40],
+    [ 60, 120, 210],
+    [ 80, 180,  90],
+    [230, 200,  60],
+  ];
+
+  // HSV → RGB, all in [0,1] → [0,255].
+  function hsvToRgb(h, s, v) {
+    h = ((h % 1) + 1) % 1;
+    const i = Math.floor(h * 6);
+    const f = h * 6 - i;
+    const p = v * (1 - s);
+    const q = v * (1 - f * s);
+    const t = v * (1 - (1 - f) * s);
+    let r, g, b;
+    switch (i % 6) {
+      case 0: r = v; g = t; b = p; break;
+      case 1: r = q; g = v; b = p; break;
+      case 2: r = p; g = v; b = t; break;
+      case 3: r = p; g = q; b = v; break;
+      case 4: r = t; g = p; b = v; break;
+      case 5: r = v; g = p; b = q; break;
+    }
+    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+  }
+
+  // 4 evenly-spaced hues with a random rotation, varied saturation/value.
+  function rerollPalette() {
+    const rot = Math.random();
+    const pal = [];
+    for (let k = 0; k < 4; k++) {
+      const h = (rot + k / 4) % 1;
+      const s = 0.55 + Math.random() * 0.4;   // [0.55, 0.95]
+      const v = 0.55 + Math.random() * 0.4;   // [0.55, 0.95]
+      pal.push(hsvToRgb(h, s, v));
+    }
+    PAL = pal;
+  }
+
+  const canvas = document.getElementById('live-canvas');
+  const ctx = canvas.getContext('2d');
+  let lut = null;
+  let state = null;
+
+  function loadLut() {
+    return fetch("{% url 'ouroboros:seed_bytes' pk=pk %}", {credentials: 'same-origin'})
+      .then(r => r.arrayBuffer())
+      .then(buf => {
+        lut = new Uint8Array(buf);
+        for (let i = 0; i < lut.length; i++) lut[i] &= 3;
+        rebuildInit();
+        draw();
+      });
+  }
+
+  // Build the initial state according to the init-source selector.
+  // Deterministic — same selection always produces the same grid.
+  function rebuildInit() {
+    if (!lut) return;
+    const src = document.getElementById('init-source').value;
+    state = new Uint8Array(lut.length);
+    if (src === 'lut') {
+      state.set(lut);
+    } else if (src === 'random') {
+      // LCG-seeded so reset gives the same grid every time.
+      let s = 0xCA1ED175 >>> 0;
+      for (let i = 0; i < state.length; i++) {
+        s = ((s * 1664525) + 1013904223) >>> 0;
+        state[i] = (s >>> 16) & 3;
+      }
+    } else if (src === 'center') {
+      // Single non-zero cell at the centre; surrounded by 0.
+      const W = 128;
+      state[64 * W + 64] = 1;
+      state[64 * W + 65] = 2;
+      state[65 * W + 64] = 3;
+    } else if (src === 'noise-spot') {
+      // 32×32 random patch centred on the grid, rest 0.
+      let s = 0xDEADBEEF >>> 0;
+      const W = 128;
+      for (let r = 48; r < 80; r++) {
+        for (let c = 48; c < 80; c++) {
+          s = ((s * 1664525) + 1013904223) >>> 0;
+          state[r * W + c] = (s >>> 16) & 3;
+        }
+      }
+    }
+  }
+
+  // Hex-aware render: every cell becomes a 2x2 pixel block, and odd
+  // rows are x-shifted by one pixel so the pointy-top hex layout is
+  // visible (matches the s3lab / Automaton convention).
+  function draw() {
+    const W = 128, PW = 256, PH = 256;
+    const img = ctx.createImageData(PW, PH);
+    // Fill background opaque black first.
+    for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
+    for (let r = 0; r < W; r++) {
+      const shift = (r & 1) ? 1 : 0;
+      const py0 = r * 2;
+      for (let c = 0; c < W; c++) {
+        const v = state[r * W + c];
+        const [R, G, B] = PAL[v];
+        for (let dy = 0; dy < 2; dy++) {
+          const py = py0 + dy;
+          for (let dx = 0; dx < 2; dx++) {
+            let px = c * 2 + dx + shift;
+            if (px >= PW) px -= PW;   // wrap the rightmost half-cell
+            const idx = (py * PW + px) * 4;
+            img.data[idx]     = R;
+            img.data[idx + 1] = G;
+            img.data[idx + 2] = B;
+          }
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  function lookup(self_c, nw, ne, rt, se, sw, l) {
+    const idx = (self_c<<12) | (nw<<10) | (ne<<8)
+                | (rt<<6) | (se<<4) | (sw<<2) | l;
+    return lut[idx] & 3;
+  }
+
+  // Same encoding as spoeqi's hex_ca_step.
+  function step() {
+    const out = new Uint8Array(state.length);
+    const W = 128, H = 128;
+    const at = (rr, cc) => state[((rr + H) % H) * W + ((cc + W) % W)];
+    for (let r = 0; r < H; r++) {
+      const even = (r & 1) === 0;
+      for (let c = 0; c < W; c++) {
+        const sc = state[r * W + c];
+        const up = at(r-1, c), dn = at(r+1, c);
+        const ll = at(r, c-1), rr = at(r, c+1);
+        const ul = at(r-1, c-1), ur = at(r-1, c+1);
+        const dl = at(r+1, c-1), dr = at(r+1, c+1);
+        const nw = even ? ul : up;
+        const ne = even ? up : ur;
+        const sw = even ? dl : dn;
+        const se = even ? dn : dr;
+        out[r * W + c] = lookup(sc, nw, ne, rr, se, sw, ll);
+      }
+    }
+    state = out;
+  }
+
+  let timer = null;
+  let totalTicks = 0;
+  let mode = 'idle';   // 'burst' | 'continuous' | 'idle'
+  let burstRemaining = 0;
+  let stepDelay = 120;
+
+  const statusEl   = document.getElementById('live-status');
+  const burstBtn   = document.getElementById('play-burst-btn');
+  const contBtn    = document.getElementById('play-cont-btn');
+  const pauseBtn   = document.getElementById('pause-btn');
+  const resetBtn   = document.getElementById('reset-btn');
+  const paletteBtn = document.getElementById('palette-btn');
+  const speedEl    = document.getElementById('speed');
+  const speedValEl = document.getElementById('speed-val');
+
+  function updateStatus(extra) {
+    const m = mode === 'idle' ? 'idle'
+            : mode === 'continuous' ? 'continuous'
+            : `burst (${burstRemaining} left)`;
+    statusEl.textContent = `tick ${totalTicks} · ${m}${extra ? ' · ' + extra : ''}`;
+  }
+
+  function stopTimer() {
+    if (timer) { clearInterval(timer); timer = null; }
+    mode = 'idle';
+    burstRemaining = 0;
+    pauseBtn.disabled = true;
+    updateStatus();
+  }
+
+  function tick() {
+    if (!lut) return;
+    step();
+    draw();
+    totalTicks++;
+    if (mode === 'burst') {
+      burstRemaining--;
+      if (burstRemaining <= 0) { stopTimer(); return; }
+    }
+    updateStatus();
+  }
+
+  function startTimer(newMode, burstCount) {
+    if (!lut) return;
+    if (timer) clearInterval(timer);
+    mode = newMode;
+    if (newMode === 'burst') burstRemaining = burstCount;
+    pauseBtn.disabled = false;
+    updateStatus();
+    timer = setInterval(tick, stepDelay);
+  }
+
+  burstBtn.addEventListener('click', () => startTimer('burst', 16));
+  contBtn.addEventListener('click',  () => startTimer('continuous', 0));
+  pauseBtn.addEventListener('click', () => {
+    if (timer) { clearInterval(timer); timer = null; }
+    pauseBtn.disabled = true;
+    updateStatus('paused');
+  });
+  resetBtn.addEventListener('click', () => {
+    if (timer) { clearInterval(timer); timer = null; }
+    mode = 'idle';
+    burstRemaining = 0;
+    totalTicks = 0;
+    pauseBtn.disabled = true;
+    rebuildInit();
+    draw();
+    updateStatus();
+  });
+  paletteBtn.addEventListener('click', () => {
+    rerollPalette();
+    if (state) draw();
+  });
+
+  // Changing init source auto-resets to that init.
+  document.getElementById('init-source').addEventListener('change', () => {
+    if (timer) { clearInterval(timer); timer = null; }
+    mode = 'idle';
+    burstRemaining = 0;
+    totalTicks = 0;
+    pauseBtn.disabled = true;
+    rebuildInit();
+    draw();
+    updateStatus();
+  });
+
+  speedEl.addEventListener('input', () => {
+    stepDelay = parseInt(speedEl.value, 10) || 0;
+    speedValEl.textContent = stepDelay + ' ms';
+    // If a timer is running, restart it with the new interval.
+    if (timer) {
+      clearInterval(timer);
+      timer = setInterval(tick, stepDelay);
+    }
+  });
+
+  loadLut().then(() => updateStatus());
+})();
+</script>
+{% endblock %}

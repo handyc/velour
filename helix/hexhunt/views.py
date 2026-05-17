@@ -512,10 +512,22 @@ def _runner_thread(run_pk: int, corpus_pk: int, params, keep_top: int) -> None:
         # forever in 'running'.
         gen_log: list = []
         def progress(g):
-            gen_log.append({
+            entry = {
                 'gen': g.gen, 'best': g.best, 'mean': g.mean,
                 'elapsed_s': g.elapsed_s,
-            })
+            }
+            # Self-reproduction validation event: include the per-elite
+            # scores so the browser progress page can show them.  Tuple
+            # form ((idx, score), …) serialises cleanly as JSON arrays.
+            if g.self_reproduce_scores is not None:
+                entry['sr_scores'] = [
+                    [int(idx), float(s)] for idx, s in g.self_reproduce_scores
+                ]
+                entry['sr_min']  = min(s for _, s in g.self_reproduce_scores)
+                entry['sr_max']  = max(s for _, s in g.self_reproduce_scores)
+                entry['sr_mean'] = float(sum(s for _, s in g.self_reproduce_scores)
+                                            / len(g.self_reproduce_scores))
+            gen_log.append(entry)
             run.generation_log_json = list(gen_log)
             run.last_heartbeat_at = djtz.now()
             run.save(update_fields=['generation_log_json', 'last_heartbeat_at'])
@@ -628,6 +640,33 @@ def launch_run(request):
         return redirect('helix:hexhunt:list')
     windows_used = min(windows, len(corpus_windows))
 
+    # Self-reproduction validation: opt-in via the launch form.  When
+    # set, every N generations the GA re-scores its top elites by how
+    # closely each rule's CA reproduces its own LUT-as-image — a
+    # direct test of meta-evolution (a rule that reproduces itself is
+    # a class-4 generator of a class-4).  Defaults preserve old
+    # behaviour.
+    sr_on = (request.POST.get('self_reproduce') or '').strip() == '1'
+    val_every = 0
+    val_elite = 8
+    val_steps = 64
+    if sr_on:
+        try:
+            val_every = max(1, min(gens,
+                                       int(request.POST.get('val_every', 5) or 5)))
+        except ValueError:
+            val_every = 5
+        try:
+            val_elite = max(1, min(pop,
+                                       int(request.POST.get('val_elite', 8) or 8)))
+        except ValueError:
+            val_elite = 8
+        try:
+            val_steps = max(1, min(256,
+                                       int(request.POST.get('val_steps', 64) or 64)))
+        except ValueError:
+            val_steps = 64
+
     params = TournamentParams(
         population_size=pop,
         generations=gens,
@@ -639,6 +678,9 @@ def launch_run(request):
         steps=engine.TOTAL_STEPS,
         rng_seed=seed,
         init_mutation_rate=init_mutation,
+        validation_every=val_every,
+        validation_elite_n=val_elite,
+        validation_steps=val_steps,
     )
 
     params_dict = dict(params.__dict__)

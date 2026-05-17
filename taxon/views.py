@@ -343,6 +343,21 @@ def rule_detail(request, slug: str):
     # All classifications (history) + latest.
     classifications = list(rule.classifications.all()[:8])
 
+    # Quine-tag summary: pick the most recent classification that
+    # has is_quine=True OR any non-zero quine score, so the badge
+    # survives a later re-classify that didn't carry the tags.
+    quine_card = None
+    for c in classifications:
+        if c.is_quine or (c.sr_strict or c.sr_arbsigma or c.nest_depth):
+            quine_card = {
+                'is_quine':    c.is_quine,
+                'sr_strict':   c.sr_strict or 0.0,
+                'sr_arbsigma': c.sr_arbsigma or 0.0,
+                'nest_depth':  c.nest_depth,
+                'origin':      c.quine_origin,
+            }
+            break
+
     agents = list(rule.agents.all())
     return render(request, 'taxon/detail.html', {
         'rule': rule,
@@ -354,6 +369,7 @@ def rule_detail(request, slug: str):
         'palette_hex': rule.palette_hex,
         'class_choices': [(n, lbl) for n, lbl in WOLFRAM_CLASSES],
         'agents': agents,
+        'quine_card': quine_card,
     })
 
 
@@ -443,6 +459,26 @@ def rule_preview_png(request, slug: str):
             grid = traj[-1]
             palette = list(bytes(rule.palette_ansi))[:4]
             from automaton.packed import ansi256_to_rgb
+            pal_rgb = [ansi256_to_rgb(p) for p in palette]
+        elif rule.kind == 'hex_k4_lut':
+            # Spoeqi pointy-top hex CA; pad up to 128×128 with the
+            # rule's own LUT-as-image then sub-step `ticks` ticks.
+            import numpy as np
+            from automaton.packed import ansi256_to_rgb
+            from caformer.primitives import hex_ca_step
+            lut = np.frombuffer(bytes(rule.genome), dtype=np.uint8) & 3
+            # Use the LUT-as-image (128×128) as the seed; this matches
+            # the spoeqi self-reproduce framing and keeps the preview
+            # tied to the rule's quine identity.
+            state = lut.reshape(128, 128).copy()
+            rule_arr = np.frombuffer(bytes(rule.genome), dtype=np.uint8)
+            preview_ticks = ticks
+            for _ in range(preview_ticks):
+                state = hex_ca_step(state, rule_arr)
+            # Down-sample to ``size``×``size`` via nearest-neighbour.
+            step = 128 // size
+            grid = state[::step, ::step][:size, :size]
+            palette = list(bytes(rule.palette_ansi))[:4]
             pal_rgb = [ansi256_to_rgb(p) for p in palette]
         else:
             from .hexnn import HexNNRuleset, simulate as hexnn_simulate, unpack_hexnn

@@ -19,6 +19,13 @@
       — {{ group.note }}
     </span>
   {% endif %}
+  <span style="margin-left:0.6rem; font-weight:400; font-size:0.78rem;">
+    {% if composition %}
+      {% include "caframe/_export_button.html" with source="escher" source_ref=composition.slug label="→ caframe movie" %}
+    {% else %}
+      {% include "caframe/_export_button.html" with source="escher" source_ref=group.slug label="→ caframe movie" %}
+    {% endif %}
+  </span>
 </h1>
 
 <p style="color:#8b949e; font-size:0.85rem; margin:0.2rem 0 0.8rem;">

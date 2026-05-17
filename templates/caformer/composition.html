@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}caformer — {{ composition.name }}{% endblock %}
+{% block content %}
+<style>
+  .cx-page { max-width: 60em; }
+  .cx-page h1 { margin: 0 0 4px; }
+  .cx-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 14px; }
+  .cx-page .crumbs a { color: #ace; }
+  .cx-section { margin-top: 16px; padding: 12px 14px;
+                 border: 1px solid #1f1f1f; background: #0a0a0a; }
+  .cx-section h2 { font-size: 0.78rem; color: #888;
+                    text-transform: uppercase; letter-spacing: 0.06em;
+                    font-weight: normal; margin: 0 0 6px; }
+  .cx-struct { font-family: monospace; color: #9c9; white-space: pre;
+                font-size: 0.85rem; padding: 10px; background: #050505;
+                border: 1px solid #1f1f1f; }
+  .cx-meta { color: #aaa; font-size: 0.82rem; line-height: 1.6; }
+  .cx-meta code { color: #fc6; }
+  .cx-list a { display: inline-block; padding: 4px 10px; margin: 2px 6px 2px 0;
+                color: #ace; background: #0d1117; border: 1px solid #30363d;
+                text-decoration: none; font-size: 0.8rem; }
+  .cx-list a:hover { background: #061206; border-color: #2a3; }
+  .status-sketch    { color: #ccc; }
+  .status-partial   { color: #fc6; }
+  .status-working   { color: #6f6; }
+  .status-optimised { color: #6cf; }
+</style>
+
+<div class="cx-page">
+  <div class="crumbs">
+    <a href="{% url 'caformer:index' %}">caformer</a> ›
+    L{{ composition.abstraction }} ›
+    {{ composition.name }}
+  </div>
+  <h1>{{ composition.name }}
+    <span class="status-{{ composition.status }}"
+          style="font-size:0.7rem; padding:2px 8px; border:1px solid;
+                  border-radius:2px; vertical-align:middle;">
+      {{ composition.status }}
+    </span>
+    <span style="font-size:0.7rem; color:#fc6; vertical-align:middle;
+                  font-family:monospace; margin-left:0.6em;">
+      abstraction L{{ composition.abstraction }}
+    </span>
+  </h1>
+
+  <div class="cx-section">
+    <h2>structure</h2>
+    <div class="cx-struct">{{ composition.structure }}</div>
+    <div class="cx-meta" style="margin-top:8px;">
+      ca count budget: <code>{{ composition.ca_count }}</code>
+    </div>
+  </div>
+
+  <div class="cx-section">
+    <h2>notes</h2>
+    <div class="cx-meta">{{ composition.notes }}</div>
+  </div>
+
+  {% if contained_components %}
+  <div class="cx-section">
+    <h2>builds on (primitives)</h2>
+    <div class="cx-list">
+      {% for c in contained_components %}
+        <a href="{% url 'caformer:component' slug=c.slug %}">{{ c.name }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if contained_compositions %}
+  <div class="cx-section">
+    <h2>builds on (compositions)</h2>
+    <div class="cx-list">
+      {% for c in contained_compositions %}
+        <a href="{% url 'caformer:composition' slug=c.slug %}">{{ c.name }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="cx-section">
+    <h2>where this sits in the ladder</h2>
+    <div class="cx-list">
+      {% for c in compositions %}
+        {% if c.slug == composition.slug %}
+          <span style="display:inline-block; padding:4px 10px; margin:2px 6px 2px 0;
+                        color:#fff; background:#1f4f1f; border:1px solid #4a8;
+                        font-size:0.8rem;">L{{ c.abstraction }} · {{ c.name }}</span>
+        {% else %}
+          <a href="{% url 'caformer:composition' slug=c.slug %}">L{{ c.abstraction }} · {{ c.name }}</a>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

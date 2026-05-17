@@ -134,3 +134,8 @@ clone_init.json.applied
 # the contents.
 signs/imports/*
 !signs/imports/.gitkeep
+
+# ALICE bundles — generated artefacts; keep the dir tracked-as-empty
+# so generators can write into it on any fresh checkout.
+conduit/alice/bundles/*
+!conduit/alice/bundles/.gitkeep

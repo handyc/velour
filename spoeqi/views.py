@@ -11,7 +11,8 @@ import json
 import secrets
 
 from django.contrib import messages
-from django.http import HttpResponseRedirect, Http404, JsonResponse
+from django.contrib.auth.decorators import login_required
+from django.http import HttpResponse, HttpResponseRedirect, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -503,6 +504,18 @@ def detail(request, slug):
             'uniform_pct': round(100 * fp['n_uniform'] / COMPONENTS, 1),
         }
 
+    # Pull a recent-walks list for the gridprint form's "use a Mandelbrot
+    # walk's final image as the CA initial state" dropdown.  Cheap query
+    # (12 rows, slug+name only) and only matters if loupe is installed —
+    # wrapped so a missing loupe app doesn't break the spoeqi detail page.
+    try:
+        from loupe.models import Walk
+        recent_walks = list(
+            Walk.objects.order_by('-pk')
+                .values('slug', 'name')[:12])
+    except Exception:
+        recent_walks = []
+
     return render(request, 'spoeqi/detail.html', {
         'pact':    pact,
         'payload': json.dumps(payload),
@@ -513,6 +526,7 @@ def detail(request, slug):
         'swatch_palette':   swatch_palette,
         'palette_is_per_component': palette_is_per_component,
         'fingerprint':      fingerprint,
+        'recent_walks':     recent_walks,
     })
 
 
@@ -532,12 +546,11 @@ def delete(request, slug):
 # the prompt and (optional) response. Heavy: each POST loads the
 # internal CausalLM and may take 5-30 s.
 
-ORACLE_MODEL_CHOICES = [
-    'distilgpt2',
-    'gpt2',
-    'EleutherAI/pythia-70m',
-    'TinyLlama/TinyLlama-1.1B-Chat-v1.0',
-]
+def _oracle_model_choices() -> list[str]:
+    """Sourced from llm_lora.DEFAULT_TARGETS so newly-registered backbones
+    (e.g. karpathy/minGPT-*) appear in the dropdown automatically."""
+    from .llm_lora import list_known_models
+    return list_known_models()
 
 
 def oracle(request, slug):
@@ -601,7 +614,7 @@ def oracle(request, slug):
         'pact':      pact,
         'form':      form,
         'providers': providers,
-        'models':    ORACLE_MODEL_CHOICES,
+        'models':    _oracle_model_choices(),
         'result':    result,
     })
 
@@ -1043,25 +1056,57 @@ def chain(request, slug):
     results = None
     error = None
 
+    # Full-64 (gene-driven) mode runs a 64-stage chain where each
+    # component's (mode, mapping) "task" is picked deterministically
+    # from a CA meta-tap.  Same pact → same gene → same chain.  The
+    # `chain64_prefer_mode` knob lets the user constrain everything to
+    # char or token if they want a homogeneous-mode gene; default
+    # 'auto' lets the gene byte decide per stage.
+    form_defaults.update({
+        'chain64_prefer_mode': 'auto',     # 'auto' | 'char' | 'token'
+        'chain64_generation':  '0',
+    })
+    form.update({k: form_defaults[k] for k in form_defaults if k.startswith('chain64_')})
+
+    chain_mode_used = 'manual'   # 'manual' | 'full64'
+    full64_gene     = None       # populated when chain_64 ran
+
     if request.method == 'POST':
         for k in form:
             form[k] = request.POST.get(k, form_defaults[k])
         try:
-            for i in range(n_slots):
-                mode = form[f'mode_{i}']
-                if not mode:                    # empty slot — skip
-                    continue
-                if mode not in ('char', 'token'):
-                    raise ValueError(f'stage {i}: mode {mode!r} not chainable '
-                                     f'(attention produces a matrix, not text)')
-                mapping = form[f'mapping_{i}']
-                comp = int(form[f'component_{i}'])
-                gen  = int(form[f'generation_{i}'])
-                stages.append(tm.ChainStage(
-                    mode=mode, mapping=mapping,
-                    component=comp, generation=gen))
-            if stages:
+            if request.POST.get('chain_64'):
+                # Output of CA 0 feeds CA 1 feeds CA 2 ... feeds CA 63,
+                # but each stage runs its *own gene-coded task* — not
+                # the same mapping 64 times.  The gene is derived from
+                # the pact's CA bytes via derive_chain_gene().
+                chain_mode_used = 'full64'
+                gen64     = int(form['chain64_generation'])
+                pref      = form['chain64_prefer_mode']
+                if pref not in ('auto', 'char', 'token'):
+                    raise ValueError(f'bad prefer_mode {pref!r}')
+                stages = tm.derive_chain_gene(
+                    pact, generation=gen64,
+                    prefer_mode=None if pref == 'auto' else pref,
+                )
+                full64_gene = stages
                 results = tm.apply_chain(pact, stages, form['text'])
+            else:
+                for i in range(n_slots):
+                    mode = form[f'mode_{i}']
+                    if not mode:                    # empty slot — skip
+                        continue
+                    if mode not in ('char', 'token'):
+                        raise ValueError(f'stage {i}: mode {mode!r} not chainable '
+                                         f'(attention produces a matrix, not text)')
+                    mapping = form[f'mapping_{i}']
+                    comp = int(form[f'component_{i}'])
+                    gen  = int(form[f'generation_{i}'])
+                    stages.append(tm.ChainStage(
+                        mode=mode, mapping=mapping,
+                        component=comp, generation=gen))
+                if stages:
+                    results = tm.apply_chain(pact, stages, form['text'])
         except (ValueError, TypeError) as e:
             error = f'bad input: {e}'
         except Exception as e:  # noqa: BLE001
@@ -1088,15 +1133,153 @@ def chain(request, slug):
             'generation': form[f'generation_{i}'],
         })
 
+    # Preview the gene even on GET so the user sees what each component
+    # will do *before* spending the cycles to run all 64 stages.  Cheap:
+    # one keystream tap + 64 dict lookups.
+    try:
+        gene_preview = tm.derive_chain_gene(
+            pact, generation=int(form.get('chain64_generation') or 0),
+            prefer_mode=None if form.get('chain64_prefer_mode', 'auto') == 'auto'
+                       else form['chain64_prefer_mode'],
+        )
+    except Exception:  # noqa: BLE001
+        gene_preview = []
+
     return render(request, 'spoeqi/chain.html', {
-        'pact':           pact,
-        'form':           form,
-        'slots':          slots,
-        'results':        results,
-        'error':          error,
-        'char_mappings':  char_mappings,
-        'token_mappings': token_mappings,
-        'components':     list(range(COMPONENTS)),
+        'pact':              pact,
+        'form':              form,
+        'slots':             slots,
+        'results':           results,
+        'error':             error,
+        'char_mappings':     char_mappings,
+        'token_mappings':    token_mappings,
+        'components':        list(range(COMPONENTS)),
+        'chain_mode_used':   chain_mode_used,
+        'n_components':      COMPONENTS,
+        'gene_preview':      gene_preview,
+        'full64_gene':       full64_gene,
+    })
+
+
+@login_required
+def chain_evolve(request, slug):
+    """GA over per-component chain genes.  Each individual is a 64-tuple
+    of (mode, mapping); fitness = weighted sum of metrics from
+    spoeqi.chain_evolution.METRIC_REGISTRY.  See the textmask docstring
+    for the long-term plan: chains as learnable LLM-prep preprocessors.
+    """
+    from . import chain_evolution as ce
+    from . import textmask as tm
+
+    pact = get_object_or_404(Pact, slug=slug)
+    metric_registry = ce.METRIC_REGISTRY
+
+    form_defaults = {
+        'input_text':       'attention is all you need but the woods are lovely dark and deep',
+        'reference_text':   '',                # blank → reference_match disabled
+        'n_population':     '12',
+        'n_generations':    '8',
+        'mutation_rate':    '0.10',
+        'crossover_rate':   '0.6',
+        'generation':       '0',
+        'seed_with_pact':   '1',
+    }
+    # Default weights: 1.0 on a few sane defaults, 0 elsewhere.
+    default_weights = {
+        'lexical_diversity':      1.0,
+        'stopword_density':       1.0,
+        'input_recall':           1.0,
+        'bigram_diversity':       1.0,
+        'avg_word_length':        0.5,
+        'alpha_ratio':            0.5,
+    }
+    for name in metric_registry:
+        form_defaults[f'w_{name}'] = str(default_weights.get(name, 0.0))
+    form_defaults['w_reference_match'] = '0.0'
+
+    form = dict(form_defaults)
+    result = None
+    error = None
+    sample_chain = None
+
+    if request.method == 'POST':
+        for k in form_defaults:
+            form[k] = request.POST.get(k, form_defaults[k])
+        try:
+            input_text = (form['input_text'] or '').strip()
+            if not input_text:
+                raise ValueError('input text is required')
+            n_pop = max(2, min(40, int(form['n_population'])))
+            n_gen = max(1, min(40, int(form['n_generations'])))
+            m_rate = max(0.0, min(1.0, float(form['mutation_rate'])))
+            c_rate = max(0.0, min(1.0, float(form['crossover_rate'])))
+            gen    = max(0, int(form['generation']))
+            seed_pact = form.get('seed_with_pact') == '1'
+
+            weights = {}
+            for name in metric_registry:
+                w = float(form.get(f'w_{name}', '0') or 0)
+                if w != 0.0:
+                    weights[name] = w
+            ref = (form.get('reference_text') or '').strip()
+            ref_w = float(form.get('w_reference_match', '0') or 0)
+            if ref_w != 0.0 and ref:
+                # Inject the factory metric on top of the registry-driven sum.
+                ref_fn = ce.reference_match(ref)
+                weights['_reference_match_inline'] = ref_w
+                # Build a custom fitness callable that adds the reference
+                # match to the weighted-sum.  Cheaper than restructuring
+                # weighted_fitness to accept ad-hoc callables.
+                base_fit = ce.weighted_fitness(
+                    {k: v for k, v in weights.items()
+                      if not k.startswith('_')})
+                base_w   = sum(v for k, v in weights.items() if not k.startswith('_')) or 1.0
+                ref_only = ref_w / (base_w + ref_w)
+                base_only = base_w / (base_w + ref_w)
+                def fitness(inp, out, stages):
+                    return (base_only * base_fit(inp, out, stages)
+                            + ref_only * ref_fn(inp, out, stages))
+            else:
+                if not weights:
+                    raise ValueError('all metric weights are 0 — pick at least one metric')
+                fitness = ce.weighted_fitness(weights)
+
+            result = ce.evolve(pact,
+                                input_text=input_text,
+                                fitness=fitness,
+                                n_population=n_pop,
+                                n_generations=n_gen,
+                                mutation_rate=m_rate,
+                                crossover_rate=c_rate,
+                                generation=gen,
+                                seed_with_pact_gene=seed_pact)
+
+            # Re-run the winning gene to get per-stage breakdown for the UI.
+            best_gene = result.final_population[0]
+            stages = ce.gene_to_stages(best_gene, gen)
+            sample_chain = tm.apply_chain(pact, stages, input_text)
+        except (ValueError, TypeError) as e:
+            error = f'bad input: {e}'
+        except Exception as e:  # noqa: BLE001
+            error = f'{type(e).__name__}: {e}'
+
+    metric_rows = [
+        {
+            'name':        name,
+            'description': desc,
+            'weight':      form.get(f'w_{name}', '0'),
+            'is_default':  default_weights.get(name, 0.0) > 0,
+        }
+        for name, (desc, _fn) in metric_registry.items()
+    ]
+    return render(request, 'spoeqi/chain_evolve.html', {
+        'pact':            pact,
+        'form':            form,
+        'metric_rows':     metric_rows,
+        'result':          result,
+        'sample_chain':    sample_chain,
+        'error':           error,
+        'n_components':    COMPONENTS,
     })
 
 
@@ -1353,3 +1536,1077 @@ def export_tile_to_automaton(request, slug, component):
         'simulation_url': reverse('automaton:run', kwargs={'slug': sim.slug}),
         'rules_created': len(rules),
     })
+
+
+# ────────────────────── Workspace (CA → ELF) ───────────────────────
+#
+# Per-pact 4096-byte ELF generator.  GET /spoeqi/<pact>/workspace/
+# lists the apps and links to specific ticks; the .elf endpoint serves
+# the patched binary as application/octet-stream.
+
+WORKSPACE_APPS = {
+    'app0_greeter': {
+        'label':       'ANSI greeter',
+        'description': 'CA-derived ANSI greeting — simplest verification.',
+        'render':      'render_greeter_elf',
+    },
+    'app1_mandel': {
+        'label':       'Mandelbrot frame',
+        'description': 'One half-block frame at a CA-picked zoom preset.',
+        'render':      'render_mandel_elf',
+    },
+    'app2_caview': {
+        'label':       'Hex CA viewer',
+        'description': 'Self-referential — the substrate viewing itself, '
+                       'CA bytes pick rule + initial state for a 4-state '
+                       'hex CA the ELF then runs locally.',
+        'render':      'render_caview_elf',
+    },
+}
+
+
+@login_required
+def workspace_index(request, slug):
+    pact = get_object_or_404(Pact, slug=slug)
+    return render(request, 'spoeqi/workspace.html', {
+        'pact':  pact,
+        'apps':  WORKSPACE_APPS,
+        'ticks': [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144],
+        # Fully-qualified base URL so the curl recipe works from any
+        # machine — request.get_host() includes the port when present.
+        'scheme_host': f'{request.scheme}://{request.get_host()}',
+    })
+
+
+def _serve_workspace_elf(pact, app, tick):
+    if app not in WORKSPACE_APPS:
+        raise Http404(f'unknown workspace app {app!r}')
+    from .workspace import slots as ws_slots
+    fn = getattr(ws_slots, WORKSPACE_APPS[app]['render'])
+    elf = fn(pact, tick=int(tick))
+    resp = HttpResponse(elf, content_type='application/octet-stream')
+    resp['Content-Disposition'] = (
+        f'attachment; filename="{pact.slug}-{app}-tick{int(tick):05d}.elf"')
+    resp['Content-Length'] = str(len(elf))
+    # Cache aggressively: same (pact, app, tick) → identical bytes forever.
+    resp['Cache-Control'] = 'public, max-age=31536000, immutable'
+    return resp
+
+
+@login_required
+def workspace_app_elf(request, slug, app, tick):
+    """Authenticated path — kept so a logged-in researcher can grab any
+    pact's ELFs from the browser without juggling tokens."""
+    pact = get_object_or_404(Pact, slug=slug)
+    return _serve_workspace_elf(pact, app, tick)
+
+
+def workspace_app_elf_token(request, slug, token, app, tick):
+    """Bearer-token path — researchers on other machines (or curl from
+    a terminal) hit this with the per-pact token displayed on the
+    workspace index page.  Constant-time compare so the token can't be
+    probed by timing.  No login required."""
+    import hmac
+    pact = get_object_or_404(Pact, slug=slug)
+    if not pact.workspace_share_token:
+        raise Http404('no share token issued for this pact')
+    if not hmac.compare_digest(token, pact.workspace_share_token):
+        raise Http404('bad share token')
+    return _serve_workspace_elf(pact, app, tick)
+
+
+# ─── Metapact views ──────────────────────────────────────────────────
+
+
+@login_required
+def metapact_list(request):
+    from .models import Metapact
+    return render(request, 'spoeqi/metapact_list.html', {
+        'metapacts': Metapact.objects.all()[:60],
+    })
+
+
+@login_required
+def metapact_create(request):
+    from .models import Metapact
+    from .metachain import GRID_AREA
+    import numpy as np
+    from django.utils.text import slugify
+    if request.method == 'POST':
+        name = (request.POST.get('name') or '').strip() or 'untitled metapact'
+        slug = slugify(request.POST.get('slug') or name)[:80]
+        seed_int = int(request.POST.get('seed') or 0xCAFEBABE) & 0xFFFFFFFF
+        depth = max(2, min(20, int(request.POST.get('depth') or 10)))
+        ticks = max(4, min(64, int(request.POST.get('chain_ticks') or 24)))
+        leaf = (request.POST.get('leaf_probe') or
+                  'In the beginning the Universe was created. ' * 4)
+        rng = np.random.default_rng(seed_int)
+        seed_state = bytes(rng.integers(0, 4, size=GRID_AREA,
+                                          dtype=np.uint8))
+        m = Metapact.objects.create(
+            name=name, slug=slug,
+            seed_state=seed_state, depth=depth, chain_ticks=ticks,
+            leaf_probe=leaf,
+        )
+        chain = m.expand()
+        m.final_chain_quality = chain.chain_quality
+        m.final_class4_depth  = chain.depth_class4
+        m.save(update_fields=['final_chain_quality', 'final_class4_depth'])
+        return redirect('spoeqi:metapact_detail', slug=m.slug)
+    return render(request, 'spoeqi/metapact_create.html', {})
+
+
+@login_required
+def metapact_detail(request, slug):
+    from .models import Metapact
+    m = get_object_or_404(Metapact, slug=slug)
+    chain = m.expand()
+    return render(request, 'spoeqi/metapact_detail.html', {
+        'metapact': m, 'chain': chain,
+        'levels':   list(zip(range(chain.depth), chain.classes, chain.scores)),
+    })
+
+
+@login_required
+def metapact_expand(request, slug):
+    from .models import Metapact
+    m = get_object_or_404(Metapact, slug=slug)
+    chain = m.expand()
+    return JsonResponse({
+        'slug': m.slug, 'depth': chain.depth,
+        'depth_class4': chain.depth_class4,
+        'chain_quality': chain.chain_quality,
+        'classes': chain.classes,
+        'scores':  [round(s, 4) for s in chain.scores],
+    })
+
+
+@login_required
+def metapact_bytes(request, slug):
+    """Raw byte stream of the expanded chain — depth × 16,384 bytes.
+    Other apps (caframe, recursive metachains) slice this however they
+    like. Deterministic: same Metapact slug → same bytes."""
+    from .models import Metapact
+    m = get_object_or_404(Metapact, slug=slug)
+    blob = m.expand().as_bytes()
+    resp = HttpResponse(blob, content_type='application/octet-stream')
+    resp['Content-Disposition'] = f'inline; filename="{slug}.metachain.bin"'
+    resp['X-Metachain-Depth'] = str(m.depth)
+    resp['Cache-Control'] = 'public, max-age=300'
+    return resp
+
+
+@login_required
+def metapact_chat(request, slug):
+    from .models import Metapact
+    m = get_object_or_404(Metapact, slug=slug)
+    return render(request, 'spoeqi/metapact_chat.html', {'metapact': m})
+
+
+@login_required
+def metapact_chat_reply(request, slug):
+    from .models import Metapact
+    from caformer.transformer import ca_generate_qkv
+    from caformer.primitives import ASCII_PRINTABLE
+    m = get_object_or_404(Metapact, slug=slug)
+    q = (request.GET.get('q') or '').strip()
+    if not q:
+        return JsonResponse({'reply': '', 'error': 'empty prompt'})
+    n = max(1, min(96, int(request.GET.get('n') or 24)))
+    try:
+        temperature = max(0.0, min(20.0,
+                                      float(request.GET.get('temperature') or 0.8)))
+    except ValueError:
+        temperature = 0.8
+    seed = int(request.GET.get('seed') or 0xC0FFEE) & 0x7FFFFFFF
+    ascii_only = request.GET.get('ascii_only') in ('1', 'true', 'on', 'yes')
+    kw = m.caformer_kwargs(n_blocks=1)
+    prompt_ids = list(q.encode('utf-8'))[:64]
+    out = ca_generate_qkv(prompt_ids, max_new_tokens=n, n_blocks=1,
+                            vocab_size=256, temperature=temperature,
+                            sample_seed=seed, base_seed=seed,
+                            allowed_bytes=(ASCII_PRINTABLE if ascii_only else None),
+                            **kw)
+    reply = bytes(out).decode('latin-1', errors='replace')
+    return JsonResponse({
+        'reply': reply, 'tokens': out, 'metapact': m.slug,
+        'prompt_len': len(prompt_ids),
+    })
+
+
+@login_required
+def metapact_evolve(request, slug):
+    from .models import Metapact
+    m = get_object_or_404(Metapact, slug=slug)
+    return render(request, 'spoeqi/metapact_evolve.html', {'metapact': m})
+
+
+# Process-local stash for GA results, keyed by session.
+_METAPACT_RESULTS: dict = {}
+_METAPACT_RESULTS_CAP = 16
+
+
+@login_required
+async def metapact_evolve_stream(request, slug):
+    import asyncio, json as _json, time
+    from .models import Metapact
+    from .metachain_ga import evolve_metapact, MetaGAConfig
+    from asgiref.sync import sync_to_async
+    m = await sync_to_async(get_object_or_404)(Metapact, slug=slug)
+
+    def _ci(name, default, lo, hi):
+        try:
+            return max(lo, min(hi, int(request.GET.get(name) or default)))
+        except (TypeError, ValueError):
+            return default
+
+    # Optional self-reproduction term: the user opts in by passing
+    # ?w_sr=<float>.  When > 0, each candidate's seed is also scored
+    # by how closely the rule reproduces its own LUT-as-image — a
+    # ruleset-quine fitness that turns the metapact into a stable
+    # generator of itself at every chain level.
+    try:
+        w_sr = max(0.0, min(2.0, float(request.GET.get('w_sr') or 0.0)))
+    except (TypeError, ValueError):
+        w_sr = 0.0
+    sr_ticks = _ci('sr_ticks', 64, 1, 256)
+    cfg = MetaGAConfig(
+        pop_size=_ci('pop_size', 8, 4, 24),
+        generations=_ci('generations', 8, 1, 30),
+        mutation_rate=float(request.GET.get('mutation_rate') or 0.002),
+        seed=_ci('seed', 0xCAB00B5, 1, 2**31 - 1),
+        depth=m.depth, chain_ticks=m.chain_ticks,
+        w_sr=w_sr, sr_ticks=sr_ticks,
+    )
+    template_seed = bytes(m.seed_state)
+    corpus = m.leaf_probe or ('In the beginning ' * 32)
+
+    async def stream():
+        try:
+            yield ('event: meta\ndata: ' + _json.dumps({
+                'pop_size': cfg.pop_size, 'generations': cfg.generations,
+                'depth': cfg.depth, 'chain_ticks': cfg.chain_ticks,
+                'total_evals': cfg.pop_size * cfg.generations,
+                'starting_seed_slug': m.slug,
+            }) + '\n\n').encode()
+            t0 = time.time()
+            loop = asyncio.get_running_loop()
+            q: asyncio.Queue = asyncio.Queue()
+
+            def _on_individual(gen_idx, ind_idx, comp, cq, lf, sr):
+                loop.call_soon_threadsafe(q.put_nowait, ('ind', {
+                    'gen': gen_idx, 'ind': ind_idx,
+                    'fitness': float(comp), 'chain_q': float(cq),
+                    'leaf_logprob': float(lf),
+                    'self_reproduce': float(sr),
+                    'elapsed_ms': int((time.time() - t0) * 1000),
+                }))
+
+            def _on_generation(gen_idx, best, mean, worst):
+                loop.call_soon_threadsafe(q.put_nowait, ('gen', {
+                    'gen': gen_idx, 'best': float(best),
+                    'mean': float(mean), 'worst': float(worst),
+                    'elapsed_ms': int((time.time() - t0) * 1000),
+                }))
+
+            async def _runner():
+                result = await asyncio.to_thread(
+                    evolve_metapact,
+                    corpus=corpus, template_seed=template_seed, cfg=cfg,
+                    on_individual=_on_individual,
+                    on_generation=_on_generation)
+                await q.put(('done', result))
+
+            run_task = asyncio.create_task(_runner())
+            result = None
+            try:
+                while True:
+                    kind, payload = await q.get()
+                    if kind == 'done':
+                        result = payload; break
+                    elif kind == 'ind':
+                        yield ('event: individual\ndata: '
+                                + _json.dumps(payload) + '\n\n').encode()
+                    else:
+                        yield ('data: '
+                                + _json.dumps(payload) + '\n\n').encode()
+            finally:
+                if not run_task.done():
+                    run_task.cancel()
+
+            sk = request.session.session_key or 'anon'
+            if len(_METAPACT_RESULTS) >= _METAPACT_RESULTS_CAP:
+                _METAPACT_RESULTS.pop(next(iter(_METAPACT_RESULTS)))
+            _METAPACT_RESULTS[sk] = {
+                'parent_slug':    m.slug,
+                'seed_state':     result.best_seed,
+                'fitness':        result.best_fitness,
+                'chain_quality':  result.best_chain_quality,
+                'leaf_fitness':   result.best_leaf_fitness,
+                'self_reproduce': result.best_self_reproduce,
+                'history':        result.history,
+                'cfg':            cfg,
+            }
+            yield ('event: end\ndata: ' + _json.dumps({
+                'best_fitness': result.best_fitness,
+                'best_chain_quality': result.best_chain_quality,
+                'best_leaf_logprob':  result.best_leaf_fitness,
+                'best_self_reproduce': result.best_self_reproduce,
+                'elapsed_ms': int((time.time() - t0) * 1000),
+                'savable':    True,
+            }) + '\n\n').encode()
+        except asyncio.CancelledError:
+            return
+
+    from django.http import StreamingHttpResponse
+    resp = StreamingHttpResponse(stream(), content_type='text/event-stream')
+    resp['Cache-Control']     = 'no-cache'
+    resp['X-Accel-Buffering'] = 'no'
+    resp['Content-Encoding']  = 'identity'
+    return resp
+
+
+@login_required
+@require_POST
+def metapact_save_winner(request, slug):
+    from .models import Metapact
+    sk = request.session.session_key or 'anon'
+    payload = _METAPACT_RESULTS.get(sk)
+    if payload is None or payload.get('parent_slug') != slug:
+        return JsonResponse({'ok': False,
+            'error': 'no evolution result in this session for this metapact'})
+    name = (request.POST.get('name') or '').strip()
+    new_slug = (request.POST.get('slug') or '').strip()
+    if not name or not new_slug:
+        return JsonResponse({'ok': False, 'error': 'need name + slug'})
+    parent = Metapact.objects.filter(slug=slug).first()
+    if parent is None:
+        return JsonResponse({'ok': False, 'error': 'parent metapact gone'})
+    m = Metapact.objects.create(
+        name=name[:80], slug=new_slug[:80],
+        notes=(request.POST.get('notes') or ''),
+        seed_state=payload['seed_state'],
+        depth=parent.depth, chain_ticks=parent.chain_ticks,
+        parent_seed=parent.seed_state,
+        ga_generations=payload['cfg'].generations,
+        ga_pop_size=payload['cfg'].pop_size,
+        final_chain_quality=payload['chain_quality'],
+        final_leaf_fitness=payload['leaf_fitness'],
+        leaf_probe=parent.leaf_probe,
+    )
+    chain = m.expand()
+    m.final_class4_depth = chain.depth_class4
+    m.save(update_fields=['final_class4_depth'])
+    return JsonResponse({'ok': True, 'slug': m.slug,
+        'detail_url': reverse('spoeqi:metapact_detail',
+                                 kwargs={'slug': m.slug})})
+
+
+@login_required
+@require_POST
+def metapact_delete(request, slug):
+    from .models import Metapact
+    m = get_object_or_404(Metapact, slug=slug)
+    m.delete()
+    messages.success(request, f'metapact {slug!r} deleted')
+    return redirect('spoeqi:metapact_list')
+
+
+# ─── Metapact tournament — autotournament UI ─────────────────────────
+
+
+@login_required
+def metapact_tournament(request):
+    """Render the autotournament page: shows current Metapacts + a
+    one-click "▶ Run autotournament" form with sensible defaults."""
+    from .models import Metapact
+    return render(request, 'spoeqi/metapact_tournament.html', {
+        'metapacts': Metapact.objects.all()[:30],
+        'total':     Metapact.objects.count(),
+    })
+
+
+@login_required
+async def metapact_tournament_stream(request):
+    """SSE: stream a tournament run.  Auto-includes existing metapacts
+    as contestants by default.  Each round's champion is saved as a
+    new Metapact row with parent_seed pointing back to the previous
+    round's champion (so the lineage is visible in the DB).
+    """
+    import asyncio, json as _json, time
+    from asgiref.sync import sync_to_async
+    from django.http import StreamingHttpResponse
+    from .models import Metapact
+    from .metapact_tournament import (
+        TournamentConfig, run_tournament, save_round_winner,
+    )
+
+    def _ci(name, default, lo, hi):
+        try:
+            return max(lo, min(hi, int(request.GET.get(name) or default)))
+        except (TypeError, ValueError):
+            return default
+
+    cfg = TournamentConfig(
+        n_contestants=_ci('contestants', 6, 3, 16),
+        rounds=_ci('rounds', 4, 1, 8),
+        survivors_per_round=_ci('survivors', 2, 1, 6),
+        refine_generations=_ci('refine_gens', 5, 1, 20),
+        refine_pop=_ci('refine_pop', 6, 3, 16),
+        mutation_rate=float(request.GET.get('mutation_rate') or 0.003),
+        depth=_ci('depth', 6, 2, 16),
+        chain_ticks=_ci('chain_ticks', 16, 4, 48),
+        seed=_ci('seed', 0xCAFE_7E, 1, 2**31 - 1),
+        corpus=(request.GET.get('corpus') or ''),
+        run_label=(request.GET.get('label')
+                     or time.strftime('%y%m%d-%H%M')),
+        save_winners=(request.GET.get('save') != '0'),
+    )
+    include_existing = request.GET.get('include') != '0'
+    limit_include = _ci('limit_include', cfg.n_contestants, 1, cfg.n_contestants)
+
+    if include_existing:
+        seeds = await sync_to_async(list)(
+            Metapact.objects.order_by('-final_leaf_fitness',
+                                          '-final_chain_quality',
+                                          '-created_at')
+                              [:limit_include]
+                              .values_list('seed_state', 'slug'))
+        contestants = [bytes(s) for s, _ in seeds]
+        seed_slugs = [sl for _, sl in seeds]
+    else:
+        contestants = []
+        seed_slugs = []
+
+    async def stream():
+        loop = asyncio.get_running_loop()
+        q: asyncio.Queue = asyncio.Queue()
+        try:
+            yield ('event: meta\ndata: ' + _json.dumps({
+                'cfg': {
+                    'rounds': cfg.rounds,
+                    'contestants': cfg.n_contestants,
+                    'survivors': cfg.survivors_per_round,
+                    'refine_pop': cfg.refine_pop,
+                    'refine_gens': cfg.refine_generations,
+                    'depth': cfg.depth, 'chain_ticks': cfg.chain_ticks,
+                    'run_label': cfg.run_label,
+                    'save_winners': cfg.save_winners,
+                },
+                'seed_slugs': seed_slugs,
+            }) + '\n\n').encode()
+
+            saved_slugs = []
+            prev_champion = {'seed': None}
+
+            def _emit(kind, payload):
+                loop.call_soon_threadsafe(q.put_nowait, (kind, payload))
+
+            def _on_save(round_idx, report):
+                try:
+                    m = save_round_winner(
+                        report, cfg=cfg, run_label=cfg.run_label,
+                        prior_champion_seed=prev_champion['seed'])
+                except Exception as e:
+                    _emit('error', {'msg': f'save failed: {e!r}'})
+                    return
+                saved_slugs.append(m.slug)
+                prev_champion['seed'] = report.champion_seed
+                _emit('saved', {
+                    'round': round_idx,
+                    'slug': m.slug,
+                    'class4_depth': m.final_class4_depth,
+                })
+
+            async def _runner():
+                # save_winner DB writes happen on the worker thread —
+                # ORM is happy with that as long as no async-context
+                # collision.  We wrap save_round_winner via sync_to_async
+                # by delegating through _emit + a small helper.
+                def _on_save_wrapper(round_idx, report):
+                    _emit('save_request', {'round': round_idx,
+                                            'report': report})
+
+                # Note: we want save calls to actually happen, so we
+                # call save_round_winner *directly* here — the GA runs
+                # in to_thread anyway so DB writes are off the loop.
+                result = await asyncio.to_thread(
+                    run_tournament,
+                    cfg=cfg, contestants=contestants,
+                    on_event=_emit, on_save_winner=_on_save)
+                _emit('done', result)
+
+            run_task = asyncio.create_task(_runner())
+            try:
+                while True:
+                    kind, payload = await q.get()
+                    if kind == 'done':
+                        yield ('event: end\ndata: ' + _json.dumps({
+                            'winner_fitness':      payload.winner_fitness,
+                            'winner_chain_q':      payload.winner_chain_q,
+                            'winner_leaf_logprob': payload.winner_leaf_lp,
+                            'elapsed_seconds':     payload.elapsed_seconds,
+                            'saved_slugs':         saved_slugs,
+                        }) + '\n\n').encode()
+                        return
+                    if kind == 'error':
+                        yield ('event: error\ndata: '
+                                + _json.dumps(payload) + '\n\n').encode()
+                        continue
+                    yield (f'event: {kind}\ndata: '
+                            + _json.dumps(payload) + '\n\n').encode()
+            finally:
+                if not run_task.done():
+                    run_task.cancel()
+        except asyncio.CancelledError:
+            return
+
+    resp = StreamingHttpResponse(stream(),
+                                  content_type='text/event-stream')
+    resp['Cache-Control']     = 'no-cache'
+    resp['X-Accel-Buffering'] = 'no'
+    resp['Content-Encoding']  = 'identity'
+    return resp
+
+
+
+# ─── Class-4 quine browser surface ────────────────────────────────────
+#
+# Backed by ComponentChampion with component_slug='class4_quine'.  The
+# 16,384-byte seed lives in `rules_blob` (rule_names_csv='seed'),
+# fitness is the strict SR, and the per-rule metrics (c4, activity,
+# arbitrary-σ SR, chain run-length) live as JSON in `notes`.
+# See spoeqi/metachain.py for the discovery + analysis helpers.
+
+_QUINE_SLUG = 'class4_quine'
+
+
+def _quine_meta(champion):
+    """Parse the JSON-blob meta on a class4_quine ComponentChampion."""
+    try:
+        m = json.loads(champion.notes or '{}')
+        if not isinstance(m, dict):
+            return {}
+        return m
+    except (ValueError, TypeError):
+        return {}
+
+
+@login_required
+def quine_index(request):
+    """List saved class-4 quine candidates + offer the search form."""
+    from caformer.models import ComponentChampion
+    candidates = list(ComponentChampion.objects.filter(
+        component_slug=_QUINE_SLUG).order_by('-fitness', '-created_at')[:100])
+    rows = []
+    for c in candidates:
+        m = _quine_meta(c)
+        rows.append({
+            'pk':        c.pk,
+            'fitness':   c.fitness,
+            'c4':        m.get('c4', 0.0),
+            'act':       m.get('act', 0.0),
+            'arbsigma':  m.get('arbsigma', 0.0),
+            'run_len':   m.get('class4_run_length', 0),
+            'origin':    m.get('origin', '?'),
+            'created':   c.created_at,
+            'run_label': c.run_label,
+        })
+    n_total = ComponentChampion.objects.filter(
+        component_slug=_QUINE_SLUG).count()
+    return render(request, 'spoeqi/quine_index.html', {
+        'rows':    rows,
+        'n_total': n_total,
+    })
+
+
+@login_required
+@require_POST
+def quine_search(request):
+    """Run a block-flip-from-identity sweep + hill-climb, persist the
+    top winners as ComponentChampion(class4_quine) rows."""
+    from caformer.models import ComponentChampion
+    from spoeqi.metachain import (
+        block_flip_search, hill_climb_quine, walk_chain,
+        sr_arbitrary_sigma)
+    import time
+
+    def _ci(name, default, lo, hi):
+        try:
+            return max(lo, min(hi, int(request.POST.get(name, default))))
+        except (TypeError, ValueError):
+            return default
+    n_trials      = _ci('n_trials',      300, 50, 2000)
+    n_keep        = _ci('n_keep',          3,  1,   20)
+    climb_passes  = _ci('climb_passes',    1,  0,    8)
+    climb_sample  = _ci('climb_sample', 1024, 128, 4096)
+    label         = (request.POST.get('label') or 'browser').strip()[:40]
+
+    rng_seed = int(time.time()) & 0xFFFFFFFF
+    keepers = block_flip_search(n_trials=n_trials, rng_seed=rng_seed)
+    if not keepers:
+        messages.warning(request,
+            f'block-flip sweep ({n_trials} trials) produced no candidates '
+            f'matching SR>0.30 and activity in [0.05, 0.5].  Try more trials.')
+        return redirect('spoeqi:quine_index')
+
+    saved = 0
+    for k in keepers[:n_keep]:
+        seed = k['seed']
+        sr, c4, act = k['sr'], k['c4'], k['act']
+        block, nblk = k['block'], k['n_blocks']
+        if climb_passes > 0:
+            out = hill_climb_quine(seed, passes=climb_passes,
+                                       sample_size=climb_sample)
+            seed = out['seed']
+            sr, c4, act = out['sr'], out['c4'], out['act']
+        chain = walk_chain(seed, depth=20)
+        arbs = sr_arbitrary_sigma(seed, ticks=16)
+        meta = {
+            'origin':            'block-flip + hill-climb',
+            'sr':                float(sr),
+            'c4':                float(c4),
+            'act':               float(act),
+            'arbsigma':          float(arbs),
+            'class4_run_length': int(chain['class4_run_length']),
+            'block_size':        int(block),
+            'n_blocks':          int(nblk),
+            'climb_passes':      climb_passes,
+            'rng_seed':          rng_seed,
+        }
+        ComponentChampion.objects.create(
+            component_slug=_QUINE_SLUG,
+            rules_blob=seed,
+            rule_names_csv='seed',
+            fitness=float(sr),
+            generation=0,
+            run_label=label,
+            ga_pop_size=0, ga_generations=0,
+            eval_count=n_trials,
+            notes=json.dumps(meta),
+        )
+        saved += 1
+    messages.success(request,
+        f'block-flip sweep: {len(keepers)} candidates / {n_trials} trials, '
+        f'saved top {saved} (climb_passes={climb_passes}).')
+    return redirect('spoeqi:quine_index')
+
+
+@login_required
+def quine_detail(request, pk):
+    """Detail page: chain walk + per-level stats + actions."""
+    from caformer.models import ComponentChampion
+    from spoeqi.metachain import walk_chain
+    c = get_object_or_404(ComponentChampion, pk=pk,
+                            component_slug=_QUINE_SLUG)
+    try:
+        depth = max(5, min(60, int(request.GET.get('depth', 20))))
+    except (TypeError, ValueError):
+        depth = 20
+    seed = bytes(c.rules_blob)
+    walk = walk_chain(seed, depth=depth)
+    return render(request, 'spoeqi/quine_detail.html', {
+        'champion':           c,
+        'meta':               _quine_meta(c),
+        'levels':             walk['levels'],
+        'class4_run_length':  walk['class4_run_length'],
+        'depth':              depth,
+        'seed_size_bytes':    len(seed),
+    })
+
+
+@login_required
+@require_POST
+def quine_refine(request, pk):
+    """Hill-climb a saved candidate further, update in place."""
+    from caformer.models import ComponentChampion
+    from spoeqi.metachain import (
+        hill_climb_quine, walk_chain, sr_arbitrary_sigma)
+    c = get_object_or_404(ComponentChampion, pk=pk,
+                            component_slug=_QUINE_SLUG)
+    def _ci(name, d, lo, hi):
+        try: return max(lo, min(hi, int(request.POST.get(name, d))))
+        except (TypeError, ValueError): return d
+    passes = _ci('passes',      2,   1,    8)
+    sample = _ci('sample',   1024, 128, 4096)
+    out = hill_climb_quine(bytes(c.rules_blob),
+                              passes=passes, sample_size=sample)
+    walk = walk_chain(out['seed'], depth=20)
+    meta = _quine_meta(c)
+    meta.update({
+        'sr':                float(out['sr']),
+        'c4':                float(out['c4']),
+        'act':               float(out['act']),
+        'arbsigma':          float(sr_arbitrary_sigma(out['seed'], ticks=16)),
+        'class4_run_length': int(walk['class4_run_length']),
+        'refined':           True,
+        'refine_passes':     (meta.get('refine_passes', 0) or 0) + passes,
+    })
+    c.rules_blob = out['seed']
+    c.fitness    = float(out['sr'])
+    c.eval_count = (c.eval_count or 0) + passes * sample
+    c.notes      = json.dumps(meta)
+    c.save(update_fields=('rules_blob', 'fitness', 'eval_count', 'notes'))
+    messages.success(request,
+        f'refined #{c.pk}: SR={out["sr"]:.4f}, c4={out["c4"]:.4f}, '
+        f'class-4 chain run={walk["class4_run_length"]} levels.')
+    return redirect('spoeqi:quine_detail', pk=c.pk)
+
+
+@login_required
+@require_POST
+def quine_delete(request, pk):
+    from caformer.models import ComponentChampion
+    c = get_object_or_404(ComponentChampion, pk=pk,
+                            component_slug=_QUINE_SLUG)
+    c.delete()
+    messages.success(request, f'deleted quine candidate #{pk}')
+    return redirect('spoeqi:quine_index')
+
+
+@login_required
+def quine_seed_bytes(request, pk):
+    """Raw 16,384-byte seed download."""
+    from caformer.models import ComponentChampion
+    c = get_object_or_404(ComponentChampion, pk=pk,
+                            component_slug=_QUINE_SLUG)
+    resp = HttpResponse(bytes(c.rules_blob),
+                          content_type='application/octet-stream')
+    resp['Content-Disposition'] = f'attachment; filename="quine-{c.pk}.bin"'
+    return resp
+
+
+@login_required
+@require_POST
+def quine_to_pact(request, pk):
+    """Mint a spoeqi Pact from a saved class-4 quine candidate.
+
+    Modes:
+      ``shared``  — single-rule Pact: all 64 components share this
+                      quine's rule.  Cheap; the rule's class-4 dynamics
+                      drive every component identically.
+      ``mutated`` — single-rule Pact with per-component mutation: this
+                      quine is the base; each component gets a small
+                      deterministic perturbation.  Same diversity model
+                      as the standard Pact ``mutated`` mode but using
+                      a quine instead of a random rule as the base.
+      ``chain``   — fleet Pact built from the metachain: walk 64 levels
+                      from this quine, use level i as component i's rule.
+                      Each component is a *distinct* class-4 rule that
+                      is structurally related to its neighbours (each
+                      level is derived from the previous by the rule's
+                      own dynamics).  Filled with cycle-extension if the
+                      chain closes before 64 levels.
+    """
+    from caformer.models import ComponentChampion
+    from .models import (
+        Pact, RULE_TABLE_SIZE, COMPONENTS, COMPONENT_GRID,
+        COMPONENT_GRID_CHOICES,
+    )
+    from .metachain import chain_seeds
+    import hashlib as _hashlib
+
+    c = get_object_or_404(ComponentChampion, pk=pk,
+                            component_slug=_QUINE_SLUG)
+    mode = (request.POST.get('mode') or 'shared').strip().lower()
+    if mode not in ('shared', 'mutated', 'chain'):
+        mode = 'shared'
+
+    base_rule = bytes(c.rules_blob)
+    if len(base_rule) != RULE_TABLE_SIZE:
+        messages.error(request,
+            f'quine #{c.pk}: rules_blob is {len(base_rule)} bytes, '
+            f'expected {RULE_TABLE_SIZE}.')
+        return redirect('spoeqi:quine_detail', pk=c.pk)
+
+    # Generate a deterministic 64-byte seed_matrix from the rule so
+    # the same quine always seals the same Pact (modulo name + time).
+    seed_matrix = _hashlib.sha512(base_rule).digest()[:COMPONENTS]
+
+    name = (request.POST.get('name') or '').strip()
+    if not name:
+        import time as _t
+        name = f'quine-{c.pk}-{mode}-{int(_t.time()) % 100000}'
+    name = name[:80]
+
+    rule_diversity = mode if mode in ('shared', 'mutated') else 'fleet'
+    rules_snapshot = None
+    fleet_candidate_ids = None
+    rule = base_rule
+    if mode == 'chain':
+        # Walk to 64 levels; if the chain cycles earlier, repeat the
+        # available levels to fill all 64 components.
+        levels = chain_seeds(base_rule, depth=COMPONENTS, ticks_per_level=16)
+        if not levels:
+            messages.error(request, 'chain_seeds returned no levels')
+            return redirect('spoeqi:quine_detail', pk=c.pk)
+        if len(levels) < COMPONENTS:
+            # Tile the chain
+            levels = (levels * ((COMPONENTS // len(levels)) + 1))[:COMPONENTS]
+        rules_snapshot = b''.join(levels)
+        rule = levels[0]  # first chain level as the single-rule default
+
+    # Default palette: same 4-state K=4 anchors as the standard new-pact
+    # form ships with (medium-saturation hexagonal mood).
+    palette = [
+        [40, 50, 70],
+        [220, 100, 60],
+        [120, 180, 200],
+        [240, 220, 110],
+    ]
+
+    pact = Pact(
+        name=name,
+        party_a=(request.POST.get('party_a') or 'Alice').strip()[:40],
+        party_b=(request.POST.get('party_b') or 'Bob').strip()[:40],
+        seed_matrix=seed_matrix,
+        rule_snapshot=rule,
+        rules_snapshot=rules_snapshot,
+        rule_diversity=rule_diversity,
+        mutation_density=1024,
+        palette=palette,
+        clock_model='synced',
+        tick_ms=250,
+        component_grid=COMPONENT_GRID,
+        launch_time=timezone.now(),
+        notes=(f'Minted from class-4 quine candidate #{c.pk} '
+                 f'(mode={mode}). Strict SR={c.fitness:.4f}.\n'
+                 f'See /spoeqi/quine/{c.pk}/ for the source.'),
+        det_candidate=None,
+        fleet_candidate_ids=fleet_candidate_ids,
+        created_by=request.user if request.user.is_authenticated else None,
+    )
+    pact.save()
+    messages.success(request,
+        f'Pact "{pact.name}" sealed from quine #{c.pk} '
+        f'(mode={mode}, diversity={rule_diversity}).')
+    return redirect('spoeqi:detail', slug=pact.slug)
+
+
+# ─── Chain stream miner ──────────────────────────────────────────────
+#
+# 16 KB quine seed → 64 chain levels (each a distinct class-4 CA) →
+# each runs as a deterministic data source.  This is the "compressed
+# database in a small numberset" pattern: the seed is the only thing
+# that needs to be shared, and any consumer can re-expand it to
+# arbitrary amounts of per-level CA data.
+
+
+def _quine_stream_init_seed(quine_pk: int, level: int) -> int:
+    """Deterministic per-level LCG seed so streams are reproducible."""
+    return ((quine_pk * 2654435761) ^ (level * 0x9E3779B1)
+            ^ 0xCA1ED175) & 0xFFFFFFFF
+
+
+@login_required
+def quine_streams(request, pk):
+    """Index page: list every chain level + offer downloads."""
+    from caformer.models import ComponentChampion
+    from .metachain import chain_seeds, classify_rule, probe_activity
+    c = get_object_or_404(ComponentChampion, pk=pk,
+                            component_slug=_QUINE_SLUG)
+    seed = bytes(c.rules_blob)
+    depth = max(1, min(64, int(request.GET.get('depth', 64))))
+    try:
+        ticks = max(1, min(2048, int(request.GET.get('ticks', 64))))
+    except (TypeError, ValueError):
+        ticks = 64
+
+    levels_bytes = chain_seeds(seed, depth=depth, ticks_per_level=16)
+    levels = []
+    for i, rb in enumerate(levels_bytes):
+        cls, c4 = classify_rule(rb, probe_ticks=16)
+        act = probe_activity(rb, ticks=12)
+        levels.append({
+            'level':  i,
+            'cls':    cls,
+            'c4':     c4,
+            'act':    act,
+            'init_seed': _quine_stream_init_seed(c.pk, i),
+            'distinct': i < len(set(levels_bytes[:i + 1])),
+            'tile_of':  None,
+        })
+    # Mark which levels are duplicates (chain cycled and got tiled)
+    seen = {}
+    for i, rb in enumerate(levels_bytes):
+        if rb in seen:
+            levels[i]['tile_of'] = seen[rb]
+        else:
+            seen[rb] = i
+    chain_full_length = len(levels_bytes)
+    bytes_per_level_packed = ticks * 4096    # 4 cells per byte
+    bytes_per_level_raw    = ticks * 16384   # 1 byte per cell
+    total_bytes_packed = depth * bytes_per_level_packed
+    total_bytes_raw    = depth * bytes_per_level_raw
+    return render(request, 'spoeqi/quine_streams.html', {
+        'champion':         c,
+        'levels':           levels,
+        'depth':            depth,
+        'ticks':            ticks,
+        'chain_full':       chain_full_length,
+        'bytes_per_level':  bytes_per_level_packed,
+        'bytes_per_level_packed': bytes_per_level_packed,
+        'bytes_per_level_raw':    bytes_per_level_raw,
+        'total_bytes':      total_bytes_packed,
+        'total_bytes_packed':     total_bytes_packed,
+        'total_bytes_raw':        total_bytes_raw,
+        'seed_bytes':       len(seed),
+    })
+
+
+@login_required
+def quine_stream_download(request, pk, level):
+    """Bytes for one chain level's CA running ``?ticks=N`` ticks from a
+    deterministic init.  Default output is packed K=4 (4 cells per
+    byte; ``ticks × 4,096`` bytes), giving researchers dense 8-bit
+    data instead of mostly-zero 2-bit cells.  Pass ``?raw=1`` to get
+    the unpacked ``ticks × 16,384`` byte stream (one byte per cell,
+    high 6 bits always zero)."""
+    from caformer.models import ComponentChampion
+    from .metachain import chain_seeds, run_ca_stream
+    c = get_object_or_404(ComponentChampion, pk=pk,
+                            component_slug=_QUINE_SLUG)
+    levels = chain_seeds(bytes(c.rules_blob), depth=max(level + 1, 64),
+                            ticks_per_level=16)
+    if level < 0 or level >= len(levels):
+        raise Http404(f'level {level} beyond chain length {len(levels)}')
+    try:
+        ticks = max(1, min(2048, int(request.GET.get('ticks', 64))))
+    except (TypeError, ValueError):
+        ticks = 64
+    raw_mode = request.GET.get('raw', '') in ('1', 'true', 'yes')
+    init_seed = _quine_stream_init_seed(c.pk, level)
+    stream = run_ca_stream(levels[level], init_seed=init_seed, ticks=ticks,
+                              packed=not raw_mode)
+    resp = HttpResponse(stream, content_type='application/octet-stream')
+    tag = 'raw' if raw_mode else 'packed'
+    resp['Content-Disposition'] = (
+        f'attachment; filename="quine-{c.pk}-L{level:02d}-t{ticks}-{tag}.bin"')
+    resp['X-Stream-Init-Seed'] = str(init_seed)
+    resp['X-Stream-Format'] = (
+        'k4-raw-1byte-per-cell' if raw_mode
+        else 'k4-packed-4cells-per-byte (LSB=cell0)')
+    return resp
+
+
+def _quine_default_ansi_palette() -> bytes:
+    """4 ANSI-256 indices matching spoeqi's DEFAULT_PALETTE RGB triples.
+    Used when importing a chain rule into Taxon so the rule has a
+    sensible default render — the user can reroll via taxon UI."""
+    from automaton.packed import nearest_ansi256
+    from spoeqi.models import DEFAULT_PALETTE
+    return bytes(nearest_ansi256(tuple(c)) for c in DEFAULT_PALETTE)
+
+
+@login_required
+def quine_chain_to_taxon(request, pk, level):
+    """Materialise the (quine pk, chain level) rule, import as a Taxon
+    Rule (kind=hex_k4_lut), tag it as a quine with the SR scores and
+    nest depth, then redirect to /taxon/rules/<slug>/.
+
+    Idempotent on the rule's sha1; clicking the same level repeatedly
+    reuses the existing Taxon Rule and just refreshes the classification.
+    """
+    from caformer.models import ComponentChampion
+    from taxon.models import Classification
+    from taxon.importers import upsert_hex_lut
+    from .metachain import (chain_seeds, classify_rule, probe_activity,
+                              sr_arbitrary_sigma, self_reproduce_score,
+                              walk_chain)
+    c = get_object_or_404(ComponentChampion, pk=pk,
+                            component_slug=_QUINE_SLUG)
+    seed = bytes(c.rules_blob)
+    depth = max(1, min(64, level + 1))
+    levels = chain_seeds(seed, depth=max(level + 1, 8), ticks_per_level=16)
+    if level < 0 or level >= len(levels):
+        raise Http404(f'level {level} beyond chain length {len(levels)}')
+    lut = levels[level]
+
+    cls, c4 = classify_rule(lut, probe_ticks=16)
+    act = probe_activity(lut, ticks=12)
+    sr_strict = self_reproduce_score(lut, ticks=16)
+    sr_arbs = sr_arbitrary_sigma(lut, ticks=16)
+    sub_chain = walk_chain(lut, depth=20)
+    nest_depth = int(sub_chain.get('class4_run_length', 0))
+
+    name = f'spoeqi quine #{c.pk} L{level:02d}'
+    rule = upsert_hex_lut(
+        lut, _quine_default_ansi_palette(),
+        name=name, source='spoeqi',
+        source_ref=f'quine={c.pk}; chain_level={level}',
+    )
+    Classification.objects.create(
+        rule=rule, wolfram_class=int(cls),
+        confidence=float(c4),
+        basis_json={'c4': c4, 'activity': act,
+                    'probe_ticks': 16, 'probe_size': 128},
+        is_quine=bool(sr_strict >= 0.30 or sr_arbs >= 0.85),
+        sr_strict=float(sr_strict),
+        sr_arbsigma=float(sr_arbs),
+        nest_depth=nest_depth,
+        quine_origin=f'spoeqi quine #{c.pk} chain L{level}',
+    )
+    return redirect('taxon:rule_detail', slug=rule.slug)
+
+
+@login_required
+def quine_streams_bundle(request, pk):
+    """Zip bundle of every chain level's stream + a manifest JSON.
+
+    The manifest records exactly which seed + LCG init + tick count
+    produced each file, so a consumer with only the seed + manifest
+    can re-derive the entire bundle byte-for-byte.
+    """
+    import io
+    import zipfile
+    from caformer.models import ComponentChampion
+    from .metachain import chain_seeds, run_ca_stream, classify_rule
+    c = get_object_or_404(ComponentChampion, pk=pk,
+                            component_slug=_QUINE_SLUG)
+    depth = max(1, min(64, int(request.GET.get('depth', 64))))
+    try:
+        ticks = max(1, min(512, int(request.GET.get('ticks', 32))))
+    except (TypeError, ValueError):
+        ticks = 32
+    seed = bytes(c.rules_blob)
+    levels = chain_seeds(seed, depth=depth, ticks_per_level=16)
+
+    raw_mode = request.GET.get('raw', '') in ('1', 'true', 'yes')
+    buf = io.BytesIO()
+    manifest = {
+        'quine_pk':       c.pk,
+        'quine_sr':       c.fitness,
+        'seed_size':      len(seed),
+        'chain_depth':    len(levels),
+        'ticks_per_level': ticks,
+        'bytes_per_tick': 16384 if raw_mode else 4096,
+        'stream_format':  (
+            'concatenated post-tick 128x128 grids, one byte per cell, '
+            'K=4 values in [0,3]' if raw_mode else
+            'concatenated post-tick 128x128 grids, packed K=4 — '
+            '4 cells per byte (LSB-first), so each tick = 4,096 bytes'),
+        'levels': [],
+    }
+    with zipfile.ZipFile(buf, mode='w',
+                            compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('seed.bin', seed)
+        for i, rb in enumerate(levels):
+            init_seed = _quine_stream_init_seed(c.pk, i)
+            stream = run_ca_stream(rb, init_seed=init_seed, ticks=ticks,
+                                      packed=not raw_mode)
+            zf.writestr(f'streams/L{i:02d}.bin', stream)
+            cls, c4 = classify_rule(rb, probe_ticks=16)
+            manifest['levels'].append({
+                'level':     i,
+                'init_seed': init_seed,
+                'class':     cls,
+                'c4_score':  c4,
+                'bytes':     len(stream),
+            })
+        zf.writestr('manifest.json', json.dumps(manifest, indent=2))
+
+    payload = buf.getvalue()
+    resp = HttpResponse(payload, content_type='application/zip')
+    resp['Content-Disposition'] = (
+        f'attachment; filename="quine-{c.pk}-streams-d{depth}-t{ticks}.zip"')
+    return resp

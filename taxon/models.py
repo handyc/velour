@@ -26,16 +26,24 @@ from django.utils import timezone
 
 # The genome formats taxon understands.
 # - HXC4: 4,096-byte K=4 packed-positional (the original; what s3lab
-#   classic / cellular / automaton / helix.hexhunt all share).
+#   classic / cellular / automaton / helix.hexhunt all share). Flat-top
+#   hex neighbourhood (self, N, NE, SE, S, SW, NW); 2-bit packing.
 # - HXNN: K-dialable nearest-neighbor used by /hexnn/, stratum, strateta.
 #   Stored as taxon's HXNN blob format: b'HXNN' + u32 K + u32 N_entries
 #   + N*7 keys + N outs. ~131 KB at the canonical N=16384.
+# - HX4L: 16,384-byte K=4 full LUT — one byte per (self, NW, NE, R, SE,
+#   SW, L) neighbourhood. Pointy-top encoding with row-parity neighbour
+#   resolution. Native format of spoeqi.metachain quines and class-4
+#   chain levels. Same K=4 dynamics as HXC4 but a different geometric
+#   tile, so the byte layout is NOT interchangeable with HXC4.
 KIND_HEX_K4_PACKED = 'hex_k4_packed'
 KIND_HEX_NN        = 'hex_nn'
+KIND_HEX_K4_LUT    = 'hex_k4_lut'
 
 KIND_CHOICES = [
     (KIND_HEX_K4_PACKED, 'Hex K=4 packed (HXC4)'),
     (KIND_HEX_NN,        'Hex NN (K-dialable, hexnn-genome / strateta)'),
+    (KIND_HEX_K4_LUT,    'Hex K=4 full LUT (HX4L, spoeqi quine)'),
 ]
 
 
@@ -48,6 +56,7 @@ SOURCE_CHOICES = [
     ('stratum',     'S3 Lab Stratum'),
     ('strateta',    'S3 Lab Strateta'),
     ('hexnn',       'HexNN'),
+    ('spoeqi',      'Spoeqi (quine / metachain)'),
     ('manual',      'Manual upload'),
     ('random',      'Random init'),
     ('mutation',    'Mutation'),
@@ -220,7 +229,17 @@ class MetricRun(models.Model):
 
 
 class Classification(models.Model):
-    """A Wolfram-class assignment with the metric vector that drove it."""
+    """A Wolfram-class assignment with the metric vector that drove it.
+
+    The optional quine-tag fields ride alongside the Wolfram class: a
+    rule is independently "class 4" and "a 3-deep nested quine".
+    ``is_quine`` flips on when ``sr_strict`` ≥ the spoeqi quine
+    threshold (~0.30) under the strict 16-tick self-reproduction
+    metric; ``sr_arbsigma`` records the looser histogram-overlap
+    score; ``nest_depth`` is the chain run length while staying
+    class-4 (i.e. how many successive metachain levels remain
+    quine-ish).
+    """
     rule = models.ForeignKey(
         Rule, on_delete=models.CASCADE, related_name='classifications',
     )
@@ -229,11 +248,37 @@ class Classification(models.Model):
     basis_json = models.JSONField(default=dict, blank=True)
     assigned_at = models.DateTimeField(default=timezone.now)
 
+    is_quine = models.BooleanField(
+        default=False, db_index=True,
+        help_text='True if the rule reproduces its own LUT-as-image '
+                  'under self-application above the SR threshold.',
+    )
+    sr_strict = models.FloatField(
+        null=True, blank=True,
+        help_text='Strict 16-tick Hamming similarity between final '
+                  'state and the rule LUT itself, ∈ [0, 1].',
+    )
+    sr_arbsigma = models.FloatField(
+        null=True, blank=True,
+        help_text='Histogram-overlap similarity (palette/position '
+                  'invariant) — looser σ-quine metric, ∈ [0, 1].',
+    )
+    nest_depth = models.PositiveSmallIntegerField(
+        default=0, db_index=True,
+        help_text='Metachain run length: how many successive nested '
+                  'quine levels stay class-4 before tipping.',
+    )
+    quine_origin = models.CharField(
+        max_length=200, blank=True,
+        help_text='Free-form provenance ("spoeqi quine #42 chain L3").',
+    )
+
     class Meta:
         ordering = ('-assigned_at',)
 
     def __str__(self) -> str:
-        return f'{self.rule.slug} → class {self.wolfram_class}'
+        q = ' (quine)' if self.is_quine else ''
+        return f'{self.rule.slug} → class {self.wolfram_class}{q}'
 
 
 class AutoSearch(models.Model):

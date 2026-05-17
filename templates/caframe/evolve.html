@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}caframe — evolve consistency{% endblock %}
+{% block content %}
+<style>
+  .ev-page { max-width: 70em; }
+  .ev-page h1 { margin: 0 0 4px; }
+  .ev-knobs { display: flex; flex-wrap: wrap; gap: 14px; margin: 12px 0;
+              padding: 12px; background: #0a0a0a; border: 1px solid #1f1f1f; }
+  .ev-knobs label { color: #aaa; font-size: 0.78rem; display: flex;
+                     flex-direction: column; }
+  .ev-knobs input { width: 6em; background: #111; color: #ddd;
+                     border: 1px solid #333; padding: 3px 6px;
+                     font-family: inherit; }
+  .ev-knobs button { background: #1f3f1f; color: #cfc; border: 1px solid #4a8;
+                      padding: 5px 14px; cursor: pointer; font-family: inherit; }
+  .ev-stats { font: 0.82rem ui-monospace, monospace; color: #aaa;
+               margin-top: 12px; }
+  .ev-stats td { padding: 2px 8px; }
+  .ev-stats td:first-child { color: #888; }
+  .ev-stats b { color: #cfa; }
+  .ev-out { margin-top: 16px; display: flex; gap: 18px; flex-wrap: wrap; }
+  .ev-out img { image-rendering: pixelated; max-width: 360px;
+                  border: 1px solid #1f1f1f; background: #050505; }
+</style>
+
+<div class="ev-page">
+  <p><a href="{% url 'caframe:index' %}" style="color:#888;">← caframe</a></p>
+  <h1>Evolve consistency
+    <span style="color:#888; font-weight:400; font-size:0.78rem;">
+      — search (rule_seed, init_seed) for stable-but-not-static video
+    </span>
+  </h1>
+  <p style="color:#aaa; font-size:0.85rem; max-width:50em;">
+    Tiny GA over (rule_seed, init_seed) tuples (just two 32-bit
+    integers; the rule itself is derived from the seed via the
+    standard random_rule_table).  Fitness rewards consistency and
+    penalises distance from a target edge-activity — so the winner
+    is video where most cells stay put each frame but a slow,
+    deliberate trickle of activity keeps it interesting.
+  </p>
+
+  <form id="ev-form" class="ev-knobs" onsubmit="return false;">
+    <label>generations <input type="number" name="n_gen"   value="8"  min="1" max="40"></label>
+    <label>pop size    <input type="number" name="pop_size" value="12" min="2" max="32"></label>
+    <label>w           <input type="number" name="w"        value="32" min="8" max="64"></label>
+    <label>h           <input type="number" name="h"        value="32" min="8" max="64"></label>
+    <label>frames      <input type="number" name="n_frames" value="16" min="2" max="48"></label>
+    <label>seed        <input type="number" name="seed"     value="827514" min="1" max="2147483647"></label>
+    <button type="button" id="ev-go">▶ evolve</button>
+    <span id="ev-status" style="color:#888; font-size:0.78rem; padding-left:8px;
+                                 align-self:center;">idle</span>
+  </form>
+
+  <table class="ev-stats">
+    <tr><td>generation</td><td><b id="s-gen">—</b> / <span id="s-gens">—</span></td></tr>
+    <tr><td>evals</td><td><b id="s-evals">0</b> / <span id="s-totalevals">—</span></td></tr>
+    <tr><td>best fitness</td><td><b id="s-best">—</b></td></tr>
+    <tr><td>elapsed</td><td><b id="s-elapsed">—</b></td></tr>
+  </table>
+
+  <div class="ev-out" id="ev-out" style="display:none;">
+    <img id="ev-preview" alt="winner">
+    <div style="flex:1; min-width:18em;">
+      <p style="color:#aaa; font-size:0.85rem;">
+        rule_seed = <code id="o-rule" style="color:#cfa;">—</code><br>
+        init_seed = <code id="o-init" style="color:#cfa;">—</code><br>
+        consistency = <code id="o-cons" style="color:#cfa;">—</code><br>
+        edge activity = <code id="o-edge" style="color:#cfa;">—</code>
+      </p>
+      <div style="margin-top:8px; display:flex; gap:8px; align-items:end;">
+        <label style="color:#aaa; font-size:0.78rem; display:flex; flex-direction:column;">
+          slug
+          <input type="text" id="save-slug" placeholder="(auto)"
+                 style="width:18em; background:#111; color:#cdf; border:1px solid #333;
+                        padding:3px 6px; font-family:inherit;">
+        </label>
+        <button type="button" id="save-btn"
+                style="background:#1f3f5f; color:#cef; border:1px solid #48a;
+                       padding:5px 12px; cursor:pointer; font-family:inherit;">
+          ⭐ save as Sequence
+        </button>
+      </div>
+      <p id="save-msg" style="color:#888; font-size:0.78rem; margin-top:8px;"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const form = document.getElementById('ev-form');
+  const goBtn = document.getElementById('ev-go');
+  const status = document.getElementById('ev-status');
+  let evtSrc = null;
+  let evals = 0;
+  let lastWinner = null;
+
+  function setStatus(msg, color) {
+    status.textContent = msg;
+    status.style.color = color || '#888';
+  }
+
+  goBtn.addEventListener('click', () => {
+    if (evtSrc) return;
+    evals = 0;
+    document.getElementById('s-evals').textContent = '0';
+    document.getElementById('s-best').textContent  = '—';
+    document.getElementById('ev-out').style.display = 'none';
+    const params = new URLSearchParams();
+    Array.from(form.querySelectorAll('input')).forEach(el => {
+      if (el.name) params.set(el.name, el.value);
+    });
+    const totalGens = parseInt(params.get('n_gen'), 10) || 8;
+    const totalEvals = totalGens * (parseInt(params.get('pop_size'), 10) || 12);
+    document.getElementById('s-gens').textContent = totalGens;
+    document.getElementById('s-totalevals').textContent = totalEvals;
+    setStatus('starting…', '#cfa');
+    goBtn.disabled = true;
+    evtSrc = new EventSource(
+      `{% url 'caframe:evolve_stream' %}?${params}`);
+    evtSrc.addEventListener('individual', e => {
+      const d = JSON.parse(e.data);
+      evals += 1;
+      document.getElementById('s-evals').textContent = evals;
+      document.getElementById('s-elapsed').textContent =
+        (d.elapsed_ms / 1000).toFixed(1) + ' s';
+      setStatus(`gen ${d.gen + 1} ind ${d.ind + 1} · score ${d.score.toFixed(3)}`,
+                 '#cfa');
+    });
+    evtSrc.onmessage = e => {
+      const d = JSON.parse(e.data);
+      document.getElementById('s-gen').textContent  = d.gen + 1;
+      document.getElementById('s-best').textContent = d.best.toFixed(3);
+    };
+    evtSrc.addEventListener('end', e => {
+      const d = JSON.parse(e.data);
+      lastWinner = d;
+      document.getElementById('o-rule').textContent = d.rule_seed;
+      document.getElementById('o-init').textContent = d.init_seed;
+      document.getElementById('o-cons').textContent = d.consistency.toFixed(3);
+      document.getElementById('o-edge').textContent = d.edge_activity.toFixed(3);
+      document.getElementById('ev-preview').src = d.apng_url;
+      document.getElementById('ev-out').style.display = 'flex';
+      setStatus(`done · best ${d.best_fitness.toFixed(3)} · ` +
+                 `${(d.elapsed_ms / 1000).toFixed(1)}s`, '#4ca');
+      goBtn.disabled = false;
+      evtSrc.close(); evtSrc = null;
+    });
+    evtSrc.onerror = () => {
+      setStatus('stream error / disconnected', '#f86');
+      goBtn.disabled = false;
+      if (evtSrc) { evtSrc.close(); evtSrc = null; }
+    };
+  });
+
+  document.getElementById('save-btn').addEventListener('click', async () => {
+    if (!lastWinner) return;
+    const slug = document.getElementById('save-slug').value.trim();
+    const fd = new FormData();
+    fd.append('rule_seed', lastWinner.rule_seed);
+    fd.append('init_seed', lastWinner.init_seed);
+    if (slug) fd.append('slug', slug);
+    const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+    const r = await fetch(`{% url 'caframe:evolve_save' %}`, {
+      method: 'POST', body: fd, headers: {'X-CSRFToken': csrf},
+      credentials: 'same-origin',
+    });
+    const j = await r.json();
+    if (j.ok) {
+      document.getElementById('save-msg').innerHTML =
+        `✓ saved <a href="${j.detail_url}" style="color:#cea;">${j.slug}</a>`;
+    } else {
+      document.getElementById('save-msg').textContent = `error: ${j.error || 'unknown'}`;
+    }
+  });
+})();
+</script>
+{% endblock %}

@@ -60,6 +60,24 @@
       style="width:100%; margin-top:0.5rem;">
 
     <h3 style="margin:0.8rem 0 0.4rem; font-size:0.85rem; color:#8b949e;
+               text-transform:uppercase; letter-spacing:0.05em;">Posterize</h3>
+    <div style="display:flex; gap:0.3rem;">
+      <button id="btn-poster" type="button"
+        style="flex:1; background:#21262d; color:#c9d1d9;
+               border:1px solid #30363d; padding:0.35rem 0.5rem;
+               cursor:pointer; font-size:0.78rem;">
+        🎨 Posterize → 4 colours
+      </button>
+      <button id="btn-poster-reroll" type="button" title="Reroll the 4 colours"
+        style="background:#21262d; color:#c9d1d9; border:1px solid #30363d;
+               padding:0.35rem 0.55rem; cursor:pointer; font-size:0.78rem;">
+        🎲
+      </button>
+    </div>
+    <div id="poster-swatch" style="display:flex; gap:2px; margin-top:0.35rem;
+         height:14px;"></div>
+
+    <h3 style="margin:0.8rem 0 0.4rem; font-size:0.85rem; color:#8b949e;
                text-transform:uppercase; letter-spacing:0.05em;">Fitness</h3>
     <canvas id="fitness-chart" width="280" height="60"
             style="display:block; width:100%; background:#0d1117;
@@ -96,6 +114,9 @@
        style="display:inline-block; background:#238636; color:#fff;
               padding:0.4rem 0.8rem; text-decoration:none;
               font-size:0.8rem;">→ Tile with escher (p6m)</a>
+    <div style="margin-top:0.4rem;">
+      {% include "caframe/_export_button.html" with source="loupe" source_ref=walk.slug label="→ caframe movie" %}
+    </div>
     <div style="color:#888; font-size:0.72rem; margin-top:0.2rem;">
       uses this walk's final frame as a motif under one of the 17
       wallpaper groups (default p6m).
@@ -135,18 +156,29 @@
   const escherBtn = document.getElementById('btn-escher');
   const PRINT_BASE = printBtn ? printBtn.getAttribute('href') : null;
   const ESCHER_BASE = escherBtn ? escherBtn.getAttribute('href') : null;
+  function rgbToHex (rgb) {
+    return rgb.map(v => v.toString(16).padStart(2, '0')).join('');
+  }
+  function posterQS () {
+    // Engine guarantees posterBins is set after a posterize render.
+    if (!eng.posterize || !eng.posterBins) return '';
+    const pal = eng.posterPalette.map(rgbToHex).join(',');
+    return '&poster=1&pal=' + pal +
+           '&bins=' + eng.posterBins.map(b => b.toFixed(3)).join(',');
+  }
   function showStep (k) {
     const s = GENE[Math.max(0, Math.min(GENE.length - 1, k))];
     eng.setView(s.cx, s.cy, s.span);
-    eng.render();
+    eng.render();   // recomputes posterBins for *this* view if posterized.
     rstep.textContent = k;
     rcx.textContent = s.cx.toExponential(4);
     rcy.textContent = s.cy.toExponential(4);
     rspan.textContent = s.span.toExponential(3);
     rfit.textContent = (s.fitness ?? 0).toFixed(3);
     slider.value = k;
+    const pq = posterQS();
     if (printBtn && PRINT_BASE) {
-      printBtn.href = PRINT_BASE + '&step=' + k;
+      printBtn.href = PRINT_BASE + '&step=' + k + pq;
     }
     if (escherBtn && ESCHER_BASE) {
       escherBtn.href = ESCHER_BASE + '&loupe_step=' + k;
@@ -196,6 +228,41 @@
     }
     ctx.stroke();
   })();
+
+  // ── Posterize ──────────────────────────────────────────────────────
+  const posterBtn    = document.getElementById('btn-poster');
+  const posterReroll = document.getElementById('btn-poster-reroll');
+  const posterSwatch = document.getElementById('poster-swatch');
+
+  function paintPosterSwatch () {
+    posterSwatch.innerHTML = '';
+    for (const [r, g, b] of eng.posterPalette) {
+      const d = document.createElement('div');
+      d.style.flex = '1';
+      d.style.background = `rgb(${r},${g},${b})`;
+      posterSwatch.appendChild(d);
+    }
+  }
+  function updatePosterBtn () {
+    posterBtn.textContent = eng.posterize
+      ? '✓ Posterize ON (click to disable)'
+      : '🎨 Posterize → 4 colours';
+    posterBtn.style.background = eng.posterize ? '#1a3a1a' : '#21262d';
+    posterBtn.style.color      = eng.posterize ? '#cfc'    : '#c9d1d9';
+  }
+  paintPosterSwatch();
+  updatePosterBtn();
+  posterBtn.addEventListener('click', () => {
+    eng.posterize = !eng.posterize;
+    updatePosterBtn();
+    showStep(parseInt(slider.value, 10) || 0);
+  });
+  posterReroll.addEventListener('click', () => {
+    eng.rerollPosterPalette();
+    paintPosterSwatch();
+    if (!eng.posterize) { eng.posterize = true; updatePosterBtn(); }
+    showStep(parseInt(slider.value, 10) || 0);
+  });
 
   // Land on the final step initially (matches the thumbnail).
   showStep(GENE.length - 1);

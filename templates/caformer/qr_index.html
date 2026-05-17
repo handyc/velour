@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}Q→R curated training · CAformer{% endblock %}
+{% block content %}
+<style>
+  .qr-page { max-width: 90em; }
+  .qr-page h1 { margin: 0 0 4px; }
+  .qr-intro { color: #aaa; max-width: 70em; font-size: 0.85rem; }
+  .qr-cmd   { background: #050505; border: 1px solid #1f1f1f;
+              padding: 8px 12px; margin: 10px 0; color: #cfa;
+              font-family: ui-monospace, monospace; font-size: 0.78rem;
+              overflow-x: auto; }
+  .qr-add  { margin: 12px 0; padding: 10px 12px; background: #0a1118;
+              border: 1px solid #48a; }
+  .qr-add form { display: flex; flex-wrap: wrap; gap: 8px;
+                  align-items: end; }
+  .qr-add label { color: #aaa; font-size: 0.78rem;
+                   display: flex; flex-direction: column; gap: 2px; }
+  .qr-add input[type="text"] { background: #111; color: #cef;
+                                border: 1px solid #333; padding: 4px 8px;
+                                font-family: inherit; font-size: 0.85rem; }
+  .qr-add input[name="prompt"]   { width: 14em; }
+  .qr-add input[name="expected"] { width: 18em; }
+  .qr-add input[name="label"]    { width: 10em; }
+  .qr-add input[type="number"]   { width: 4em; background: #111;
+                                     color: #cef; border: 1px solid #333;
+                                     padding: 4px 8px; font-family: inherit; }
+  .qr-add button { background: #1f4f1f; color: #cfc;
+                    border: 1px solid #4a8; padding: 5px 14px;
+                    cursor: pointer; font-family: inherit;
+                    font-weight: bold; font-size: 0.85rem; }
+
+  .qr-table { width: 100%; border-collapse: collapse;
+               font: 0.85rem ui-monospace, monospace;
+               background: #0a0a0a; border: 1px solid #1f1f1f; }
+  .qr-table th { color: #888; font-weight: normal;
+                  text-transform: uppercase; font-size: 0.72rem;
+                  letter-spacing: 0.04em; padding: 8px;
+                  text-align: left; border-bottom: 1px solid #1f1f1f; }
+  .qr-table td { padding: 6px 8px; border-bottom: 1px solid #141414; }
+  .qr-table tr:hover td { background: #0d1216; }
+  .qr-prompt { color: #cef; }
+  .qr-arrow { color: #666; }
+  .qr-expected { color: #cfa; }
+  .qr-output  { color: #f86; }
+  .qr-output.exact { color: #6f6; font-weight: bold; }
+  .qr-fit    { color: #cfc; text-align: right; }
+  .qr-meta   { color: #888; font-size: 0.78rem; }
+  .qr-actions form { display: inline; }
+  .qr-actions button { background: #111; color: #aaa;
+                        border: 1px solid #333; padding: 2px 8px;
+                        cursor: pointer; font: inherit; font-size: 0.72rem;
+                        margin-right: 4px; }
+  .qr-actions button.deploy { color: #cfa; border-color: #4a4; }
+  .qr-actions button.reset  { color: #fc8; border-color: #864; }
+  .qr-actions button.delete { color: #f86; border-color: #844; }
+
+  .qr-status-exact { display: inline-block; padding: 1px 6px;
+                      background: #1a3a1a; color: #6f6;
+                      border: 1px solid #4a8; font-size: 0.72rem;
+                      border-radius: 2px; }
+  .qr-status-train { display: inline-block; padding: 1px 6px;
+                      background: #1a1a1a; color: #fc6;
+                      border: 1px solid #864; font-size: 0.72rem;
+                      border-radius: 2px; }
+  .qr-status-fresh { display: inline-block; padding: 1px 6px;
+                      background: #1a1a1a; color: #888;
+                      border: 1px solid #444; font-size: 0.72rem;
+                      border-radius: 2px; }
+</style>
+
+<div class="qr-page">
+  <p><a href="{% url 'caformer:index' %}" style="color:#888;">← caformer</a></p>
+  <h1>Q→R curated training
+    <span style="color:#888; font-weight:400; font-size:0.78rem;">
+      &middot; evolve the model to produce specific responses byte-for-byte
+    </span>
+  </h1>
+  <p class="qr-intro">
+    Each row is a (prompt, expected) pair the trainer will evolve toward.
+    The CLI runs long bursts of GA + polish + random restarts (the
+    inline pipeline-autotrain runs ~30s; this is hours).  Every
+    improvement updates the row in place, so you can deploy the
+    current best as a TrainedModel and chat with it at any time —
+    even mid-training.
+  </p>
+
+  <div class="qr-cmd">
+    # Train a single pair for 1 hour:<br>
+    venv/bin/python manage.py caformer_qr_train --pair-id &lt;PK&gt; --hours 1<br>
+    # Train every pair where best_exact=False, round-robin:<br>
+    venv/bin/python manage.py caformer_qr_train --all-pending --hours 8<br>
+    # Create-and-train in one shot:<br>
+    venv/bin/python manage.py caformer_qr_train --prompt "hi" --expected "hello" --hours 2 --pop 32
+  </div>
+
+  <div class="qr-add">
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="add">
+      <label>prompt <input type="text" name="prompt" placeholder="hi" autofocus></label>
+      <label>expected <input type="text" name="expected" placeholder="hello"></label>
+      <label>n_blocks <input type="number" name="n_blocks" min="1" max="4" value="1"></label>
+      <label>label <input type="text" name="label" placeholder="(optional)"></label>
+      <button type="submit">＋ add pair</button>
+    </form>
+  </div>
+
+  <table class="qr-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>status</th>
+        <th>prompt → expected</th>
+        <th>current output</th>
+        <th>fitness</th>
+        <th>n_blocks</th>
+        <th>evals</th>
+        <th>restarts</th>
+        <th>phase</th>
+        <th>updated</th>
+        <th>actions</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for p in pairs %}
+      <tr>
+        <td class="qr-meta">{{ p.pk }}</td>
+        <td>
+          {% if p.best_exact %}
+            <span class="qr-status-exact">✓ exact</span>
+          {% elif p.best_genome_blob %}
+            <span class="qr-status-train">in progress</span>
+          {% else %}
+            <span class="qr-status-fresh">fresh</span>
+          {% endif %}
+        </td>
+        <td>
+          <span class="qr-prompt">{{ p.prompt }}</span>
+          <span class="qr-arrow">→</span>
+          <span class="qr-expected">{{ p.expected }}</span>
+          {% if p.label %}<span class="qr-meta"> · {{ p.label }}</span>{% endif %}
+        </td>
+        <td>
+          <span class="qr-output {% if p.best_exact %}exact{% endif %}">{{ p.best_output|default:"—" }}</span>
+        </td>
+        <td class="qr-fit">{{ p.best_fitness|floatformat:3 }}</td>
+        <td class="qr-meta">{{ p.n_blocks }}</td>
+        <td class="qr-meta">{{ p.n_evals }}</td>
+        <td class="qr-meta">{{ p.restarts }}</td>
+        <td class="qr-meta">{{ p.last_phase|default:"—" }}</td>
+        <td class="qr-meta">{{ p.updated_at|date:"D d M H:i:s" }}</td>
+        <td class="qr-actions">
+          {% if p.best_genome_blob %}
+          <form method="post" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="deploy">
+            <input type="hidden" name="pk" value="{{ p.pk }}">
+            <button type="submit" class="deploy"
+                    title="Create a TrainedModel from the current best genome so the chat UI can use it.">deploy</button>
+          </form>
+          {% endif %}
+          {% if p.deployed_slug %}
+          <a href="{% url 'caformer:chat' %}?model={{ p.deployed_slug }}"
+             style="color:#cfa; font-size:0.72rem;">
+            chat with {{ p.deployed_slug }} →
+          </a>
+          {% endif %}
+          <form method="post" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="reset">
+            <input type="hidden" name="pk" value="{{ p.pk }}">
+            <button type="submit" class="reset"
+                    title="Clear best genome so the next training run starts fresh.">reset</button>
+          </form>
+          <form method="post" style="display:inline;"
+                onsubmit="return confirm('Delete this pair?');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="pk" value="{{ p.pk }}">
+            <button type="submit" class="delete">delete</button>
+          </form>
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="11" style="color:#666; text-align:center; padding:14px;">
+        no pairs yet — add one above
+      </td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <p style="color:#888; font-size:0.78rem; margin-top:10px;">
+    Auto-refreshes every 5 s so you can watch progress live during a CLI run.
+  </p>
+</div>
+
+<script>
+  // Light-touch poll: refresh the page every 5s when the user is on
+  // the tab so they see trainer progress without manual refresh.
+  if (document.visibilityState === 'visible') {
+    setTimeout(() => location.reload(), 5000);
+  }
+</script>
+{% endblock %}

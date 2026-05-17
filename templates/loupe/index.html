@@ -57,6 +57,31 @@
                padding:0.35rem 0.6rem; cursor:pointer;">▶ Redraw</button>
     </div>
 
+    <div style="margin-top:0.5rem; padding:0.4rem 0.5rem;
+                background:#0d1117; border:1px solid #30363d;
+                border-radius:4px;">
+      <div style="display:flex; gap:0.3rem;">
+        <button id="btn-poster" type="button"
+          style="flex:1; background:#21262d; color:#c9d1d9;
+                 border:1px solid #30363d; padding:0.35rem 0.5rem;
+                 cursor:pointer; font-size:0.78rem;">
+          🎨 Posterize → 4 colours
+        </button>
+        <button id="btn-poster-reroll" type="button" title="Reroll the 4 colours"
+          style="background:#21262d; color:#c9d1d9; border:1px solid #30363d;
+                 padding:0.35rem 0.55rem; cursor:pointer; font-size:0.78rem;">
+          🎲
+        </button>
+      </div>
+      <div id="poster-swatch" style="display:flex; gap:2px; margin-top:0.35rem;
+           height:14px;"></div>
+      <div id="poster-status" style="margin-top:0.25rem; color:#888;
+           font-size:0.7rem;">
+        Maps escape times to 4 quantile buckets — ready to feed into a
+        4-colour CA.
+      </div>
+    </div>
+
     <details style="margin-top:0.4rem;">
       <summary style="cursor:pointer; color:#8b949e;">
         Palette source
@@ -340,9 +365,12 @@
         sample_w: 40, sample_h: 40,
       });
       const gene = agent.run();
-      // Generate a thumbnail of the final state.
+      // Generate a thumbnail of the final state.  Also paint the main
+      // canvas so the user watches each agent's destination land in
+      // turn — honours the posterize flag like everything else.
       const finalView = gene[gene.length - 1];
       eng.setView(finalView.cx, finalView.cy, finalView.span);
+      eng.render();
       const thumb = eng.thumbnail(128, 128)
                        .replace(/^data:image\/png;base64,/, '');
       walks.push({
@@ -425,6 +453,43 @@
 
   // Initial swatch render.
   paintSwatch(DEFAULT_PALETTE);
+
+  // ── Posterize → 4 colours ──────────────────────────────────────────
+  const posterBtn    = document.getElementById('btn-poster');
+  const posterReroll = document.getElementById('btn-poster-reroll');
+  const posterSwatch = document.getElementById('poster-swatch');
+  const posterStatus = document.getElementById('poster-status');
+
+  function paintPosterSwatch () {
+    posterSwatch.innerHTML = '';
+    for (const [r, g, b] of eng.posterPalette) {
+      const d = document.createElement('div');
+      d.style.flex = '1';
+      d.style.background = `rgb(${r},${g},${b})`;
+      posterSwatch.appendChild(d);
+    }
+  }
+  function updatePosterBtn () {
+    posterBtn.textContent = eng.posterize
+      ? '✓ Posterize ON (click to disable)'
+      : '🎨 Posterize → 4 colours';
+    posterBtn.style.background = eng.posterize ? '#1a3a1a' : '#21262d';
+    posterBtn.style.color      = eng.posterize ? '#cfc'    : '#c9d1d9';
+  }
+  paintPosterSwatch();
+  updatePosterBtn();
+
+  posterBtn.addEventListener('click', () => {
+    eng.posterize = !eng.posterize;
+    updatePosterBtn();
+    redraw(true);
+  });
+  posterReroll.addEventListener('click', () => {
+    eng.rerollPosterPalette();
+    paintPosterSwatch();
+    if (eng.posterize) redraw(true);
+    else { eng.posterize = true; updatePosterBtn(); redraw(true); }
+  });
 
   // First paint.
   eng.setView(-0.5, 0.0, 3.0);

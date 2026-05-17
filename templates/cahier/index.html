@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Cahier — notebooks{% endblock %}
+
+{% block content %}
+<style>
+  .cah-page { max-width: 70em; }
+  .cah-page h1 { margin: 0 0 0.3rem 0; }
+  .cah-page .lede { color: #aaa; font-size: 0.9rem;
+                          max-width: 56em; line-height: 1.55; }
+  .nb-list { margin-top: 1rem; display: grid; gap: 0.6rem; }
+  .nb-row { padding: 0.7rem 0.9rem; background: #0d1117;
+              border: 1px solid #234; border-radius: 4px;
+              display: grid; grid-template-columns: 1fr auto;
+              gap: 0.6rem; align-items: center; }
+  .nb-row.pinned { border-left: 3px solid #6ebb50; }
+  .nb-row .title { color: #c9d1d9; font-weight: 500; }
+  .nb-row .title a { color: #79c0ff; text-decoration: none; }
+  .nb-row .summary { color: #8b949e; font-size: 0.85rem;
+                            margin-top: 0.2rem; }
+  .nb-row .meta { color: #6e7681; font-size: 0.78rem;
+                       font-family: ui-monospace, monospace; }
+  .nb-row .tag { display: inline-block; padding: 1px 8px;
+                       background: #21262d; color: #8b949e;
+                       border-radius: 9px; font-size: 0.72rem;
+                       margin-right: 4px; }
+  .nb-row.missing .title a { color: #f9c674; }
+  .nb-row.missing .meta { color: #f9c674; }
+</style>
+
+<div class="cah-page">
+  <h1>Cahier</h1>
+  <p class="lede">
+    Catalogue of Jupyter notebooks that document and replicate Velour
+    experiments. Each entry is a real <code>.ipynb</code> under
+    <code>notebooks/</code> — pull it locally to run, or open the
+    rendered preview here.
+  </p>
+
+  {% if tag_filter %}
+    <p style="font-size:0.85rem; color:#aaa;">
+      filter: <code>{{ tag_filter }}</code> ·
+      <a href="{% url 'cahier:index' %}" style="color:#79c0ff;">clear</a>
+    </p>
+  {% endif %}
+
+  <div class="nb-list">
+    {% for r in rows %}
+      <div class="nb-row {% if r.project.pinned %}pinned{% endif %} {% if not r.exists %}missing{% endif %}">
+        <div>
+          <div class="title">
+            <a href="{% url 'cahier:detail' slug=r.project.slug %}">{{ r.project.title }}</a>
+            {% if r.project.pinned %}<span style="color:#6ebb50;">★</span>{% endif %}
+          </div>
+          {% if r.project.summary %}
+          <div class="summary">{{ r.project.summary }}</div>
+          {% endif %}
+          <div class="meta">
+            {% for t in r.project.tag_list %}
+              <a class="tag" href="?tag={{ t }}" style="text-decoration:none;">{{ t }}</a>
+            {% endfor %}
+            · <code>{{ r.project.path }}</code>
+            {% if r.exists %} · {{ r.size_kb|floatformat:1 }} KB
+            {% else %} · <b>file missing</b>{% endif %}
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:4px; text-align:right;">
+          <a href="{% url 'cahier:detail' slug=r.project.slug %}"
+              style="color:#79c0ff; font-size:0.85rem;">preview →</a>
+          {% if r.exists %}
+          <a href="{% url 'cahier:download' slug=r.project.slug %}"
+              style="color:#8b949e; font-size:0.78rem;">⬇ .ipynb</a>
+          {% endif %}
+        </div>
+      </div>
+    {% empty %}
+      <p style="color:#888;">No notebooks catalogued yet. Add a
+      <code>NotebookProject</code> row in the admin, or run
+      <code>manage.py cahier_seed</code>.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

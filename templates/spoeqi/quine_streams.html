@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}spoeqi — quine #{{ champion.pk }} streams{% endblock %}
+{% block content %}
+<style>
+  .qs-page { max-width: 70em; }
+  .qs-page h1 { margin: 0 0 0.3rem 0; }
+  .qs-page p.lede { color: #aaa; font-size: 0.9rem; max-width: 56em; }
+  .qs-page .stats { display: grid; grid-template-columns: auto 1fr;
+                       gap: 0.2rem 0.8rem; margin: 0.6rem 0 1rem 0;
+                       font-family: ui-monospace, monospace; font-size: 0.85rem;
+                       max-width: 38em; }
+  .qs-page .stats dt { color: #8b949e; }
+  .qs-page .stats dd { color: #c9d1d9; margin: 0; }
+  .qs-form { display: flex; gap: 0.6rem; align-items: center;
+                 flex-wrap: wrap; margin: 0.8rem 0;
+                 padding: 0.6rem 0.8rem; background: #0d1117;
+                 border: 1px solid #234; }
+  .qs-form label { color: #8b949e; font-size: 0.85rem; }
+  .qs-form input[type=number] { width: 4.5rem; background: #0d1117;
+                                     color: #c9d1d9; border: 1px solid #30363d;
+                                     padding: 0.2rem 0.4rem; }
+  .qs-form button, .qs-form a.btn-bundle {
+    background: #5a4cbd; color: #fff; border: 0;
+    padding: 0.3rem 0.9rem; cursor: pointer;
+    font-family: inherit; font-size: 0.85rem;
+    text-decoration: none;
+  }
+  .qs-grid { display: grid;
+                grid-template-columns: repeat(8, 1fr);
+                gap: 0.4rem; margin-top: 0.6rem; }
+  .qs-cell { background: #0d1117; border: 1px solid #234;
+                padding: 0.4rem 0.5rem; font-family: ui-monospace, monospace;
+                font-size: 0.78rem; line-height: 1.4; }
+  .qs-cell.c4 { border-color: #2a6b3a; background: rgba(110, 187, 80, 0.06); }
+  .qs-cell.tile { opacity: 0.55; }
+  .qs-cell .lvl { color: #79c0ff; font-weight: 600; font-size: 0.85rem; }
+  .qs-cell .cls-4 { color: #7ee787; }
+  .qs-cell .cls-3 { color: #f9c674; }
+  .qs-cell .cls-2 { color: #79c0ff; }
+  .qs-cell .cls-1 { color: #888; }
+  .qs-cell .tag { color: #8b949e; }
+  .qs-cell a.dl { display: block; margin-top: 0.3rem;
+                    color: #79c0ff; text-decoration: none; }
+  .qs-cell a.tx { display: block; margin-top: 0.15rem;
+                    color: #cfa; text-decoration: none; }
+  .qs-cell a.tx:hover { color: #efd; }
+  .qs-back { color: #79c0ff; text-decoration: none; font-size: 0.85rem; }
+</style>
+
+<div class="qs-page">
+  <p><a class="qs-back" href="{% url 'spoeqi:quine_detail' pk=champion.pk %}">← back to quine #{{ champion.pk }}</a></p>
+  <h1>chain streams — quine #{{ champion.pk }}</h1>
+  <p class="lede">
+    A 16 KB quine seed unfolds into {{ chain_full }} distinct chain levels,
+    each its own class-4 CA.  Run each level for N ticks on a
+    deterministic LCG init → you get a reproducible byte stream.
+    Streams are emitted <b>packed</b> by default — 4 K=4 cells per byte,
+    so every output bit varies and the file is real 8-bit data, not
+    mostly-zero 2-bit cells.  The whole {{ depth }}-level × {{ ticks }}-tick
+    bundle is <b>{{ total_bytes_packed|floatformat:0 }} bytes packed</b>
+    (or {{ total_bytes_raw|floatformat:0 }} raw), from {{ seed_bytes }}
+    bytes of seed — expansion ratio
+    <b>{{ total_bytes_packed|stringformat:"d" }}÷{{ seed_bytes|stringformat:"d" }}</b>.
+    Append <code>?raw=1</code> to any download URL to get the unpacked
+    1-byte-per-cell form.
+  </p>
+
+  <dl class="stats">
+    <dt>chain depth (distinct levels)</dt> <dd>{{ chain_full }}</dd>
+    <dt>levels shown</dt>                   <dd>{{ depth }}</dd>
+    <dt>ticks per level</dt>                <dd>{{ ticks }}</dd>
+    <dt>bytes per level (packed / raw)</dt>
+        <dd>{{ bytes_per_level_packed }} / {{ bytes_per_level_raw }}</dd>
+    <dt>total stream size (packed / raw)</dt>
+        <dd>{{ total_bytes_packed }} / {{ total_bytes_raw }} bytes</dd>
+    <dt>seed size</dt>                      <dd>{{ seed_bytes }} bytes</dd>
+  </dl>
+
+  <form class="qs-form" method="get">
+    <label>depth (max 64)
+      <input type="number" name="depth" value="{{ depth }}" min="1" max="64">
+    </label>
+    <label>ticks per level (max 2048)
+      <input type="number" name="ticks" value="{{ ticks }}" min="1" max="2048">
+    </label>
+    <button type="submit">apply</button>
+    <a class="btn-bundle"
+        href="{% url 'spoeqi:quine_streams_bundle' pk=champion.pk %}?depth={{ depth }}&ticks={{ ticks }}">
+      📦 download bundle.zip (all {{ depth }} levels + manifest.json)
+    </a>
+  </form>
+
+  <div class="qs-grid">
+  {% for l in levels %}
+    <div class="qs-cell{% if l.cls == 4 %} c4{% endif %}{% if l.tile_of is not None %} tile{% endif %}">
+      <span class="lvl">L{{ l.level }}</span>
+      <span class="cls-{{ l.cls }}">cls={{ l.cls }}</span>
+      <span class="tag">c4={{ l.c4|floatformat:3 }}</span>
+      <span class="tag">act={{ l.act|floatformat:3 }}</span>
+      {% if l.tile_of is not None %}
+        <div class="tag">↺ tile of L{{ l.tile_of }}</div>
+      {% endif %}
+      <a class="dl"
+          href="{% url 'spoeqi:quine_stream_download' pk=champion.pk level=l.level %}?ticks={{ ticks }}">
+        ⬇ L{{ l.level }}.bin
+      </a>
+      <a class="tx"
+          href="{% url 'spoeqi:quine_chain_to_taxon' pk=champion.pk level=l.level %}"
+          title="Import this rule into Taxon and open its live view (classified + tagged as a quine).">
+        ⌕ view in Taxon
+      </a>
+    </div>
+  {% endfor %}
+  </div>
+
+  <p style="color:#888; font-size:0.82rem; margin-top:1rem;">
+    Each per-level <code>.bin</code> is <code>ticks × 16,384</code> bytes:
+    one full 128×128 K=4 hex CA grid per tick, concatenated post-step.
+    Deterministic in <code>(quine_pk, level, ticks)</code> — the
+    consumer only needs the quine seed + manifest to re-derive every byte.
+    The bundle's <code>manifest.json</code> records each level's
+    LCG <code>init_seed</code>, class, and c4 score.
+  </p>
+</div>
+{% endblock %}

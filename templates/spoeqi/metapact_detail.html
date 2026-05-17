@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}{{ metapact.slug }} — metapact{% endblock %}
+{% block content %}
+<style>
+  .mp-detail { max-width:80em; }
+  .lvl-grid { display:grid; grid-template-columns:repeat(auto-fit,
+              minmax(8em,1fr)); gap:8px; margin-top:10px; }
+  .lvl-card { background:#0a0a0a; border:1px solid #1f1f1f;
+               padding:6px; font:0.76rem ui-monospace, monospace;
+               color:#aaa; }
+  .lvl-card .lvl-num { color:#888; }
+  .lvl-card .cls {
+      display:inline-block; padding:1px 6px; font-size:0.72rem;
+      border:1px solid; border-radius:2px; margin-left:4px; }
+  .cls-4 { color:#6f6; border-color:#4a4; }
+  .cls-3 { color:#fc6; border-color:#963; }
+  .cls-2 { color:#88f; border-color:#446; }
+  .cls-1 { color:#888; border-color:#444; }
+  .lvl-card .score { color:#cfa; }
+</style>
+
+<div class="mp-detail">
+  <p>
+    <a href="{% url 'spoeqi:metapact_list' %}" style="color:#888;">← metapacts</a>
+  </p>
+  <h1 style="margin-bottom:4px;">
+    {{ metapact.name }}
+    <span style="color:#888; font-weight:400; font-size:0.78rem;">
+      (slug <code>{{ metapact.slug }}</code>, depth {{ metapact.depth }},
+       ticks {{ metapact.chain_ticks }})
+    </span>
+  </h1>
+  <p style="color:#aaa; font-size:0.85rem;">
+    {% if metapact.notes %}{{ metapact.notes }}<br>{% endif %}
+    Chain quality (sum of class-4 scores): <b style="color:#cfa;">
+      {{ chain.chain_quality|floatformat:3 }}</b>;
+    class-4 prefix depth: <b style="color:#cfa;">
+      {{ chain.depth_class4 }}</b> of {{ chain.depth }}.
+    {% if metapact.parent_seed %}
+      Came out of a GA over <code>{{ metapact.ga_generations }}g × {{ metapact.ga_pop_size }}p</code>.
+    {% endif %}
+  </p>
+
+  <p style="margin-top:8px; font-size:0.82rem;">
+    <a href="{% url 'spoeqi:metapact_chat' slug=metapact.slug %}"
+       style="background:#1f3f3f; color:#cef; border:1px solid #4aa;
+              padding:5px 12px; text-decoration:none;">
+      💬 chat with derived CAformer
+    </a>
+    &nbsp;
+    <a href="{% url 'spoeqi:metapact_evolve' slug=metapact.slug %}"
+       style="background:#1f3f1f; color:#cfc; border:1px solid #4a8;
+              padding:5px 12px; text-decoration:none;">
+      🧬 evolve a child metapact
+    </a>
+    &nbsp;
+    <a href="{% url 'spoeqi:metapact_bytes' slug=metapact.slug %}"
+       style="background:#1f1f4f; color:#cdf; border:1px solid #48a;
+              padding:5px 12px; text-decoration:none;">
+      ⤓ download chain bytes ({{ chain.depth }}×16,384 = {{ chain.depth|add:'-1' }}…)
+    </a>
+    &nbsp;
+    {% include "caframe/_export_button.html" with source="spoeqi" source_ref=metapact.slug label="→ caframe movie" %}
+  </p>
+
+  <h2 style="font-size:0.9rem; color:#888; text-transform:uppercase;
+              letter-spacing:0.06em; font-weight:normal; margin-top:18px;">
+    Chain levels (state → next-level rule)
+  </h2>
+  <div class="lvl-grid">
+    {% for lvl, cls, score in levels %}
+      <div class="lvl-card">
+        <span class="lvl-num">L{{ lvl }}</span>
+        <span class="cls cls-{{ cls }}">class {{ cls }}</span>
+        <span class="score">{{ score|floatformat:3 }}</span>
+      </div>
+    {% endfor %}
+  </div>
+
+  <h2 style="font-size:0.9rem; color:#888; text-transform:uppercase;
+              letter-spacing:0.06em; font-weight:normal; margin-top:18px;">
+    Leaf probe corpus
+  </h2>
+  <pre style="white-space:pre-wrap; color:#aaa; background:#0a0a0a;
+              border:1px solid #1f1f1f; padding:10px; font-size:0.8rem;">{{ metapact.leaf_probe }}</pre>
+
+  <form method="post" action="{% url 'spoeqi:metapact_delete' slug=metapact.slug %}"
+        style="margin-top:18px;">
+    {% csrf_token %}
+    <button type="submit"
+            style="background:#221; color:#caa; border:1px solid #533;
+                   padding:4px 10px; cursor:pointer; font-family:inherit;
+                   font-size:0.78rem;">delete</button>
+  </form>
+</div>
+{% endblock %}

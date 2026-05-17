@@ -583,6 +583,62 @@ class ChainStageResult:
     cells:       List[dict]
 
 
+def derive_chain_gene(pact: Pact, *, generation: int = 0,
+                       prefer_mode: str | None = None
+                       ) -> List[ChainStage]:
+    """Derive a 64-element chain gene from the pact: one (mode, mapping)
+    task per component, picked deterministically from a meta-tap of the
+    pact's CA bytes.  Two researchers running the same pact get the
+    same gene, so the chain reveals the *same* per-component behaviour
+    on either side of the seal.
+
+    Each stage's ``component`` index is its position in the chain (0..63).
+    Each stage's ``generation`` is the generation passed to this call —
+    so the gene encodes *which task each component does*, while
+    ``generation`` controls *what state the task draws from*.
+
+    ``prefer_mode``:
+        None    — pick char vs token by coin flip on the gene byte
+        'char'  — force every stage to char mode
+        'token' — force every stage to token mode
+
+    The gene is derived in its own keystream domain so the bytes don't
+    collide with any existing tap (LoRA, MoE, envelope, default)."""
+    from . import keystream
+    from .models import COMPONENTS
+
+    char_names  = list(MAPPING_TABLES.keys())
+    token_names = list(TOKEN_MAPPING_TABLES.keys())
+    if not char_names or not token_names:
+        raise RuntimeError(
+            'cannot derive chain gene: empty mapping registry — '
+            'register at least one char + one token mapping first')
+
+    # Two bytes per component: one to pick the mode, one to pick the
+    # mapping within that mode.  Using a dedicated domain so this gene
+    # tap never collides with an envelope, LoRA, or router tap.
+    raw = keystream.tap(pact, component=0, generation=0,
+                         n_bytes=COMPONENTS * 2,
+                         domain=b'spoeqi-chain-gene/1')
+
+    stages: List[ChainStage] = []
+    for i in range(COMPONENTS):
+        mode_byte    = raw[i * 2]
+        mapping_byte = raw[i * 2 + 1]
+        if prefer_mode == 'char':
+            mode = 'char'
+        elif prefer_mode == 'token':
+            mode = 'token'
+        else:
+            mode = 'token' if (mode_byte & 1) else 'char'
+        names = token_names if mode == 'token' else char_names
+        mapping = names[mapping_byte % len(names)]
+        stages.append(ChainStage(
+            mode=mode, mapping=mapping,
+            component=i, generation=generation))
+    return stages
+
+
 def apply_chain(pact: Pact, stages: List[ChainStage], text: str
                 ) -> List[ChainStageResult]:
     """Apply each stage in order; the output_text of stage K becomes

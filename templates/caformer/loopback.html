@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Loopback · CAformer{% endblock %}
+{% block content %}
+<style>
+  .lb-page  { max-width: 1100px; padding: 0 1rem; color: #c9d1d9;
+              font-family: ui-monospace, Menlo, monospace; }
+  .lb-card  { background: #0a0a0a; border: 1px solid #1f1f1f;
+              padding: 12px 14px; margin-bottom: 12px; }
+  .lb-card h2 { font-size: 0.95rem; margin: 0 0 6px; color: #cea; }
+  .lb-knobs { display: grid; grid-template-columns: repeat(4, 1fr);
+              gap: 8px 12px; font-size: 0.78rem; color: #8b949e; }
+  .lb-knobs input, .lb-knobs select {
+              width: 100%; background: #111; color: #ddd;
+              border: 1px solid #333; padding: 4px 8px;
+              font-family: inherit; font-size: 0.85rem;
+              box-sizing: border-box; }
+  .lb-card  textarea { width: 100%; min-height: 80px; box-sizing: border-box;
+              background: #111; color: #ddd; border: 1px solid #333;
+              padding: 6px 10px; font-family: inherit; font-size: 0.85rem; }
+  .lb-go    { background: #1f4f1f; color: #cfc; border: 1px solid #4a8;
+              padding: 8px 16px; cursor: pointer; font-family: inherit;
+              font-size: 0.9rem; margin-top: 8px; }
+  .lb-go:disabled { opacity: 0.5; cursor: wait; }
+  .lb-meta  { color: #888; font-size: 0.82rem; }
+  .lb-meta code { color: #cea; }
+  .lb-iter  { background: #111; border-left: 3px solid #234;
+              padding: 6px 10px; margin: 6px 0; }
+  .lb-iter .head { color: #888; font-size: 0.72rem;
+                   display: flex; gap: 1em; align-items: baseline; }
+  .lb-iter .head .score { color: #cfa; font-weight: bold; }
+  .lb-iter pre { margin: 4px 0 0; padding: 6px 8px; background: #0a0a0a;
+                  color: #ddd; font-family: ui-monospace, monospace;
+                  font-size: 0.82rem; white-space: pre-wrap;
+                  word-break: break-all; }
+  .lb-iter .match { background: rgba(80, 180, 90, 0.15);
+                     border-bottom: 1px dotted #4a8; }
+  .lb-iter .match.long { background: rgba(80, 180, 90, 0.40); }
+  .lb-summary { padding: 10px; background: #0a0a0a;
+                border-left: 3px solid #4a8; color: #cfa;
+                font-size: 0.85rem; }
+  .lb-summary b { color: #fff; }
+</style>
+
+<div class="lb-page">
+<p><a href="{% url 'caformer:index' %}" style="color:#888;">← caformer</a></p>
+<h1 style="margin-bottom:4px;">Loopback iteration viewer
+  <span style="color:#888;font-weight:400;font-size:0.78rem;">
+    — does the genome stay in corpus-space when you feed output back in?
+  </span>
+</h1>
+<p class="lb-meta">
+  Sliding-window feedback: last <code>context_len</code> bytes of each
+  iteration's output become the next iteration's prompt. Each output
+  is scored by <b>longest-match n-gram</b> against the corpus — for
+  every position, find the longest substring that appears anywhere in
+  the corpus. A real attractor genome keeps scoring high across
+  iterations; a random genome drifts to noise within 1–2 hops.
+</p>
+
+<form id="lb-form" class="lb-card" onsubmit="return false;">
+  <h2>Genome + corpus</h2>
+  <div class="lb-knobs">
+    <label>TrainedModel
+      <select name="model_slug">
+        <option value="">(random rules)</option>
+        {% for m in trained %}
+        <option value="{{ m.slug }}">{{ m.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>n_iterations <input type="number" name="n_iterations"
+        value="3" min="1" max="8"></label>
+    <label>generate_len <input type="number" name="generate_len"
+        value="16" min="4" max="64"></label>
+    <label>context_len <input type="number" name="context_len"
+        value="32" min="8" max="128"></label>
+    <label>n_blocks <input type="number" name="n_blocks"
+        value="1" min="1" max="2"></label>
+    <label>temperature <input type="number" name="temperature"
+        value="0.8" min="0" max="5" step="0.1"></label>
+    <label>prompt (optional)
+      <input type="text" name="prompt" placeholder="(corpus[:32])"></label>
+  </div>
+  <h2 style="margin-top:10px;">Corpus</h2>
+  <textarea name="corpus" placeholder="(paste any text — blank uses Shakespeare sonnets)"></textarea>
+  <button class="lb-go" type="submit" id="lb-go">run iteration</button>
+  <span id="lb-status" style="color:#888;font-size:0.78rem;
+        margin-left:10px;"></span>
+</form>
+
+<div id="lb-result" style="display:none;">
+  <div class="lb-summary" id="lb-summary"></div>
+  <div id="lb-iters"></div>
+</div>
+
+<details class="lb-card" style="margin-top:10px;">
+  <summary style="cursor:pointer;color:#cea;">Bundled Shakespeare excerpt</summary>
+  <pre style="color:#aaa;font-size:0.78rem;white-space:pre-wrap;">{{ shakespeare_excerpt|escape }}…</pre>
+</details>
+</div>
+
+<script>
+(function () {
+  const form    = document.getElementById('lb-form');
+  const goBtn   = document.getElementById('lb-go');
+  const status  = document.getElementById('lb-status');
+  const result  = document.getElementById('lb-result');
+  const summary = document.getElementById('lb-summary');
+  const itersEl = document.getElementById('lb-iters');
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c =>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // Wrap each text byte in a span whose class encodes the longest-match
+  // length at that position, so CSS can colour-grade matched stretches.
+  function paintText(text, lms) {
+    if (!lms || !lms.length) return escapeHtml(text);
+    const out = [];
+    for (let i = 0; i < text.length; i++) {
+      const k = (i < lms.length) ? lms[i] : 0;
+      const ch = escapeHtml(text[i]);
+      if (k >= 4) out.push(`<span class="match long">${ch}</span>`);
+      else if (k >= 2) out.push(`<span class="match">${ch}</span>`);
+      else out.push(ch);
+    }
+    return out.join('');
+  }
+
+  function getCsrf() {
+    const m = document.cookie.match(/csrftoken=([^;]+)/);
+    return m ? m[1] : '';
+  }
+
+  form.addEventListener('submit', async () => {
+    goBtn.disabled = true;
+    status.textContent = 'running iteration…';
+    result.style.display = 'none';
+    const fd = new FormData(form);
+    try {
+      const r = await fetch('{% url "caformer:loopback_iterate" %}', {
+        method: 'POST', body: fd,
+        headers: {'X-CSRFToken': getCsrf()},
+      });
+      const data = await r.json();
+      if (data.error) throw new Error(data.error);
+      renderResult(data);
+      status.textContent = `done in ${data.elapsed_ms} ms`;
+    } catch (exc) {
+      status.textContent = 'error: ' + exc.message;
+    } finally {
+      goBtn.disabled = false;
+    }
+  });
+
+  function renderResult(d) {
+    result.style.display = '';
+    const c = d.config;
+    summary.innerHTML =
+      `<b>${escapeHtml(d.model)}</b> on ${d.corpus_bytes}-byte corpus · ` +
+      `weighted-mean (loop closure) <b>${d.weighted_score}</b> · ` +
+      `mean ${d.avg_score} · ` +
+      `${c.n_iterations}×${c.generate_len} tokens, ` +
+      `ctx=${c.context_len}, blocks=${c.n_blocks}, T=${c.temperature}`;
+    const parts = [];
+    parts.push(`<div class="lb-iter" style="border-color:#444;">` +
+      `<div class="head"><span>prompt</span></div>` +
+      `<pre>${escapeHtml(d.prompt)}</pre></div>`);
+    for (const it of d.trajectory) {
+      const scoreColour =
+        it.score > 0.3 ? '#cfa' :
+        it.score > 0.1 ? '#fea' :
+                          '#f88';
+      parts.push(
+        `<div class="lb-iter">` +
+        `<div class="head">` +
+          `<span>iteration ${it.i}</span>` +
+          `<span class="score" style="color:${scoreColour}">` +
+            `score ${it.score}</span>` +
+        `</div>` +
+        `<pre>${paintText(it.text, it.lms)}</pre>` +
+        `</div>`);
+    }
+    itersEl.innerHTML = parts.join('');
+  }
+})();
+</script>
+{% endblock %}

@@ -27,6 +27,7 @@ from .llm_lora import (
     derive_lora,
     find_weight,
     keystream_gaussians,
+    load_backbone,
 )
 from .models import Pact
 
@@ -90,14 +91,7 @@ def generate_moe(pact: Pact, prompt: str, *,
     """
     if target_weight is None:
         target_weight = default_target_weight(model_name)
-    from transformers import AutoTokenizer, AutoModelForCausalLM
-    tok = AutoTokenizer.from_pretrained(model_name)
-    if tok.pad_token_id is None:
-        tok.pad_token = tok.eos_token
-    model = AutoModelForCausalLM.from_pretrained(model_name)
-    if device is not None:
-        model = model.to(device)
-    model.eval()
+    tok, model = load_backbone(model_name, device=device)
 
     weight = find_weight(model, target_weight)
     shape = (weight.shape[0], weight.shape[1])

@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Internalize corpus · CAformer{% endblock %}
+{% block content %}
+<style>
+  .iz-page  { max-width: 1100px; padding: 0 1rem; color: #c9d1d9;
+              font-family: ui-monospace, Menlo, monospace; }
+  .iz-grid  { display: grid; grid-template-columns: 1fr 320px;
+              gap: 20px; align-items: start; }
+  @media (max-width: 760px) { .iz-grid { grid-template-columns: 1fr; } }
+  .iz-card  { background: #0a0a0a; border: 1px solid #1f1f1f;
+              padding: 14px 16px; margin-bottom: 14px; }
+  .iz-card h2 { font-size: 1rem; margin: 0 0 6px; color: #cea; }
+  .iz-card  textarea { width: 100%; min-height: 180px; box-sizing: border-box;
+              background: #111; color: #ddd; border: 1px solid #333;
+              padding: 8px 10px; font-family: inherit; font-size: 0.85rem; }
+  .iz-card  input[type=text], .iz-card input[type=number] {
+              background: #111; color: #ddd; border: 1px solid #333;
+              padding: 4px 8px; font-family: inherit; font-size: 0.85rem; }
+  .iz-card  label { color: #888; font-size: 0.78rem; display: block;
+              margin: 8px 0 2px; }
+  .iz-knobs { display: grid; grid-template-columns: repeat(3, 1fr);
+              gap: 8px 14px; }
+  .iz-methods { display: flex; gap: 10px; margin: 6px 0 4px; }
+  .iz-methods label { background: #111; border: 1px solid #2a2a2a;
+              padding: 6px 10px; cursor: pointer; }
+  .iz-methods input[type=radio] { margin-right: 6px; }
+  .iz-go    { background: #1f4f1f; color: #cfc; border: 1px solid #4a8;
+              padding: 8px 16px; cursor: pointer; font-family: inherit;
+              font-size: 0.9rem; margin-top: 10px; }
+  .iz-meta  { color: #888; font-size: 0.82rem; }
+  .iz-meta code { color: #cea; }
+  .iz-recent li { color: #aaa; margin: 2px 0; }
+  .iz-recent a  { color: #ace; }
+  pre.iz-shake  { background: #0a0a0a; border: 1px solid #1f1f1f;
+                  color: #aaa; padding: 10px; font-size: 0.78rem;
+                  max-height: 140px; overflow-y: auto;
+                  white-space: pre-wrap; }
+</style>
+
+<div class="iz-page">
+<p><a href="{% url 'caformer:index' %}" style="color:#888;">← caformer</a></p>
+<h1 style="margin-bottom:4px;">Internalize corpus → CA
+  <span style="color:#888;font-weight:400;font-size:0.78rem;">
+    — no GA, no SGD, no backprop
+  </span>
+</h1>
+<p class="iz-meta">
+  Two CA-native methods for getting a text corpus <em>into</em> a
+  CAformer without training. Both run in seconds and produce a
+  <code>TrainedModel</code> you can immediately chat with.
+</p>
+
+<div class="iz-grid">
+<form method="post" enctype="multipart/form-data" class="iz-card">
+  {% csrf_token %}
+  <h2>1. Pick a method</h2>
+  <div class="iz-methods">
+    <label><input type="radio" name="method" value="ngram" checked>
+      <b>n-gram bake</b> → <code>output_rule</code></label>
+    <label><input type="radio" name="method" value="metachain">
+      <b>metachain seed</b> → all 10 rules</label>
+  </div>
+  <p class="iz-meta" style="margin:4px 0 12px;">
+    <b>n-gram bake</b>: walk the corpus, count which next-byte bucket
+    follows each 7-byte CA-colour context, argmax → <code>output_rule</code>.
+    Other 9 rules stay random. Biases the model toward the corpus's
+    byte-transition statistics.<br>
+    <b>metachain seed</b>: SHA-stretch the corpus into a 16,384-byte
+    seed, run <code>spoeqi.metachain.metachain_expand</code> to derive
+    all 10 rule tables. The corpus IS the recipe.
+  </p>
+
+  <h2>2. Corpus</h2>
+  <label>Paste text (leave blank to use the bundled Shakespeare sonnets)</label>
+  <textarea name="corpus" placeholder="(paste anything — Shakespeare, code, your chat log…)"></textarea>
+  <label style="margin-top:8px;">…or upload a .txt file</label>
+  <input type="file" name="upload" accept=".txt,.md,.py,.csv,.json"
+         style="color:#ccc;">
+
+  <h2>3. Knobs</h2>
+  <div class="iz-knobs">
+    <label>name (display)
+      <input type="text" name="name" value="shakespeare-sonnets"></label>
+    <label>slug (URL)
+      <input type="text" name="slug" placeholder="(auto)"></label>
+    <label>context bytes (n-gram only)
+      <input type="number" name="context_bytes" min="1" max="7" value="7"></label>
+    <label>depth (metachain only)
+      <input type="number" name="depth" min="1" max="20" value="10"></label>
+    <label>chain ticks (metachain only)
+      <input type="number" name="chain_ticks" min="1" max="64" value="20"></label>
+  </div>
+
+  <button class="iz-go" type="submit">internalize → chat ⟶</button>
+</form>
+
+<aside>
+  <div class="iz-card">
+    <h2>Bundled corpus preview</h2>
+    <p class="iz-meta" style="margin:2px 0 8px;">
+      Six Shakespeare sonnets (~3.8 KB, public domain). Submit with an
+      empty textarea to use this.
+    </p>
+    <pre class="iz-shake">{{ shakespeare_excerpt|escape }}…</pre>
+  </div>
+  <div class="iz-card">
+    <h2>Recent TrainedModels</h2>
+    {% if recent %}
+    <ul class="iz-recent" style="padding-left:18px;margin:6px 0;">
+      {% for m in recent %}
+      <li><a href="{% url 'caformer:chat' %}?model={{ m.slug }}">{{ m.name }}</a>
+          <span style="color:#666;font-size:0.72rem;">{{ m.slug }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="iz-meta">none yet — internalize one to start.</p>
+    {% endif %}
+  </div>
+</aside>
+</div>
+
+<p class="iz-meta" style="margin-top:14px;">
+  Why this is "non-normal training": no loss, no gradient, no
+  iteration. The corpus is read once and either tallied into a LUT
+  (method 1) or hashed into a seed (method 2). Both produce
+  byte-identical models for the same input — re-run them on ALICE,
+  on your laptop, anywhere; same bytes out.
+</p>
+</div>
+{% endblock %}

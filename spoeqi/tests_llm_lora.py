@@ -170,6 +170,51 @@ class KeystreamDomainTest(TestCase):
         self.assertEqual(a, b)
 
 
+class MinGPTBackboneTest(TestCase):
+    """The minGPT entries are routed by name prefix instead of HF lookup,
+    so the registry plumbing is exercisable without an actual GPT-2
+    download."""
+
+    def test_registered_in_default_targets(self):
+        # All four sizes should land at the conventional last-block path.
+        self.assertEqual(
+            llm_lora.DEFAULT_TARGETS['karpathy/minGPT-gpt2'],
+            'transformer.h.11.attn.c_proj.weight')
+        self.assertEqual(
+            llm_lora.DEFAULT_TARGETS['karpathy/minGPT-gpt2-medium'],
+            'transformer.h.23.attn.c_proj.weight')
+
+    def test_appears_in_known_models(self):
+        names = llm_lora.list_known_models()
+        self.assertIn('karpathy/minGPT-gpt2', names)
+        self.assertIn('karpathy/minGPT-gpt2-xl', names)
+
+    def test_is_mingpt_name(self):
+        self.assertTrue(llm_lora.is_mingpt_name('karpathy/minGPT-gpt2'))
+        self.assertTrue(llm_lora.is_mingpt_name('karpathy/minGPT-gpt2-xl'))
+        self.assertFalse(llm_lora.is_mingpt_name('gpt2'))
+        self.assertFalse(llm_lora.is_mingpt_name('TinyLlama/TinyLlama-1.1B-Chat-v1.0'))
+
+    def test_adapter_exposes_hf_surface(self):
+        # Build a tiny minGPT (gpt-nano = 3 layers) so we don't pull a
+        # real GPT-2 checkpoint just to exercise the adapter shape.
+        from spoeqi.vendor.mingpt_model import GPT
+        cfg = GPT.get_default_config()
+        cfg.model_type = 'gpt-nano'
+        cfg.vocab_size = 100
+        cfg.block_size = 16
+        gpt = GPT(cfg)
+        adapter = llm_lora._MinGPTHFAdapter(gpt).eval()
+
+        ids = torch.randint(0, 100, (1, 8))
+        out = adapter(input_ids=ids)
+        self.assertEqual(out.logits.shape, (1, 8, 100))
+
+        # gpt-nano has 3 blocks, so the last-block path is .h.2.
+        w = llm_lora.find_weight(adapter, 'transformer.h.2.attn.c_proj.weight')
+        self.assertEqual(w.dim(), 2)
+
+
 class FindWeightTest(TestCase):
     def test_dotted_path_resolves(self):
         m = torch.nn.Sequential(

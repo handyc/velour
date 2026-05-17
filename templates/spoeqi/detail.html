@@ -68,9 +68,13 @@
   <a class="badge" style="color:#cfc; text-decoration:none;"
      href="{% url 'spoeqi:chain' pact.slug %}"
      title="Chain multiple textmask stages — pipeline preprocessing for the LLM">chain →</a>
+  {% include "caframe/_export_button.html" with source="spoeqi" source_ref=pact.slug label="→ caframe movie" %}
   <a class="badge" style="color:#cfc; text-decoration:none;"
      href="{% url 'spoeqi:evolve' pact.slug %}"
      title="Evolve populations of head ensembles via GA over textmask transforms">evolve →</a>
+  <a class="badge" style="color:#fc6; text-decoration:none;"
+     href="{% url 'spoeqi:workspace' pact.slug %}"
+     title="Per-pact 4096-byte runnable ELFs — same pact + tick → byte-identical binary">workspace →</a>
 </div>
 
 <p class="spoeqi-meta" style="max-width: 64em;">
@@ -118,6 +122,62 @@
   <span>edge-of-chaos score <b id="r-edge">—</b> <span id="r-spark"></span></span>
 </div>
 
+<form action="{% url 'gridprint:print' %}" method="get" target="_blank"
+      style="margin-top:10px; padding:8px 12px; border:1px solid #1f1f1f;
+             background:#0a0a0a; display:flex; gap:8px; align-items:center;
+             flex-wrap:wrap; font-size:0.78rem; color:#888;">
+  <span style="color:#cfa;">🖨️ Print one CA on A4</span>
+  <input type="hidden" name="pattern"        value="spoeqi_ca">
+  <input type="hidden" name="from_spoeqi_ca" value="{{ pact.slug }}">
+  <label>component
+    <input type="number" name="component"  min="0" max="63" value="0"
+           style="width:4em; background:#111; color:#ddd;
+                  border:1px solid #333; padding:2px 4px;">
+  </label>
+  <label>grid
+    <input type="number" name="grid_w"     min="64" max="2048" step="64" value="1024"
+           style="width:5em; background:#111; color:#ddd;
+                  border:1px solid #333; padding:2px 4px;">
+  </label>
+  <label>ticks
+    <input type="number" name="iterations" min="0" max="512" value="64"
+           style="width:4em; background:#111; color:#ddd;
+                  border:1px solid #333; padding:2px 4px;">
+  </label>
+  <label>seed
+    <input type="number" name="init_seed"  min="0" max="2147483647" value="42"
+           style="width:6em; background:#111; color:#ddd;
+                  border:1px solid #333; padding:2px 4px;">
+  </label>
+  {% comment %}
+    Optional: replace the random init seed with the 4-colour
+    posterised final image of a loupe Mandelbrot walk.  When set,
+    overrides ``init_seed`` server-side so the CA evolves from the
+    Mandelbrot bands instead of LCG noise.  Empty default = "use seed".
+  {% endcomment %}
+  {% if recent_walks %}
+  <label>or loupe walk
+    <select name="from_loupe_walk"
+            style="background:#111; color:#ddd;
+                   border:1px solid #333; padding:2px 4px;
+                   max-width:14em;">
+      <option value="">— random seed —</option>
+      {% for w in recent_walks %}
+      <option value="{{ w.slug }}">{{ w.name|default:w.slug|truncatechars:32 }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  <label style="display:flex; align-items:center; gap:0.3em;">
+    <input type="checkbox" name="landscape" value="1"> landscape
+  </label>
+  <button type="submit"
+          style="background:#1f4f1f; color:#cfc; border:1px solid #4a8;
+                 padding:4px 12px; cursor:pointer; font-family:inherit;">
+    print →
+  </button>
+</form>
+
 {% if fleet_legend %}
 <details open style="margin-top: 18px;">
   <summary style="color:#ace;">Fleet roster — 64 independent Hexhunt rules</summary>
@@ -139,6 +199,17 @@
          title="{% if row.score %}score {{ row.score|floatformat:2 }} · {{ row.est_class }} · {{ row.n_rules }} rules{% else %}candidate removed{% endif %}"
         >#{{ row.candidate_id }}</a>
       {% if row.score %}<span style="color: #666;">·{{ row.score|floatformat:1 }}</span>{% endif %}
+      {% comment %}
+        Per-component gridprint shortcut: same _spoeqi_ca_svg target as
+        the form below the canvas, but pre-populated with this row's
+        component index so the user can print one of the 64 rulesets
+        directly from the fleet legend.
+      {% endcomment %}
+      <a href="{% url 'gridprint:print' %}?pattern=spoeqi_ca&from_spoeqi_ca={{ pact.slug }}&component={{ forloop.counter0 }}&grid_w=1024&iterations=64&init_seed=42"
+         target="_blank" rel="noopener"
+         title="Print this component as A4"
+         style="color: #cfa; text-decoration: none; margin-left: 4px;"
+         >🖨️</a>
     </div>
     {% endfor %}
   </div>

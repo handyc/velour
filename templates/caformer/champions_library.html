@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Champion library · CAformer{% endblock %}
+{% block content %}
+<style>
+  .lib-page { max-width: 90em; }
+  .lib-page h1 { margin: 0 0 4px; }
+  .lib-meta { color: #aaa; font-size: 0.85rem; max-width: 70em; }
+  .lib-filters { display: flex; flex-wrap: wrap; gap: 6px;
+                  margin: 12px 0; padding: 8px 12px;
+                  background: #0a0a0a; border: 1px solid #1f1f1f;
+                  font-size: 0.78rem; }
+  .lib-filters a { color: #888; text-decoration: none;
+                    padding: 3px 8px; border: 1px solid #222;
+                    background: #050505; }
+  .lib-filters a:hover { color: #cfa; border-color: #4a4; }
+  .lib-filters a.active { color: #cfa; background: #0a1a14;
+                           border-color: #4a8; }
+  .lib-filters .group { display: flex; gap: 2px; align-items: center; }
+  .lib-filters .group .lbl { color: #666; font-size: 0.72rem;
+                              margin-right: 4px; }
+
+  .lib-table { width: 100%; border-collapse: collapse;
+                font: 0.78rem ui-monospace, monospace; color: #aaa; }
+  .lib-table th { color: #888; font-weight: normal;
+                   text-transform: uppercase; font-size: 0.7rem;
+                   letter-spacing: 0.04em; padding: 6px 8px;
+                   text-align: left; border-bottom: 1px solid #1f1f1f; }
+  .lib-table td { padding: 4px 8px; border-bottom: 1px solid #141414; }
+  .lib-table tr:hover td { background: #0a0a0a; }
+  .lib-table .pk { color: #666; }
+  .lib-table .slug { color: #cfa; }
+  .lib-table .fit { color: #cfc; text-align: right; }
+  .lib-table .fit.neg { color: #f86; }
+  .lib-table .gen { color: #ace; text-align: right; }
+  .lib-table .label { color: #aaa; }
+  .lib-table .ts { color: #666; }
+  .lib-table .lineage { color: #888; }
+
+  .lib-pager { margin-top: 14px; padding: 8px 12px;
+                background: #0a0a0a; border: 1px solid #1f1f1f;
+                font: 0.78rem ui-monospace, monospace; color: #aaa; }
+  .lib-pager a { color: #cfa; text-decoration: none; padding: 2px 6px; }
+  .lib-pager a:hover { background: #0a1a14; }
+  .lib-pager .cur { color: #fff; padding: 2px 6px; background: #1f4f1f; }
+</style>
+
+<div class="lib-page">
+  <p>
+    <a href="{% url 'caformer:champions' %}" style="color:#888;">← champions leaderboard</a>
+    &middot;
+    <a href="{% url 'caformer:index' %}" style="color:#888;">caformer</a>
+  </p>
+  <h1>Champion library
+    <span style="color:#888; font-weight:400; font-size:0.78rem;">
+      &middot; <strong style="color:#cfa;">{{ total }}</strong> champions across
+      <strong style="color:#cfa;">{{ specs|length }}</strong> component types
+    </span>
+  </h1>
+  <p class="lib-meta">
+    Every <code>ComponentChampion</code> row: the bytes of a CA bundle
+    + the cycle that produced it.  Run the autotournament with
+    <code>--save-all</code> (or <code>?save_all=1</code> in the SSE
+    stream URL) to save every individual, not just parent-beating ones.
+    Target library size: <strong>65,536</strong>.
+  </p>
+
+  <div class="lib-filters">
+    <div class="group">
+      <span class="lbl">component</span>
+      <a href="?{% if cur_label %}label={{ cur_label }}&{% endif %}sort={{ cur_sort }}"
+         class="{% if not cur_slug %}active{% endif %}">all</a>
+      {% for spec in specs %}
+        <a href="?component={{ spec.slug }}{% if cur_label %}&label={{ cur_label }}{% endif %}&sort={{ cur_sort }}"
+           class="{% if cur_slug == spec.slug %}active{% endif %}"
+           title="{{ spec.description }} · {{ spec.count }} saved">{{ spec.slug }}
+          <span style="color:#666;">({{ spec.count }})</span>
+        </a>
+      {% endfor %}
+    </div>
+    <div class="group" style="margin-left:auto;">
+      <span class="lbl">sort</span>
+      <a href="?{% if cur_slug %}component={{ cur_slug }}&{% endif %}{% if cur_label %}label={{ cur_label }}&{% endif %}sort=recent"
+         class="{% if cur_sort == 'recent' %}active{% endif %}">recent</a>
+      <a href="?{% if cur_slug %}component={{ cur_slug }}&{% endif %}{% if cur_label %}label={{ cur_label }}&{% endif %}sort=fitness"
+         class="{% if cur_sort == 'fitness' %}active{% endif %}">fitness</a>
+      <a href="?{% if cur_slug %}component={{ cur_slug }}&{% endif %}{% if cur_label %}label={{ cur_label }}&{% endif %}sort=lineage"
+         class="{% if cur_sort == 'lineage' %}active{% endif %}">lineage</a>
+      <a href="?{% if cur_slug %}component={{ cur_slug }}&{% endif %}{% if cur_label %}label={{ cur_label }}&{% endif %}sort=oldest"
+         class="{% if cur_sort == 'oldest' %}active{% endif %}">oldest</a>
+    </div>
+  </div>
+
+  <table class="lib-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>component</th>
+        <th>fitness</th>
+        <th>gen</th>
+        <th>run</th>
+        <th>saved</th>
+        <th>rules</th>
+        <th>lineage</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for c in page %}
+      <tr>
+        <td class="pk">{{ c.pk }}</td>
+        <td class="slug">{{ c.component_slug }}</td>
+        <td class="fit {% if c.fitness < 0 %}neg{% endif %}">{{ c.fitness|floatformat:4 }}</td>
+        <td class="gen">g{{ c.generation }}</td>
+        <td class="label">{{ c.run_label|default:"—" }}</td>
+        <td class="ts">{{ c.created_at|date:"d M H:i:s" }}</td>
+        <td><code style="color:#888;font-size:0.72rem;">{{ c.rule_names_csv }}</code></td>
+        <td class="lineage">
+          {% if c.parent_id %}
+            <a style="color:#aaa;"
+               href="?{% if cur_slug %}component={{ cur_slug }}&{% endif %}sort=lineage#row-{{ c.parent_id }}"
+               title="parent">↑ #{{ c.parent_id }}</a>
+          {% else %}
+            <span style="color:#555;">root</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="8" style="color:#666; text-align:center; padding:14px;">
+        no champions yet — run the autotournament
+      </td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="lib-pager">
+    page {{ page.number }} of {{ paginator.num_pages }} ·
+    {{ paginator.count }} total
+    {% if page.has_previous %}
+      <a href="?{% if cur_slug %}component={{ cur_slug }}&{% endif %}{% if cur_label %}label={{ cur_label }}&{% endif %}sort={{ cur_sort }}&page=1">⏮ first</a>
+      <a href="?{% if cur_slug %}component={{ cur_slug }}&{% endif %}{% if cur_label %}label={{ cur_label }}&{% endif %}sort={{ cur_sort }}&page={{ page.previous_page_number }}">◀ prev</a>
+    {% endif %}
+    {% if page.has_next %}
+      <a href="?{% if cur_slug %}component={{ cur_slug }}&{% endif %}{% if cur_label %}label={{ cur_label }}&{% endif %}sort={{ cur_sort }}&page={{ page.next_page_number }}">next ▶</a>
+      <a href="?{% if cur_slug %}component={{ cur_slug }}&{% endif %}{% if cur_label %}label={{ cur_label }}&{% endif %}sort={{ cur_sort }}&page={{ paginator.num_pages }}">last ⏭</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

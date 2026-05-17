@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}spoeqi — quine #{{ champion.pk }}{% endblock %}
+{% block content %}
+<style>
+  .qd-page { max-width: 64em; }
+  .qd-page h1 { margin: 0 0 0.3rem 0; }
+  .qd-stats { display: grid; grid-template-columns: auto 1fr;
+                 gap: 0.2rem 0.8rem; margin: 0.6rem 0 1rem 0;
+                 font-family: ui-monospace, monospace; font-size: 0.85rem;
+                 max-width: 30em; }
+  .qd-stats dt { color: #8b949e; }
+  .qd-stats dd { color: #c9d1d9; margin: 0; }
+  .qd-actions { display: flex; gap: 0.6rem; align-items: center;
+                    flex-wrap: wrap; margin: 0.6rem 0 1rem 0; }
+  .qd-actions form { display: inline-flex; gap: 0.4rem; align-items: center;
+                         padding: 0.4rem 0.6rem; background: #0d1117;
+                         border: 1px solid #234; }
+  .qd-actions label { color: #8b949e; font-size: 0.82rem; }
+  .qd-actions input[type=number] { width: 4rem; background: #0d1117;
+                                         color: #c9d1d9; border: 1px solid #30363d;
+                                         padding: 0.15rem 0.3rem; }
+  .qd-actions button { background: #1f6feb; color: #fff; border: 0;
+                            padding: 0.25rem 0.7rem; cursor: pointer;
+                            font-family: inherit; font-size: 0.85rem; }
+  .qd-actions button.danger { background: #6e2b34; }
+  .qd-actions a.btn { color: #79c0ff; padding: 0.25rem 0.5rem;
+                         border: 1px solid #234; text-decoration: none;
+                         font-size: 0.85rem; }
+  .qd-table { width: 100%; border-collapse: collapse;
+                  font-size: 0.85rem; font-family: ui-monospace, monospace; }
+  .qd-table th, .qd-table td { padding: 0.25rem 0.5rem;
+                                       border-bottom: 1px solid #21262d;
+                                       text-align: right; }
+  .qd-table th { color: #8b949e; text-transform: uppercase;
+                      font-size: 0.65rem; letter-spacing: 0.05em; }
+  .qd-table td.hist { text-align: left; color: #aaa; font-size: 0.78rem; }
+  .qd-table tr.c4 td { background: rgba(110, 187, 80, 0.06); }
+  .qd-table tr.cycle td { background: rgba(245, 165, 36, 0.12); color: #f9c674; }
+  .qd-msg { color: #cfa; font-size: 0.85rem;
+                padding: 0.5rem 0.8rem; background: #112; border: 1px solid #234;
+                margin: 0.6rem 0; }
+  .qd-back { color: #79c0ff; text-decoration: none; font-size: 0.85rem; }
+</style>
+
+<div class="qd-page">
+  <p><a class="qd-back" href="{% url 'spoeqi:quine_index' %}">← all quines</a></p>
+  <h1>quine #{{ champion.pk }}
+    <span style="color:#7ee787; font-family:ui-monospace,monospace;
+                  font-size:1rem; font-weight:400;">
+      SR={{ champion.fitness|floatformat:4 }}
+    </span>
+  </h1>
+
+  {% if messages %}
+    {% for m in messages %}<div class="qd-msg">{{ m }}</div>{% endfor %}
+  {% endif %}
+
+  <dl class="qd-stats">
+    <dt>strict SR @16 ticks</dt>      <dd>{{ champion.fitness|floatformat:4 }}</dd>
+    <dt>SR (arbitrary σ)</dt>          <dd>{{ meta.arbsigma|default_if_none:0|floatformat:4 }}</dd>
+    <dt>class-4 score</dt>             <dd>{{ meta.c4|default_if_none:0|floatformat:4 }}</dd>
+    <dt>probe activity</dt>            <dd>{{ meta.act|default_if_none:0|floatformat:4 }}</dd>
+    <dt>class-4 chain run length</dt>  <dd>{{ class4_run_length }} levels</dd>
+    <dt>origin</dt>                    <dd>{{ meta.origin|default:"?" }}</dd>
+    <dt>refined</dt>                   <dd>
+      {% if meta.refined %}{{ meta.refine_passes|default:"?" }} hill-climb passes{% else %}—{% endif %}
+    </dd>
+    <dt>created</dt>                   <dd>{{ champion.created_at|date:"D d M Y H:i" }}</dd>
+    <dt>seed size</dt>                 <dd>{{ seed_size_bytes }} bytes</dd>
+  </dl>
+
+  <div class="qd-actions">
+    <form method="post" action="{% url 'spoeqi:quine_refine' pk=champion.pk %}">
+      {% csrf_token %}
+      <label>refine passes
+        <input type="number" name="passes" value="2" min="1" max="8">
+      </label>
+      <label>sample
+        <input type="number" name="sample" value="1024" min="128" max="4096" step="128">
+      </label>
+      <button type="submit">▶ hill-climb</button>
+    </form>
+    <a class="btn" href="{% url 'spoeqi:quine_seed_bytes' pk=champion.pk %}">
+      ⬇ download seed.bin
+    </a>
+    <a class="btn" href="{% url 'spoeqi:quine_streams' pk=champion.pk %}"
+        style="color:#cfa; border-color:#345;"
+        title="64 nested class-4 CAs as deterministic data streams — the 'compressed database in a small numberset' surface">
+      ⛏ chain streams (64 CAs)
+    </a>
+    <form method="post" action="{% url 'spoeqi:quine_delete' pk=champion.pk %}"
+            onsubmit="return confirm('Delete quine #{{ champion.pk }}?');">
+      {% csrf_token %}
+      <button type="submit" class="danger">✕ delete</button>
+    </form>
+  </div>
+
+  <div class="qd-actions" style="border-top:1px solid #234; padding-top:0.8rem;
+                                    margin-top:0.4rem;">
+    <span style="color:#cfa; font-size:0.85rem; padding-right:0.4rem;">
+      → mint a spoeqi Pact from this quine:
+    </span>
+    <form method="post" action="{% url 'spoeqi:quine_to_pact' pk=champion.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="mode" value="shared">
+      <button type="submit"
+              title="All 64 components share this quine's rule (cheapest, every component same dynamic)">
+        ▶ shared Pact
+      </button>
+    </form>
+    <form method="post" action="{% url 'spoeqi:quine_to_pact' pk=champion.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="mode" value="mutated">
+      <button type="submit"
+              title="This quine is the base rule; each of 64 components gets a small deterministic perturbation">
+        ▶ mutated Pact
+      </button>
+    </form>
+    <form method="post" action="{% url 'spoeqi:quine_to_pact' pk=champion.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="mode" value="chain">
+      <button type="submit" style="background:#5a4cbd;"
+              title="Walk the metachain for 64 levels and use each level as one component's rule — 64 structurally-related class-4 rules in one Pact (fleet diversity)">
+        ▶ chain Pact (fleet of 64 chain levels)
+      </button>
+    </form>
+  </div>
+
+  <h2 style="margin-top:1.4rem; font-size:1.0rem;">
+    metachain walk
+    <span style="color:#8b949e; font-weight:400; font-size:0.85rem;">
+      (depth = {{ depth }} levels;
+      <a href="?depth=40" style="color:#79c0ff;">40</a> |
+      <a href="?depth=60" style="color:#79c0ff;">60</a>)
+    </span>
+  </h2>
+  <table class="qd-table">
+    <thead>
+      <tr>
+        <th>L</th>
+        <th>cls</th>
+        <th>SR<sub>strict</sub></th>
+        <th>SR<sub>arbσ</sub></th>
+        <th>c4</th>
+        <th>act</th>
+        <th class="hist" style="text-align:left;">histogram (0/1/2/3)</th>
+        <th>cycle?</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for l in levels %}
+      <tr{% if l.cycle_period %} class="cycle"{% elif l.class == 4 %} class="c4"{% endif %}>
+        <td>{{ l.level }}</td>
+        <td>{{ l.class }}</td>
+        <td>{{ l.sr_strict|floatformat:4 }}</td>
+        <td>{{ l.sr_arbsigma|floatformat:4 }}</td>
+        <td>{{ l.c4|floatformat:4 }}</td>
+        <td>{{ l.act|floatformat:4 }}</td>
+        <td class="hist">{{ l.histogram }}</td>
+        <td>{% if l.cycle_period %}period {{ l.cycle_period }}{% else %}—{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p style="color:#888; font-size:0.82rem; margin-top:0.8rem;">
+    Green rows are class-4 (heuristic).  Amber row marks the cycle
+    closure if the chain enters a periodic orbit before the walk depth.
+    <code>SR<sub>arbσ</sub></code> ≥ 0.85 + class=4 + activity ∈ [0.05, 0.7]
+    counts toward the chain run length.
+  </p>
+</div>
+{% endblock %}

@@ -1,0 +1,518 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}CA pipeline — live{% endblock %}
+{% block content %}
+<style>
+  /* Page sized to fit the whole 8-CA panel on a single screen
+     without scrolling — knobs + grid + reply + autotrain all visible. */
+  .pp-page { max-width: 100em; }
+  .pp-page h1 { margin: 0 0 2px; font-size: 1.25rem; }
+  .pp-intro { color: #888; max-width: 70em; font-size: 0.78rem;
+               margin: 0 0 8px; }
+  .pp-knobs { display:flex; flex-wrap:wrap; gap:10px; align-items:end;
+              margin:6px 0 8px; padding:6px 10px; background:#0a0a0a;
+              border:1px solid #1f1f1f; font-size:0.76rem; }
+  .pp-knobs label { color:#aaa;
+                    display:flex; flex-direction:column; gap:1px; }
+  .pp-knobs input[type="text"], .pp-knobs select { background:#111; color:#ddd;
+                    border:1px solid #333; padding:2px 6px;
+                    font-family:inherit; font-size:0.82rem; }
+  .pp-knobs input[type="number"] { width:4em; background:#111; color:#ddd;
+                    border:1px solid #333; padding:2px 6px;
+                    font-family:inherit; font-size:0.82rem; }
+  .pp-knobs input[type="text"]   { width:14em; }
+  .pp-go   { background:#1f4f1f; color:#cfc; border:1px solid #4a8;
+              padding:4px 10px; cursor:pointer; font-weight:bold;
+              font-size:0.78rem; }
+  .pp-stop { background:#4f1f1f; color:#fcc; border:1px solid #a48;
+              padding:4px 10px; cursor:pointer; font-size:0.78rem; }
+  .pp-status { color:#888; font-size:0.74rem; padding-left:6px;
+               flex:1; text-align:right; }
+
+  /* Tiny live-strip: every trace board as a thumbnail.  Width-capped
+     to ~14em (matches the query input) so it sits naturally below the
+     knobs row.  Thumbnails autoscale via grid 1fr so the whole strip
+     stays inside the cap regardless of trace length (depends on
+     n_blocks; default n_blocks=1 → 13, n_blocks=2 → 23). */
+  .pp-thumbrow { display:flex; align-items:center; gap:8px;
+                  margin:4px 0 8px; padding:4px 6px;
+                  background:#0a0a0a; border:1px solid #1f1f1f; }
+  .pp-thumbrow .pp-thumblead { color:#cfa; font-size:0.7rem;
+                                 font-family:ui-monospace,monospace;
+                                 text-transform:uppercase;
+                                 letter-spacing:0.04em; }
+  .pp-thumbstrip { display:grid;
+                    grid-auto-flow:column; grid-auto-columns:1fr;
+                    gap:1px; padding:2px; background:#000;
+                    border:1px solid #333;
+                    /* Width-capped to ~14em (matches the query input) so
+                       the whole pipeline-per-token sits on one bar.
+                       Height 2em so each thumbnail is visible as a
+                       little colour-stripe even at 13/23/33 columns. */
+                    width:14em; min-width:14em; max-width:14em;
+                    height:2em; }
+  .pp-thumbstrip canvas { display:block; width:100%; height:100%;
+                            image-rendering:pixelated; background:#1a1a1a; }
+  .pp-thumbstrip canvas.active { outline:1px solid #cfa; }
+  .pp-thumblabel { color:#888; font-size:0.7rem;
+                    font-family:ui-monospace,monospace; }
+
+  /* 4x2 panel grid — fits typical 1080p with knobs + reply visible. */
+  .pp-grid { display:grid; gap:6px; margin:6px 0;
+             grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width:780px) { .pp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .pp-cell { padding:4px 6px; background:#0a0a0a; border:1px solid #1f1f1f;
+              display:flex; flex-direction:column; min-width:0; }
+  .pp-cell h3 { color:#cfa; font-size:0.7rem; font-weight:normal; margin:0;
+                 text-transform:uppercase; letter-spacing:0.04em;
+                 display:flex; justify-content:space-between; align-items:center; }
+  .pp-cell h3 .ruletag { color:#666; font-family:ui-monospace,monospace;
+                          font-size:0.62rem; }
+  .pp-cell canvas { display:block; background:#050505; border:1px solid #161616;
+                     width:100%; height:auto; image-rendering:pixelated;
+                     margin-top:3px; }
+  .pp-cell.active { border-color:#cfa; box-shadow:0 0 0 1px #cfa; }
+
+  /* Lower row: reply + autotrain side-by-side. */
+  .pp-bottom { display:grid; gap:10px; margin-top:8px;
+                grid-template-columns: 1fr 1.2fr; }
+  @media (max-width:780px) { .pp-bottom { grid-template-columns: 1fr; } }
+  .pp-reply-box, .pp-train-box { padding:8px 10px; background:#0a0a0a;
+                                   border:1px solid #1f1f1f; }
+  .pp-reply-box h4, .pp-train-box h4 {
+                color:#888; font-size:0.7rem; margin:0 0 4px;
+                text-transform:uppercase; letter-spacing:0.04em;
+                font-weight:normal; }
+  .pp-reply { font:0.95rem ui-monospace,monospace; color:#fff;
+               min-height:1.4em; word-break:break-all; }
+  .pp-replychar { display:inline-block; margin-right:1px; padding:0 2px; }
+  .pp-replychar.fresh { background:#1a3a1a; }
+
+  .pp-train-row { display:flex; gap:6px; align-items:end; flex-wrap:wrap; }
+  .pp-train-row label { color:#aaa; font-size:0.74rem;
+                         display:flex; flex-direction:column; gap:1px; }
+  .pp-train-row input { background:#111; color:#cfa; border:1px solid #333;
+                         padding:2px 6px; font-family:inherit; font-size:0.82rem; }
+  .pp-train-row input[type="text"] { width:14em; }
+  .pp-train-row input[type="number"] { width:4em; }
+  .pp-train-go   { background:#1f3f5f; color:#cef; border:1px solid #48a;
+                    padding:4px 10px; cursor:pointer; font-weight:bold;
+                    font-size:0.78rem; }
+  .pp-train-save { background:#1f4f1f; color:#cfc; border:1px solid #4a8;
+                    padding:4px 10px; cursor:pointer; font-size:0.78rem; }
+  .pp-train-stop { background:#4f1f1f; color:#fcc; border:1px solid #a48;
+                    padding:4px 10px; cursor:pointer; font-size:0.78rem; }
+  .pp-train-status { color:#888; font-size:0.74rem; flex-basis:100%;
+                      margin-top:4px; }
+  .pp-train-bar { background:#080808; border:1px solid #246; height:5px;
+                   margin-top:4px; }
+  .pp-train-bar > div { background:#48a; height:100%; width:0; }
+</style>
+
+<div class="pp-page">
+  <p style="margin:0 0 4px;">
+    <a href="{% url 'caformer:index' %}" style="color:#888; font-size:0.78rem;">← caformer</a>
+    &middot;
+    <span style="color:#aaa; font-size:0.78rem;">
+      8 major CAs · live forward pass · inline Q→R autotrain
+    </span>
+  </p>
+
+  <form id="pp-form" onsubmit="return false;">
+    <div class="pp-knobs">
+      <label>query <input type="text" name="q" value="hi"></label>
+      <label>tokens
+        <input type="number" name="n" min="1" max="4096" value="12"></label>
+      <label>blocks
+        <input type="number" name="n_blocks" min="1" max="4" value="1"></label>
+      <label>temp
+        <input type="number" name="temperature" step="0.1" min="0" max="20"
+               value="0.8"></label>
+      <label>model
+        <select name="model" id="pp-model">
+          <option value="">(random rules)</option>
+          {% for s in trained_slugs %}
+            <option value="{{ s }}"
+                    {% if s == best_slug %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="button" id="pp-go" class="pp-go">▶ Run query</button>
+      <button type="button" id="pp-stop" class="pp-stop" disabled>■ stop</button>
+      <span id="pp-status" class="pp-status">idle</span>
+    </div>
+  </form>
+
+  <!-- Live-strip: every trace board as a tiny thumbnail, width-capped
+       to the query input so the whole pipeline-per-token is one row.
+       Populated dynamically on the first 'token' event because the
+       trace length varies with n_blocks (3 + 10·n_blocks ≈ 13/23/33).
+       Pre-seeded with placeholder thumbnails so the bar is visibly
+       present *before* a query runs. -->
+  <div class="pp-thumbrow" title="live trace · every CA grid the current token sees, in pipeline order">
+    <span class="pp-thumblead">live trace →</span>
+    <div class="pp-thumbstrip" id="pp-thumbstrip"></div>
+    <span id="pp-thumbcount" class="pp-thumblabel">23 boards · hover for name · updates each token</span>
+  </div>
+
+  <div class="pp-grid" id="pp-grid">
+    <div class="pp-cell" data-slot="embedding">
+      <h3>embedding<span class="ruletag">embed</span></h3>
+      <canvas width="160" height="160"></canvas>
+    </div>
+    <div class="pp-cell" data-slot="layer_norm">
+      <h3>layer_norm<span class="ruletag">norm</span></h3>
+      <canvas width="160" height="160"></canvas>
+    </div>
+    <div class="pp-cell" data-slot="projection">
+      <h3>projection<span class="ruletag">q</span></h3>
+      <canvas width="160" height="160"></canvas>
+    </div>
+    <div class="pp-cell" data-slot="self_attention">
+      <h3>self_attention<span class="ruletag">mix</span></h3>
+      <canvas width="160" height="160"></canvas>
+    </div>
+    <div class="pp-cell" data-slot="mlp">
+      <h3>mlp<span class="ruletag">mlp</span></h3>
+      <canvas width="160" height="160"></canvas>
+    </div>
+    <div class="pp-cell" data-slot="transformer">
+      <h3>transformer<span class="ruletag">block-out</span></h3>
+      <canvas width="160" height="160"></canvas>
+    </div>
+    <div class="pp-cell" data-slot="softmax">
+      <h3>softmax<span class="ruletag">output</span></h3>
+      <canvas width="160" height="160"></canvas>
+    </div>
+    <div class="pp-cell" data-slot="output">
+      <h3>output head<span class="ruletag">norm-final</span></h3>
+      <canvas width="160" height="160"></canvas>
+    </div>
+  </div>
+
+  <div class="pp-bottom">
+    <div class="pp-reply-box">
+      <h4>Generated reply</h4>
+      <div id="pp-reply" class="pp-reply"></div>
+    </div>
+
+    <div class="pp-train-box">
+      <h4>Autotrain · evolve the model to produce a specific response</h4>
+      <div class="pp-train-row">
+        <label>expected
+          <input type="text" id="pp-expected" placeholder="e.g. hello"></label>
+        <label>pop
+          <input type="number" id="pp-train-pop" min="4" max="24" value="6"></label>
+        <label>gens
+          <input type="number" id="pp-train-gens" min="1" max="60" value="8"></label>
+        <button type="button" id="pp-train-go" class="pp-train-go">
+          ▶ autotrain
+        </button>
+        <button type="button" id="pp-train-stop" class="pp-train-stop" disabled>
+          ■ stop
+        </button>
+        <button type="button" id="pp-train-save" class="pp-train-save" disabled>
+          💾 save + use
+        </button>
+        <span id="pp-train-status" class="pp-train-status">
+          type a desired response, run autotrain, save the winner — it
+          becomes the active model for the next query.
+        </span>
+        <div class="pp-train-bar" style="flex-basis:100%;">
+          <div id="pp-train-bar-fill"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="{% static 'caformer/mechanism.js' %}"></script>
+<script>
+(function () {
+  const form     = document.getElementById('pp-form');
+  const goBtn    = document.getElementById('pp-go');
+  const stopBtn  = document.getElementById('pp-stop');
+  const statusEl = document.getElementById('pp-status');
+  const replyEl  = document.getElementById('pp-reply');
+  const modelEl  = document.getElementById('pp-model');
+  const cells    = {};
+  const renderers = {};
+  const M = window.CAformerMechanism;
+
+  for (const c of document.querySelectorAll('.pp-cell')) {
+    const slot = c.dataset.slot;
+    cells[slot] = c;
+    const canvas = c.querySelector('canvas');
+    renderers[slot] = new M.HexCA(canvas, {side: 16, cellPx: 10});
+    renderers[slot].setGridFromSeed(0xCAFE ^ slot.charCodeAt(0)).paint();
+  }
+
+  // ── Thumb-strip renderer ──────────────────────────────────────
+  // Built lazily on the first 'token' event because the trace length
+  // depends on n_blocks (3 + 10·n_blocks).
+  const PALETTE = ['#0a0a0a', '#48a', '#aa6', '#cfa'];
+  const thumbStrip  = document.getElementById('pp-thumbstrip');
+  const thumbCount  = document.getElementById('pp-thumbcount');
+  const thumbByName = {};   // trace name → <canvas>
+
+  function ensureThumbs(traceNames) {
+    if (Object.keys(thumbByName).length === traceNames.length) return;
+    thumbStrip.innerHTML = '';
+    for (const n of traceNames) {
+      const cv = document.createElement('canvas');
+      cv.width = 16; cv.height = 16;    // 1 px per cell; CSS scales it
+      cv.title = n;                      // hover tooltip = trace name
+      thumbStrip.appendChild(cv);
+      thumbByName[n] = cv;
+    }
+    thumbCount.textContent = traceNames.length + ' boards · '
+                              + 'hover for name';
+  }
+
+  function paintThumb(canvas, cells) {
+    const ctx = canvas.getContext('2d');
+    const img = ctx.createImageData(16, 16);
+    for (let i = 0; i < 256; i++) {
+      const c = cells[i] & 3;
+      const hex = PALETTE[c];
+      // hex is like '#0a0a0a' or '#48a' — expand short form.
+      let r, g, b;
+      if (hex.length === 7) {
+        r = parseInt(hex.slice(1, 3), 16);
+        g = parseInt(hex.slice(3, 5), 16);
+        b = parseInt(hex.slice(5, 7), 16);
+      } else {
+        r = parseInt(hex[1] + hex[1], 16);
+        g = parseInt(hex[2] + hex[2], 16);
+        b = parseInt(hex[3] + hex[3], 16);
+      }
+      img.data[i * 4 + 0] = r;
+      img.data[i * 4 + 1] = g;
+      img.data[i * 4 + 2] = b;
+      img.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  // Pre-populate placeholder thumbnails on page load so the live-strip
+  // is visibly present *before* the first Run.  Guess the trace shape
+  // from the n_blocks knob (3 + 10·n_blocks).  Real names overwrite
+  // these on the first token event.
+  function placeholderTrace(n_blocks) {
+    const names = ['embed'];
+    for (let b = 0; b < n_blocks; b++) {
+      for (const stage of ['norm-pre', 'q', 'k', 'v', 'score', 'mix',
+                            'merge', 'norm-mid', 'mlp', 'merge-out']) {
+        names.push('b' + b + '-' + stage);
+      }
+    }
+    names.push('norm-final', 'output');
+    return names;
+  }
+  function buildPlaceholderStrip() {
+    const n_blocks = parseInt(form.querySelector('[name="n_blocks"]').value, 10)
+                      || 1;
+    const names = placeholderTrace(n_blocks);
+    ensureThumbs(names);
+    // Paint a faint quadrant pattern so the user sees the strip exists.
+    for (let i = 0; i < names.length; i++) {
+      const cv = thumbByName[names[i]];
+      if (!cv) continue;
+      const cells = new Uint8Array(256);
+      for (let j = 0; j < 256; j++) cells[j] = (i + ((j >> 4) ^ (j & 15))) & 3;
+      paintThumb(cv, cells);
+    }
+    thumbCount.textContent =
+      names.length + ' boards · waiting for run · hover for name';
+  }
+  buildPlaceholderStrip();
+  // Rebuild placeholders when the user changes n_blocks before running.
+  form.querySelector('[name="n_blocks"]').addEventListener('input', () => {
+    // Reset the registry so ensureThumbs rebuilds the canvases.
+    for (const k in thumbByName) delete thumbByName[k];
+    buildPlaceholderStrip();
+  });
+
+  let evtSrc = null;
+  function startRun() {
+    if (evtSrc) evtSrc.close();
+    const fd = new FormData(form);
+    const params = new URLSearchParams();
+    for (const [k, v] of fd) params.append(k, v);
+    replyEl.innerHTML = '';
+    goBtn.disabled = true; stopBtn.disabled = false;
+    statusEl.textContent = 'connecting…';
+    const url = "{% url 'caformer:pipeline_stream' %}?" + params;
+    evtSrc = new EventSource(url);
+    evtSrc.addEventListener('meta', e => {
+      const d = JSON.parse(e.data);
+      statusEl.textContent = 'model=' + d.model + ' · '
+                              + d.max_new + ' tokens';
+    });
+    evtSrc.addEventListener('token', e => {
+      const d = JSON.parse(e.data);
+      statusEl.textContent = 'token ' + (d.step + 1) + ' · "' + d.next_char + '"';
+      // Big named panels:
+      for (const slot in d.grids) {
+        const g = d.grids[slot];
+        if (!g) continue;
+        const r = renderers[slot];
+        if (!r) continue;
+        r.setGrid(new Uint8Array(g)).paint();
+        cells[slot].classList.add('active');
+        setTimeout(() => cells[slot].classList.remove('active'), 200);
+      }
+      // Tiny live-strip — one thumbnail per trace board, in order.
+      if (d.all_grids && d.all_grids.length) {
+        ensureThumbs(d.all_grids.map(g => g.name));
+        for (const item of d.all_grids) {
+          const cv = thumbByName[item.name];
+          if (!cv) continue;
+          paintThumb(cv, item.cells);
+          cv.classList.add('active');
+          setTimeout(() => cv.classList.remove('active'), 180);
+        }
+      }
+      const span = document.createElement('span');
+      span.className = 'pp-replychar fresh';
+      span.textContent = d.next_char;
+      replyEl.appendChild(span);
+      setTimeout(() => span.classList.remove('fresh'), 500);
+    });
+    evtSrc.addEventListener('end', e => {
+      const d = JSON.parse(e.data);
+      statusEl.textContent = 'done · ' + d.total_steps + ' tokens';
+      evtSrc.close(); evtSrc = null;
+      goBtn.disabled = false; stopBtn.disabled = true;
+    });
+    evtSrc.onerror = () => {
+      statusEl.textContent = 'connection error';
+      goBtn.disabled = false; stopBtn.disabled = true;
+    };
+  }
+  function stopRun() {
+    if (evtSrc) { evtSrc.close(); evtSrc = null; }
+    statusEl.textContent = 'stopped';
+    goBtn.disabled = false; stopBtn.disabled = true;
+  }
+  goBtn  .addEventListener('click', startRun);
+  stopBtn.addEventListener('click', stopRun);
+  form.querySelector('[name="q"]').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); startRun(); }
+  });
+
+  // ── Autotrain ─────────────────────────────────────────────────
+  const expEl    = document.getElementById('pp-expected');
+  const tPopEl   = document.getElementById('pp-train-pop');
+  const tGensEl  = document.getElementById('pp-train-gens');
+  const tGoBtn   = document.getElementById('pp-train-go');
+  const tStopBtn = document.getElementById('pp-train-stop');
+  const tSaveBtn = document.getElementById('pp-train-save');
+  const tStatus  = document.getElementById('pp-train-status');
+  const tBarFill = document.getElementById('pp-train-bar-fill');
+  let tEvt = null;
+  let totalEvals = 0;
+  let doneEvals  = 0;
+
+  function startAutotrain() {
+    const expected = (expEl.value || '').trim();
+    const q = (form.querySelector('[name="q"]').value || '').trim();
+    if (!q || !expected) {
+      tStatus.textContent = 'need both a query above and an expected response';
+      return;
+    }
+    if (tEvt) tEvt.close();
+    tGoBtn.disabled = true; tStopBtn.disabled = false; tSaveBtn.disabled = true;
+    tStatus.textContent = 'connecting…';
+    tBarFill.style.width = '0';
+    doneEvals = 0;
+    const params = new URLSearchParams();
+    params.set('q', q);
+    params.set('expected', expected);
+    params.set('pop', tPopEl.value);
+    params.set('gens', tGensEl.value);
+    params.set('n_blocks', form.querySelector('[name="n_blocks"]').value);
+    params.set('model', modelEl.value || '');
+    const url = "{% url 'caformer:pipeline_autotrain_stream' %}?" + params;
+    tEvt = new EventSource(url);
+
+    tEvt.addEventListener('meta', e => {
+      const d = JSON.parse(e.data);
+      totalEvals = d.total_evals;
+      tStatus.textContent = 'autotrain · ' + d.pop_size + 'p × '
+                             + d.generations + 'g · base=' + d.base_model
+                             + ' · "' + d.q + '" → "' + d.expected + '"';
+    });
+    tEvt.addEventListener('ind', e => {
+      const d = JSON.parse(e.data);
+      doneEvals += 1;
+      tBarFill.style.width = (100 * doneEvals / Math.max(1, totalEvals)) + '%';
+      tStatus.textContent = 'gen ' + d.gen + ' · ind ' + d.ind
+                             + ' fit=' + d.fitness.toFixed(3)
+                             + ' (' + (d.elapsed_ms / 1000).toFixed(1) + 's)';
+    });
+    tEvt.addEventListener('gen', e => {
+      const d = JSON.parse(e.data);
+      tStatus.textContent = '✓ gen ' + d.gen + ' best=' + d.best.toFixed(3)
+                             + ' mean=' + d.mean.toFixed(3);
+    });
+    tEvt.addEventListener('error', e => {
+      const d = e.data ? JSON.parse(e.data) : null;
+      tStatus.textContent = 'ERROR: ' + (d ? d.msg : 'connection');
+      tGoBtn.disabled = false; tStopBtn.disabled = true;
+    });
+    tEvt.addEventListener('end', e => {
+      const d = JSON.parse(e.data);
+      tStatus.textContent = '★ autotrain done · fitness '
+                             + d.best_fitness.toFixed(4)
+                             + ' (closer to 0 = better)';
+      tBarFill.style.width = '100%';
+      tEvt.close(); tEvt = null;
+      tGoBtn.disabled = false; tStopBtn.disabled = true;
+      tSaveBtn.disabled = !d.savable;
+    });
+    tEvt.onerror = () => {
+      tStatus.textContent = 'SSE connection error';
+      tGoBtn.disabled = false; tStopBtn.disabled = true;
+    };
+  }
+
+  function stopAutotrain() {
+    if (tEvt) { tEvt.close(); tEvt = null; }
+    tStatus.textContent = 'stopped';
+    tGoBtn.disabled = false; tStopBtn.disabled = true;
+  }
+
+  async function saveAutotrain() {
+    tSaveBtn.disabled = true;
+    tStatus.textContent = 'saving…';
+    const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+    const fd = new FormData();   // server auto-generates a slug if blank
+    const r = await fetch("{% url 'caformer:pipeline_autotrain_save' %}", {
+      method: 'POST', body: fd, headers: {'X-CSRFToken': csrf},
+      credentials: 'same-origin',
+    });
+    const j = await r.json();
+    if (!j.ok) {
+      tStatus.textContent = 'save failed: ' + (j.error || '?');
+      return;
+    }
+    // Add the new slug to the model dropdown and select it so the
+    // next Run query uses it.
+    const opt = document.createElement('option');
+    opt.value = j.slug; opt.textContent = j.slug; opt.selected = true;
+    modelEl.appendChild(opt);
+    tStatus.textContent = '✓ saved · ' + j.slug + ' · fit '
+                           + j.fitness.toFixed(4)
+                           + ' · now active model (Run query to try)';
+  }
+
+  tGoBtn  .addEventListener('click', startAutotrain);
+  tStopBtn.addEventListener('click', stopAutotrain);
+  tSaveBtn.addEventListener('click', saveAutotrain);
+  expEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); startAutotrain(); }
+  });
+})();
+</script>
+{% endblock %}

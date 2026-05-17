@@ -15,7 +15,8 @@ from automaton.packed import (
 )
 
 from .hexnn import pack_hexnn
-from .models import KIND_HEX_K4_PACKED, KIND_HEX_NN, Rule
+from .models import (KIND_HEX_K4_LUT, KIND_HEX_K4_PACKED, KIND_HEX_NN,
+                       Rule)
 
 
 def _unique_slug(base: str) -> str:
@@ -227,6 +228,51 @@ def import_strateta_population(payload: dict, *,
         )
         out.append(rule)
     return out
+
+
+def upsert_hex_lut(lut: bytes, palette_ansi: bytes, *,
+                    name: str = '', source: str = 'spoeqi',
+                    source_ref: str = '', notes: str = '') -> Rule:
+    """Insert or update a 16,384-byte K=4 full LUT (HX4L, the spoeqi
+    metachain / quine format). Sha1-keyed; re-import refreshes light
+    metadata but does not duplicate.
+
+    palette_ansi must be exactly 4 ANSI-256 indices.
+    """
+    if len(lut) != 16384:
+        raise ValueError(
+            f'expected 16,384-byte HX4L LUT, got {len(lut)}')
+    if len(palette_ansi) != 4:
+        raise ValueError(
+            f'expected 4-byte ANSI palette, got {len(palette_ansi)}')
+    sha = hashlib.sha1(lut).hexdigest()
+    existing = Rule.objects.filter(sha1=sha).first()
+    if existing:
+        if not existing.name and name:
+            existing.name = name
+        if source_ref and source_ref not in (existing.source_ref or ''):
+            existing.source_ref = (
+                f'{existing.source_ref}; {source_ref}'
+                if existing.source_ref else source_ref
+            )
+        existing.palette_ansi = palette_ansi
+        existing.save()
+        return existing
+
+    rule = Rule(
+        slug=_unique_slug(name or sha[:10]),
+        name=name,
+        notes=notes,
+        kind=KIND_HEX_K4_LUT,
+        n_colors=4,
+        genome=lut,
+        palette_ansi=palette_ansi,
+        sha1=sha,
+        source=source,
+        source_ref=source_ref,
+    )
+    rule.save()
+    return rule
 
 
 def import_huntrule(hunt_rule) -> Rule:

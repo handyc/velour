@@ -1,0 +1,444 @@
+{% comment %}
+Per-component mechanism diagram.  Required context vars:
+  component        — the components.Component dataclass
+  trained_slugs    — list of saved TrainedModel slugs (for the dropdown)
+  best_slug        — slug of the highest-fitness TrainedModel (or '')
+
+The diagram has two layers:
+
+  • Static SVG schematic — labelled, stylised hex grid + LUT lookup
+    that explains the mechanism even with no model loaded.  Always
+    visible.
+
+  • Live CA panel — once you toggle "live", JS fetches the model's
+    real rule table(s), seeds a grid from a token id, steps it, and
+    renders the real evolved CA in place of the schematic example.
+
+The mapping from component.slug → which rule(s) drive its diagram is
+defined here so the JS module can stay generic.
+{% endcomment %}
+{% load static %}
+{% with slug=component.slug %}
+<div class="mech-block" data-component="{{ slug }}">
+  <h2 style="font-size:0.78rem; color:#888; text-transform:uppercase;
+              letter-spacing:0.06em; font-weight:normal; margin:18px 0 8px;">
+    Mechanism — how the CA grid does the work
+  </h2>
+  <p style="color:#888; font-size:0.82rem; margin:0 0 8px;">
+    Every box below corresponds to a concrete operation in
+    <code>caformer.primitives</code> /
+    <code>caformer.transformer</code>.  Toggle "live" to replace the
+    schematic CA with the real one from a saved <code>TrainedModel</code>.
+  </p>
+
+  <div class="mech-controls"
+       style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;
+              font-size:0.78rem; padding:6px 10px; background:#0a0a0a;
+              border:1px solid #1f1f1f;">
+    <label style="display:flex; gap:6px; align-items:center; color:#aaa;
+                  cursor:pointer;">
+      <input type="checkbox" class="mech-live"
+             {% if best_slug %}{% else %}disabled title="train + save a model first"{% endif %}>
+      live (real CA from a TrainedModel)
+    </label>
+    <label style="color:#aaa;">model
+      <select class="mech-model" {% if not best_slug %}disabled{% endif %}
+              style="background:#111; color:#cdf; border:1px solid #333;
+                     padding:2px 6px; font-family:inherit;">
+        {% for s in trained_slugs %}
+          <option value="{{ s }}"
+                  {% if s == best_slug %}selected{% endif %}>{{ s }}</option>
+        {% empty %}
+          <option value="">(no trained models yet)</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label style="color:#aaa;">token byte
+      <input type="number" class="mech-token" min="0" max="255" value="72"
+             style="width:5em; background:#111; color:#cdf;
+                    border:1px solid #333; padding:2px 6px;
+                    font-family:inherit;">
+    </label>
+    <label style="color:#aaa;">ticks
+      <input type="number" class="mech-ticks" min="0" max="32" value="4"
+             style="width:5em; background:#111; color:#cdf;
+                    border:1px solid #333; padding:2px 6px;
+                    font-family:inherit;">
+    </label>
+    <button type="button" class="mech-step"
+            style="background:#1f3f1f; color:#cfc; border:1px solid #4a8;
+                   padding:3px 12px; cursor:pointer; font-family:inherit;
+                   font-size:0.78rem;">re-seed + step</button>
+    <span class="mech-status" style="color:#888; flex:1; text-align:right;">
+      schematic mode
+    </span>
+  </div>
+
+  <div class="mech-grid" style="display:grid; gap:14px; margin-top:12px;
+       grid-template-columns: minmax(220px, 280px) 1fr minmax(220px, 280px);">
+    {% comment %} ── Column 1: input grid + neighbourhood call-out ── {% endcomment %}
+    <div class="mech-col">
+      <div class="mech-cap">input grid · 16×16 · K=4</div>
+      <canvas class="mech-canvas mech-input" width="260" height="260"
+              style="display:block; background:#050505;
+                     border:1px solid #1f1f1f;"></canvas>
+      <div class="mech-meta" style="margin-top:6px;">
+        <span class="mech-grid-label">seed = token byte · LCG fill</span>
+      </div>
+
+      <svg class="mech-neighbour" viewBox="0 0 220 180" width="100%"
+           height="170" style="margin-top:10px;">
+        <defs>
+          <marker id="mech-arr-{{ slug }}" viewBox="0 0 10 10"
+                  refX="9" refY="5" markerWidth="6" markerHeight="6"
+                  orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#666"/>
+          </marker>
+        </defs>
+        <text x="110" y="14" text-anchor="middle" fill="#888"
+              font-family="ui-monospace,monospace" font-size="10">
+          one cell sees 6 neighbours + self (parity-dependent)
+        </text>
+        {% comment %} Stylised hex neighbourhood: centre + 6 around {% endcomment %}
+        <g transform="translate(110,100)">
+          {% for n in "0123456" %}{% endfor %}
+          {# 6 outer cells #}
+          <g font-family="ui-monospace,monospace" font-size="9"
+             fill="#aaa">
+            <circle cx="0"    cy="0"   r="22" fill="#cfa" stroke="#fff"/>
+            <text   x="0"     y="3"    text-anchor="middle" fill="#0a0a0a">self</text>
+
+            <circle cx="-40"  cy="-25" r="18" fill="#48a"/>
+            <text   x="-40"   y="-22"  text-anchor="middle" fill="#fff">nw</text>
+            <circle cx="40"   cy="-25" r="18" fill="#48a"/>
+            <text   x="40"    y="-22"  text-anchor="middle" fill="#fff">ne</text>
+
+            <circle cx="50"   cy="14"  r="18" fill="#aa6"/>
+            <text   x="50"    y="17"   text-anchor="middle" fill="#0a0a0a">e</text>
+            <circle cx="-50"  cy="14"  r="18" fill="#aa6"/>
+            <text   x="-50"   y="17"   text-anchor="middle" fill="#0a0a0a">w</text>
+
+            <circle cx="-40"  cy="50"  r="18" fill="#48a"/>
+            <text   x="-40"   y="53"   text-anchor="middle" fill="#fff">sw</text>
+            <circle cx="40"   cy="50"  r="18" fill="#48a"/>
+            <text   x="40"    y="53"   text-anchor="middle" fill="#fff">se</text>
+          </g>
+          <text x="110" y="170" text-anchor="middle" fill="#888"
+                font-family="ui-monospace,monospace" font-size="9">
+            7 cells × 2 bits = 14-bit key → 16,384-entry LUT
+          </text>
+        </g>
+      </svg>
+    </div>
+
+    {% comment %} ── Column 2: rule + transformation ── {% endcomment %}
+    <div class="mech-col">
+      <div class="mech-cap">
+        rule table · 16,384 K=4 entries · 4,096 bytes packed
+      </div>
+
+      <canvas class="mech-canvas mech-lut" width="540" height="32"
+              style="display:block; width:100%; background:#050505;
+                     border:1px solid #1f1f1f; image-rendering:pixelated;"></canvas>
+
+      <div style="margin-top:6px; color:#888; font-family:ui-monospace,monospace;
+                  font-size:0.78rem;">
+        <span class="mech-lut-name">
+          rule_<em>{{ component.slug }}</em>
+        </span>
+        <span style="float:right;">
+          highlight = look-up for centre cell
+        </span>
+      </div>
+
+      <div style="margin-top:10px; padding:8px 10px; background:#0a0a0a;
+                  border:1px solid #1f1f1f; color:#aaa; font-size:0.82rem;
+                  line-height:1.5;">
+        <span style="color:#888;">how it works:</span>
+        {% if slug == 'embedding' %}
+          Seed a 16×16 grid from <code>(token_id, position)</code> via an
+          LCG so identical tokens at identical positions produce
+          identical grids.  Step <strong>4 ticks</strong> of
+          <code>rule_embed</code>.  The 256-cell K=4 result <em>is</em>
+          the 512-bit embedding vector that downstream attention consumes.
+        {% elif slug == 'layer_norm' %}
+          <code>rule_norm</code> is evolved toward a "minority-colour
+          attractor": each tick, cells tend to flip toward the
+          locally-rare colour.  Run for <strong>4 ticks</strong> and the
+          colour histogram flattens — the CA-analogue of mean-shift +
+          rescale.  Used pre-attention and pre-MLP every block.
+        {% elif slug == 'self_attention' %}
+          For each (Q, K) token pair, stack the two 16×16 grids
+          vertically (a 32×16 stripe), step 1 tick of
+          <code>rule_score</code>, count cells where colour&nbsp;&lt;&nbsp;2 in the
+          top half — that integer <em>is</em> the attention weight.
+          <strong>rule_mix</strong> then blends the chosen V grid into
+          the state.  Causal mask is enforced by only scoring j ≤ i.
+        {% elif slug == 'projection' %}
+          The Q/K/V projection <em>is</em> one CA tick of the rule named
+          after it (this view shows <code>rule_q</code>; the K and V
+          rules have the same shape).  Running on the same input grid
+          produces three different "views" — Q says <em>what am I
+          asking</em>, K says <em>what do I offer</em>, V says <em>what
+          would I return</em>.  This is the cell-level analogue of
+          W_Q · x, W_K · x, W_V · x.
+        {% elif slug == 'mlp' %}
+          Tile the 16×16 input 2×2 → a 32×32 grid (the wider "hidden
+          dim"), step <strong>2 ticks</strong> of <code>rule_mlp</code>
+          on that expanded grid, then majority-pool each 2×2 block back
+          down to 16×16.  The rule's non-linear lookup plays GELU; the
+          expand/contract plays W_1 / W_2.
+        {% elif slug == 'transformer' %}
+          One block = pre-norm → self-attention → residual_merge →
+          pre-norm → MLP → residual_merge.  This view shows the
+          <code>rule_mix</code> step (the attention readout); the other
+          6 block rules each contribute a sub-stage.  Stack N blocks
+          for nano_gpt / GPT-2 / GPT-3-shape.
+        {% elif slug == 'softmax' %}
+          The sampler reads the output grid's 4 cell counts, treats them
+          as un-normalised logits over 4 vocab buckets (each byte v
+          maps to bucket v &gt;&gt; 6), divides by temperature, picks
+          proportionally.  Temperature noise is itself sourced from a
+          CA byte stream (so identical seeds → identical samples).
+        {% elif slug == 'output' %}
+          On the last token's CA state, run <strong>2 ticks</strong> of
+          <code>rule_output</code>, count cells per colour, map each
+          vocab byte v to its bucket (v &gt;&gt; 6 → one of 4 buckets),
+          assign that bucket's count as the byte's logit.  Sampler reads
+          those 256 logits.  This <em>is</em> the LM head.
+        {% else %}
+          For every cell, read the 7-cell hex neighbourhood, pack into
+          the 14-bit key, look up the rule's 2-bit output, write it to
+          the next grid.
+        {% endif %}
+      </div>
+
+      <div style="margin-top:10px; color:#888; font-size:0.78rem;">
+        <span class="mech-pre">→</span>
+        <span class="mech-cell-call" style="color:#cfa;">
+          centre cell key = <code class="mech-key">—</code>,
+          lut[key] = <code class="mech-out">—</code>
+        </span>
+      </div>
+    </div>
+
+    {% comment %} ── Column 3: output grid + readout ── {% endcomment %}
+    <div class="mech-col">
+      <div class="mech-cap">
+        output grid after N ticks
+      </div>
+      <canvas class="mech-canvas mech-output" width="260" height="260"
+              style="display:block; background:#050505;
+                     border:1px solid #1f1f1f;"></canvas>
+
+      <div style="margin-top:6px;">
+        <div class="mech-bars"
+             style="display:flex; gap:2px; height:24px; align-items:end;">
+          <span class="mech-bar mech-bar-0"
+                style="background:#0a0a0a; min-width:8px; height:0%;"></span>
+          <span class="mech-bar mech-bar-1"
+                style="background:#48a; min-width:8px; height:0%;"></span>
+          <span class="mech-bar mech-bar-2"
+                style="background:#aa6; min-width:8px; height:0%;"></span>
+          <span class="mech-bar mech-bar-3"
+                style="background:#cfa; min-width:8px; height:0%;"></span>
+        </div>
+        <div style="color:#888; font-size:0.72rem; margin-top:3px;">
+          cell counts per colour → {% if slug == 'output' or slug == 'softmax' %}4 logit buckets across the 256-byte vocab{% else %}feeds next stage{% endif %}
+        </div>
+      </div>
+
+      <div style="margin-top:10px; padding:8px 10px; background:#0a0a0a;
+                  border:1px solid #1f1f1f; color:#cfc; font-size:0.82rem;
+                  line-height:1.5;">
+        <span style="color:#888;">readout:</span>
+        {% if slug == 'embedding' %}
+          The grid <em>is</em> the embedding: the bar histogram on the
+          left is its 4-colour "distribution".  Position-embed XOR's in
+          next; then the whole block consumes it as token state.
+        {% elif slug == 'layer_norm' %}
+          A flatter histogram = stronger normalisation.  Adjacent stages
+          (attention, MLP) read the normed grid as their input.
+        {% elif slug == 'self_attention' %}
+          The output is the <em>attended</em> CA grid — V[best_j] XOR
+          state[i], rule_mix'd by one tick.  This grid then feeds into
+          residual_merge with the original state.
+        {% elif slug == 'projection' %}
+          The output grid is one of Q, K, V for this token.  Q and K
+          enter the per-pair attention scorer; V is the payload that
+          gets pulled in proportionally to that score.
+        {% elif slug == 'mlp' %}
+          Output replaces the token's state via a residual_merge.  In a
+          well-evolved MLP the cell-change rate is high (the rule is
+          mixing information) without colour collapse (it still uses
+          all 4 colours).
+        {% elif slug == 'transformer' %}
+          After both residuals, the per-token grid is the input to the
+          next block — or, after the last block, to the output head.
+        {% elif slug == 'softmax' %}
+          The histogram bars are the 4 logit buckets — the sampler picks
+          a byte proportionally to its bucket's height (with temperature).
+        {% elif slug == 'output' %}
+          The histogram <em>is</em> the un-normalised logits over the 4
+          vocab buckets that cover all 256 bytes.  Sampler is one
+          softmax+CDF step away from emitting the next token.
+        {% else %}
+          The output grid is the activation that the next stage of the
+          forward pass consumes.
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .mech-cap { color:#aaa; font-size:0.78rem; margin-bottom:6px; }
+  .mech-cap code { color:#cfa; }
+  .mech-col { min-width:0; }
+  .mech-canvas { width:100%; height:auto; }
+  @media (max-width:920px) {
+    .mech-grid { grid-template-columns: 1fr !important; }
+  }
+</style>
+
+<script src="{% static 'caformer/mechanism.js' %}"></script>
+<script>
+(function () {
+  // The mapping (component.slug → which rule drives this diagram).
+  // Composite components show one representative rule by default; the
+  // wider topology lives in /caformer/diagram/.
+  const RULE_FOR = {
+    'embedding':        'embed',
+    'layer_norm':       'norm',
+    'self_attention':   'mix',
+    'projection':       'q',
+    'mlp':              'mlp',
+    'transformer':      'mix',
+    'softmax':          'output',
+    'output':           'output',
+  };
+  const ruleName = RULE_FOR['{{ slug }}'] || 'embed';
+
+  const root = document.currentScript.parentElement
+                  .querySelector('.mech-block[data-component="{{ slug }}"]');
+  if (!root) return;
+
+  const M = window.CAformerMechanism;
+  const inputCanvas  = root.querySelector('.mech-input');
+  const outputCanvas = root.querySelector('.mech-output');
+  const lutCanvas    = root.querySelector('.mech-lut');
+  const liveCheckbox = root.querySelector('.mech-live');
+  const modelSelect  = root.querySelector('.mech-model');
+  const tokenInput   = root.querySelector('.mech-token');
+  const ticksInput   = root.querySelector('.mech-ticks');
+  const stepBtn      = root.querySelector('.mech-step');
+  const statusEl     = root.querySelector('.mech-status');
+  const keyEl        = root.querySelector('.mech-key');
+  const outEl        = root.querySelector('.mech-out');
+  const bars         = [0,1,2,3].map(c => root.querySelector('.mech-bar-' + c));
+  const ruleNameEl   = root.querySelector('.mech-lut-name');
+
+  const inputCA  = new M.HexCA(inputCanvas,  {side: 16});
+  const outputCA = new M.HexCA(outputCanvas, {side: 16});
+
+  let cachedRules = null;   // {meta, rules: {name: Uint8Array}}
+  // Re-seed nonce: bumped every time the "re-seed + step" button is
+  // clicked so the input grid actually changes even when the user
+  // didn't touch the token-byte input.
+  let reseedNonce = 1;
+
+  function schematicLUT() {
+    // A demonstrative LUT that ACTUALLY transforms its input — earlier
+    // version was "lut[i] = (i >> 12) & 3" which is exactly identity
+    // on the centre cell, so the output grid matched the input and the
+    // demo looked frozen.  This one rotates colours based on which
+    // neighbours match, so a tick visibly mixes the grid.
+    const lut = new Uint8Array(16384);
+    for (let i = 0; i < 16384; i++) {
+      const self = (i >> 12) & 3;
+      const nw   = (i >> 10) & 3;
+      const ne   = (i >>  8) & 3;
+      const e    = (i >>  6) & 3;
+      const se   = (i >>  4) & 3;
+      const sw   = (i >>  2) & 3;
+      const w    =  i        & 3;
+      // Majority-colour rule: most-common colour among self + 6
+      // neighbours wins, ties favour the centre cell. This is the
+      // classic class-2/3 "consensus" CA that converges to colour
+      // regions over a few ticks — visibly dynamic.
+      const counts = [0, 0, 0, 0];
+      counts[self]++; counts[nw]++; counts[ne]++; counts[e]++;
+      counts[se]++; counts[sw]++; counts[w]++;
+      let best = self;
+      for (let c = 0; c < 4; c++) if (counts[c] > counts[best]) best = c;
+      lut[i] = best;
+    }
+    const packed = new Uint8Array(4096);
+    for (let i = 0; i < 4096; i++) {
+      packed[i] = (lut[i*4] << 6) | (lut[i*4+1] << 4)
+                | (lut[i*4+2] << 2) |  lut[i*4+3];
+    }
+    return packed;
+  }
+
+  async function render() {
+    const tok    = parseInt(tokenInput.value, 10) || 0;
+    const ticks  = Math.max(0, parseInt(ticksInput.value, 10) || 0);
+    const live   = liveCheckbox.checked && !liveCheckbox.disabled;
+    const slug   = modelSelect.value;
+
+    let packed = schematicLUT();
+    if (live && slug) {
+      try {
+        if (!cachedRules || cachedRules.meta.slug !== slug) {
+          statusEl.textContent = 'loading ' + slug + '…';
+          cachedRules = await M.loadRules(slug);
+        }
+        packed = cachedRules.rules[ruleName];
+        statusEl.textContent = 'live · ' + slug + ' · rule_' + ruleName
+                              + ' · fitness ' + cachedRules.meta.fitness.toFixed(3);
+      } catch (e) {
+        statusEl.textContent = 'load failed (' + e.message + ') — schematic';
+      }
+    } else {
+      statusEl.textContent = 'schematic mode · rule_' + ruleName;
+    }
+    if (ruleNameEl) {
+      ruleNameEl.innerHTML = 'rule_<em>' + ruleName + '</em>'
+        + (live && slug ? ' · ' + slug : ' · (schematic)');
+    }
+
+    // Combine token byte with the re-seed nonce so clicking the button
+    // (which bumps the nonce) genuinely produces a fresh grid.
+    const seed = (tok * 1103515245 + reseedNonce * 2654435761 + 0xC0FFEE) >>> 0;
+    inputCA.setGridFromSeed(seed).paint();
+    // Centre-cell call-out before stepping:
+    const cInfo = inputCA.keyAt(8, 8);
+    const lut = M.unpackLUT(packed);
+    keyEl.textContent = cInfo.key + ' (0x' + cInfo.key.toString(16) + ')';
+    outEl.textContent = lut[cInfo.key];
+
+    outputCA.setGrid(inputCA.grid).stepWithLUT(lut, ticks).paint();
+
+    M.paintLUTStripe(lutCanvas, packed, M.PALETTE_CFA, cInfo.key);
+
+    const counts = [0, 0, 0, 0];
+    for (let i = 0; i < outputCA.grid.length; i++) counts[outputCA.grid[i]]++;
+    const max = Math.max(1, ...counts);
+    for (let c = 0; c < 4; c++) {
+      bars[c].style.height = (100 * counts[c] / max) + '%';
+      bars[c].style.flex   = counts[c];
+      bars[c].title = 'colour ' + c + ': ' + counts[c] + ' cells';
+    }
+  }
+
+  liveCheckbox.addEventListener('change', render);
+  modelSelect .addEventListener('change', () => { cachedRules = null; render(); });
+  tokenInput  .addEventListener('input', render);
+  ticksInput  .addEventListener('input', render);
+  stepBtn     .addEventListener('click', () => { reseedNonce += 1; render(); });
+
+  render();
+})();
+</script>
+{% endwith %}

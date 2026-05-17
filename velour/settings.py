@@ -163,6 +163,10 @@ INSTALLED_APPS = [
     'loupe',
     'scriptorium',
     'optikon',
+    'caformer',
+    'caframe',
+    'ouroboros',
+    'cahier',
 ]
 
 MIDDLEWARE = [

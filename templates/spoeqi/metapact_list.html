@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}spoeqi — metapacts{% endblock %}
+{% block content %}
+<style>
+  .mp-page { max-width: 70em; }
+  .mp-page h1 { margin: 0 0 4px; }
+  .mp-list { font: 0.85rem ui-monospace, monospace; }
+  .mp-list a { color: #ace; text-decoration: none; }
+  .mp-list a:hover { color: #cfa; }
+  .mp-list .row { padding: 8px 10px; border-bottom: 1px solid #1f1f1f; }
+  .mp-list .row:hover { background: #0a0a0a; }
+  .mp-tag { display: inline-block; padding: 1px 6px; margin-left: 6px;
+             font-size: 0.72rem; border: 1px solid; border-radius: 2px; }
+  .mp-good { color: #6f6; border-color: #4a4; }
+  .mp-meh  { color: #fc6; border-color: #963; }
+  .mp-meta { color: #888; font-size: 0.78rem; padding-left: 6px; }
+</style>
+
+<div class="mp-page">
+  <p><a href="{% url 'spoeqi:index' %}" style="color:#888;">← spoeqi</a></p>
+  <h1>Metapacts
+    <span style="color:#888; font-weight:400; font-size:0.78rem;">
+      — small recipes that expand to full CAformer models
+    </span>
+  </h1>
+  <p style="color:#aaa; font-size:0.85rem; max-width: 56em;">
+    A Metapact is a 16,384-byte seed + a depth.  Expansion: at each
+    level the previous state IS the rule for the next level; after
+    depth iterations you have 10 rule tables = a complete CAformer
+    model.  Both pact-holders chat with byte-identical weights
+    derived deterministically from the shared seed.  Evolve seeds
+    that bottom out at high-fitness models.
+    <br>
+    <a href="{% url 'spoeqi:metapact_create' %}" style="color:#cfa;">
+      → New metapact
+    </a>
+    &middot;
+    <a href="{% url 'spoeqi:metapact_tournament' %}" style="color:#cfa;"
+       title="Multi-round tournament where existing Metapacts compete and the round winners breed into the next round. One-click sensible defaults.">
+      🏆 Autotournament
+    </a>
+  </p>
+
+  <div class="mp-list" style="margin-top:14px;">
+    {% if metapacts %}
+      {% for m in metapacts %}
+        <div class="row">
+          <a href="{% url 'spoeqi:metapact_detail' slug=m.slug %}">
+            <b style="color:#fff;">{{ m.name }}</b>
+            <span style="color:#888;">({{ m.slug }})</span>
+          </a>
+          <span class="mp-tag {% if m.final_class4_depth >= 5 %}mp-good{% else %}mp-meh{% endif %}">
+            d4={{ m.final_class4_depth }}/{{ m.depth }}
+          </span>
+          <span class="mp-tag mp-meh">q={{ m.final_chain_quality|floatformat:2 }}</span>
+          {% if m.ga_generations %}
+            <span class="mp-tag" style="color:#9cf; border-color:#48a;">
+              ga × {{ m.ga_generations }}g
+            </span>
+          {% endif %}
+          <span class="mp-meta">{{ m.created_at|date:"D d M H:i" }}</span>
+        </div>
+      {% endfor %}
+    {% else %}
+      <p style="color:#888;">(no metapacts yet —
+        <a href="{% url 'spoeqi:metapact_create' %}" style="color:#cfa;">create one</a>)</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

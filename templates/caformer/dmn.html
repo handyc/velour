@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block title %}Default-Mode loop · CAformer{% endblock %}
+{% block content %}
+<style>
+  .dmn-wrap     { display: grid; grid-template-columns: auto 1fr;
+                  gap: 18px; align-items: start; }
+  .dmn-canvas-wrap canvas {
+                  background: #000; image-rendering: pixelated;
+                  display: block; border: 1px solid #2a2a2a; }
+  .dmn-stats    { font: 0.85rem ui-monospace, monospace; color: #cfc; }
+  .dmn-stats tr td:first-child { color: #888; padding-right: 14px; }
+  .dmn-stats td { padding: 2px 0; }
+  .dmn-stats b  { color: #fff; }
+  .dmn-buf      { font: 0.78rem ui-monospace, monospace; color: #aaa;
+                  margin-top: 14px; max-width: 60ch; }
+  .dmn-buf .row { display: flex; gap: 6px; padding: 1px 0; }
+  .dmn-buf .row b { color: #cfa; min-width: 4ch; text-align: right; }
+  .dmn-buf .row .h { color: #6cf; flex: 1; overflow: hidden;
+                     text-overflow: ellipsis; white-space: nowrap; }
+  .dmn-buf .row .t { color: #fc8; min-width: 5ch; text-align: right; }
+  .dmn-form     { display: flex; flex-wrap: wrap; gap: 14px;
+                  align-items: end; margin: 12px 0; padding: 10px 14px;
+                  background: #0a0a0a; border: 1px solid #1f1f1f; }
+  .dmn-form label { color: #aaa; font-size: 0.78rem;
+                    display: flex; flex-direction: column; gap: 2px; }
+  .dmn-form input { width: 6em; background: #111; color: #ddd;
+                    border: 1px solid #333; padding: 3px 6px;
+                    font-family: inherit; font-size: 0.85rem; }
+  .dmn-form button { background: #1f4f1f; color: #cfc;
+                     border: 1px solid #4a8; padding: 6px 14px;
+                     cursor: pointer; font-family: inherit; }
+  .dmn-form button.stop { background: #4f1f1f; border-color: #a48; color: #fcc; }
+  .dmn-spark    { display: inline-block; font-family: ui-monospace, monospace;
+                  letter-spacing: 1px; color: #6c6; }
+</style>
+
+<p><a href="{% url 'caformer:index' %}" style="color:#888;">← caformer</a></p>
+<h1 style="margin-bottom:4px;">Default-Mode loop · live</h1>
+<p style="color:#888; font-size:0.85rem; max-width: 80ch;">
+  No prompt, no input.  The substrate is one CA grid; every tick it
+  steps forward, four tokens are read by hashing row-groups, those
+  tokens go through caformer's <code>nano_gpt</code> (the L2 recursive
+  composition: 3 transformer blocks of CAs), the argmax of the output
+  logits is sampled, and the sampled token is XOR-folded back into the
+  substrate.  <b>That fold-back is the loop closure</b> — without it
+  the substrate just iterates its own attractor; with it the
+  nano_gpt is reading its own past output and steering the substrate
+  toward whatever its rules find probable.
+</p>
+
+<form class="dmn-form" id="dmn-form" onsubmit="return false;">
+  <label>grid side
+    <input type="number" name="grid_side"     min="6"  max="32"  value="12">
+  </label>
+  <label>vocab size
+    <input type="number" name="vocab_size"    min="4"  max="128" value="32">
+  </label>
+  <label>n_blocks
+    <input type="number" name="n_blocks"      min="1"  max="4"   value="1">
+  </label>
+  <label>window tokens
+    <input type="number" name="window_tokens" min="1"  max="8"   value="4">
+  </label>
+  <label>max steps
+    <input type="number" name="max_steps"     min="4"  max="500" value="200">
+  </label>
+  <label>seed
+    <input type="number" name="starting_seed" min="1"  max="2147483647"
+           value="233571329">
+  </label>
+  <button type="button" id="dmn-start">▶ start</button>
+  <button type="button" id="dmn-stop"  class="stop" disabled>■ stop</button>
+</form>
+
+<div class="dmn-wrap">
+  <div class="dmn-canvas-wrap">
+    <canvas id="dmn-canvas" width="320" height="320"></canvas>
+    <p style="color:#666; font-size:0.7rem; margin-top:4px;">
+      Each cell is one of 4 colours · K=4 hex CA · pointy-top
+    </p>
+  </div>
+
+  <div>
+    <table class="dmn-stats" id="dmn-stats">
+      <tr><td>tick</td>           <td><b id="s-tick">—</b></td></tr>
+      <tr><td>sampled token</td>  <td><b id="s-sampled">—</b></td></tr>
+      <tr><td>grid hash</td>      <td><b id="s-hash">—</b></td></tr>
+      <tr><td>cycle hit at</td>   <td><b id="s-cycle">—</b></td></tr>
+      <tr><td>novelty rate</td>   <td><b id="s-nov">—</b></td></tr>
+      <tr><td>unique hashes</td>  <td><b id="s-uh">—</b></td></tr>
+      <tr><td>unique tokens</td>  <td><b id="s-ut">—</b></td></tr>
+      <tr><td>buffer overlap</td> <td><b id="s-bo">—</b></td></tr>
+      <tr><td>token sparkline</td>
+          <td><span class="dmn-spark" id="s-spark"></span></td></tr>
+    </table>
+
+    <div class="dmn-buf" id="dmn-buf">
+      <div style="color:#888; padding-bottom:4px;">
+        rumination buffer (most recent 16 steps · grid hash · token)
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const form     = document.getElementById('dmn-form');
+  const canvas   = document.getElementById('dmn-canvas');
+  const ctx      = canvas.getContext('2d');
+  const buf      = document.getElementById('dmn-buf');
+  const startBtn = document.getElementById('dmn-start');
+  const stopBtn  = document.getElementById('dmn-stop');
+
+  // K=4 palette — same colours used elsewhere in caformer/escher/spoeqi
+  // for visual consistency: warm / cool / verdant / amber.
+  const PALETTE = [[220, 80, 40], [60, 120, 210],
+                    [80, 180, 90], [230, 200, 60]];
+
+  // Token sparkline keeps the last N samples as a unicode bar chart.
+  const SPARK_GLYPHS = '▁▂▃▄▅▆▇█'.split('');
+  const recentTokens = [];
+  const recentRows   = [];   // {tick, hash, sampled} per row in the buffer
+  let evtSrc = null;
+  let cellPx = 16;
+
+  function setRunning(on) {
+    startBtn.disabled = on;
+    stopBtn.disabled  = !on;
+    Array.from(form.querySelectorAll('input')).forEach(i => i.disabled = on);
+  }
+
+  function paintGrid(grid) {
+    const H = grid.length, W = grid[0].length;
+    // Pointy-top hex offset: shift odd rows by half a cell.  Cells are
+    // square-pixel approximations — keeps the painter cheap and fast
+    // enough for 5 fps without leaning on a real hex renderer.
+    canvas.width  = W * cellPx + cellPx;
+    canvas.height = Math.round(H * cellPx * 0.866) + cellPx;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    for (let r = 0; r < H; r++) {
+      const xoff = (r & 1) ? cellPx / 2 : 0;
+      const y = Math.round(r * cellPx * 0.866);
+      for (let c = 0; c < W; c++) {
+        const v = grid[r][c] & 3;
+        const [R, G, B] = PALETTE[v];
+        ctx.fillStyle = `rgb(${R},${G},${B})`;
+        ctx.fillRect(c * cellPx + xoff, y, cellPx, cellPx);
+      }
+    }
+  }
+
+  function updateStats(d) {
+    document.getElementById('s-tick').textContent    = d.tick;
+    document.getElementById('s-sampled').textContent = d.sampled;
+    document.getElementById('s-hash').textContent    = d.hash;
+    document.getElementById('s-cycle').textContent   =
+      d.cycle_at == null ? '— (novel)' : `tick ${d.cycle_at}`;
+    const o = d.observables || {};
+    document.getElementById('s-nov').textContent =
+      (o.novelty_rate ?? 0).toFixed(2);
+    document.getElementById('s-uh').textContent  = o.unique_hashes ?? '—';
+    document.getElementById('s-ut').textContent  =
+      (o.unique_tokens ?? 0).toFixed(2);
+    document.getElementById('s-bo').textContent  =
+      (o.buffer_overlap ?? 0).toFixed(2);
+
+    // Token sparkline: last 40 samples scaled into the unicode glyphs.
+    recentTokens.push(d.sampled);
+    if (recentTokens.length > 40) recentTokens.shift();
+    if (recentTokens.length) {
+      const lo = Math.min(...recentTokens);
+      const hi = Math.max(...recentTokens);
+      const range = Math.max(1, hi - lo);
+      const spark = recentTokens.map(t => {
+        const idx = Math.floor((t - lo) / range * (SPARK_GLYPHS.length - 1));
+        return SPARK_GLYPHS[idx];
+      }).join('');
+      document.getElementById('s-spark').textContent = spark;
+    }
+
+    // Rumination buffer.
+    recentRows.unshift({tick: d.tick, hash: d.hash, sampled: d.sampled,
+                         cycle_at: d.cycle_at});
+    if (recentRows.length > 16) recentRows.pop();
+    const rowsHtml = recentRows.map(r =>
+      `<div class="row"><b>${r.tick}</b>` +
+      `<span class="h">${r.hash}${r.cycle_at != null ? ' (↺ ' + r.cycle_at + ')' : ''}</span>` +
+      `<span class="t">→ ${r.sampled}</span></div>`).join('');
+    buf.innerHTML =
+      '<div style="color:#888;padding-bottom:4px;">rumination buffer ' +
+      '(most recent 16 steps · grid hash · token)</div>' + rowsHtml;
+  }
+
+  function start() {
+    stop();    // close any prior stream cleanly
+    recentTokens.length = 0;
+    recentRows.length   = 0;
+    const params = new URLSearchParams();
+    Array.from(form.querySelectorAll('input')).forEach(i =>
+      params.set(i.name, i.value));
+    evtSrc = new EventSource(`{% url 'caformer:dmn_stream' %}?${params}`);
+    evtSrc.addEventListener('meta', e => {
+      const meta = JSON.parse(e.data);
+      // Auto-size cell so a 12×12 grid is ~320 px wide; bigger grids
+      // shrink the cell so the canvas stays viewport-friendly.
+      cellPx = Math.max(8, Math.floor(320 / meta.grid_side));
+    });
+    evtSrc.onmessage = e => {
+      const d = JSON.parse(e.data);
+      paintGrid(d.grid);
+      updateStats(d);
+    };
+    evtSrc.addEventListener('end', () => stop());
+    evtSrc.onerror = () => stop();
+    setRunning(true);
+  }
+
+  function stop() {
+    if (evtSrc) { evtSrc.close(); evtSrc = null; }
+    setRunning(false);
+  }
+
+  startBtn.addEventListener('click', start);
+  stopBtn.addEventListener('click',  stop);
+})();
+</script>
+
+{% endblock %}

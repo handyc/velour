@@ -194,6 +194,15 @@ class Pact(models.Model):
     name        = models.CharField(max_length=80, unique=True)
     slug        = models.SlugField(max_length=80, unique=True)
 
+    # Bearer-style token gating the workspace ELF endpoints — researcher
+    # who knows (slug, token) can curl the per-tick binaries without a
+    # Velour session.  Auto-generated on save() if blank; rotatable from
+    # the workspace page when compromise is suspected.
+    workspace_share_token = models.CharField(
+        max_length=43, blank=True,
+        help_text='URL-safe token; pair with the slug to fetch workspace '
+                  'ELFs without logging in.')
+
     party_a     = models.CharField(max_length=40, default='Alice')
     party_b     = models.CharField(max_length=40, default='Bob')
 
@@ -314,6 +323,11 @@ class Pact(models.Model):
             self.seed_matrix = secrets.token_bytes(COMPONENTS)
         if not self.rule_snapshot:
             self.rule_snapshot = _random_rule()
+        if not self.workspace_share_token:
+            # 32 random bytes → 43 url-safe base64 chars; same shape as
+            # token_urlsafe(32) but stored on the model so it's stable
+            # for a researcher who bookmarked the URL.
+            self.workspace_share_token = secrets.token_urlsafe(32)
         if not self.palette:
             self.palette = [row[:] for row in DEFAULT_PALETTE]
         if not self.launch_time:
@@ -393,3 +407,64 @@ def synthesise_rules_mutated(base_rule: bytes, density: int,
         out += mutate_rule(base_rule, density,
                             seed=(master_seed * 1000003) ^ (c * 2654435761))
     return bytes(out)
+
+
+# ─── Metapact — rulesets that evolve rulesets to a CAformer leaf ─────
+
+
+class Metapact(models.Model):
+    """A small recipe (16,384-byte seed + depth + knobs) that
+    deterministically expands to a chain of CA rule tables and bottoms
+    out as a complete caformer model.
+
+    Both pact-holders chat with byte-identical CAformer weights without
+    ever shipping the ~160 KB of rule tables — only the recipe (the
+    seed + depth + a few ints) crosses the wire.
+
+    See ``spoeqi.metachain`` for the expansion logic.  This row stores
+    just the recipe; expansion is recomputed on demand from the seed
+    so the model and the on-disk weights are guaranteed in sync.
+    """
+
+    name = models.CharField(max_length=80, unique=True)
+    slug = models.SlugField(max_length=80, unique=True)
+    notes = models.TextField(blank=True)
+
+    seed_state = models.BinaryField()       # 16,384 bytes (128×128 K=4)
+    depth = models.PositiveSmallIntegerField(default=10)
+    chain_ticks = models.PositiveSmallIntegerField(default=24)
+
+    # GA-provenance fields. Filled when the metapact came out of an
+    # evolution run; null for hand-rolled seeds.
+    parent_seed = models.BinaryField(null=True, blank=True)
+    ga_generations = models.PositiveIntegerField(default=0)
+    ga_pop_size    = models.PositiveIntegerField(default=0)
+    final_chain_quality = models.FloatField(default=0.0)
+    final_class4_depth  = models.PositiveIntegerField(default=0)
+    final_leaf_fitness  = models.FloatField(default=0.0)
+
+    # Small text corpus the leaf caformer was scored against, kept so
+    # the recipe is reproducible end-to-end.
+    leaf_probe = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ('-created_at',)
+
+    def __str__(self):
+        return f'{self.name} (d{self.depth}, q{self.final_chain_quality:.2f})'
+
+    def expand(self):
+        """Return the ChainResult — recomputes deterministically from
+        the seed every call. Cheap (~100 ms for depth=10, ticks=24)."""
+        from .metachain import metachain_expand
+        return metachain_expand(bytes(self.seed_state),
+                                  depth=self.depth,
+                                  chain_ticks=self.chain_ticks)
+
+    def caformer_kwargs(self, *, n_blocks: int = 1):
+        """Build the kwargs dict that ``ca_forward_qkv`` accepts —
+        same shape as a saved TrainedModel's ``as_genome`` output."""
+        from .metachain import caformer_kwargs_from_chain
+        return caformer_kwargs_from_chain(self.expand(), n_blocks=n_blocks)

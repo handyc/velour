@@ -118,6 +118,60 @@ from . import depth_cache
 
 
 @login_required
+def autostereogram_decode(request):
+    """Upload an autostereogram raster (PNG/JPEG) and recover the
+    depth map driving it.  Works on stereograms exported by this
+    program or anywhere else, since the algorithm is the standard
+    autocorrelation-based SIRDS decode.
+
+    GET: render the upload form (with last-decoded result if cached).
+    POST: decode the uploaded image, store the result PNGs as base64
+    in the session, redirect back to GET so a refresh doesn't repost.
+    """
+    import base64
+    from .illusions.autostereogram import decode_depth
+
+    if request.method == 'POST':
+        f = request.FILES.get('image')
+        if not f:
+            return render(request, 'optikon/autostereogram_decode.html',
+                            {'error': 'no image file uploaded'})
+        if f.size > 16 * 1024 * 1024:
+            return render(request, 'optikon/autostereogram_decode.html',
+                            {'error': 'image too large (>16 MB)'})
+        try:
+            max_dim = max(64, min(1024,
+                                      int(request.POST.get('max_dim', 640))))
+        except (TypeError, ValueError):
+            max_dim = 640
+        smooth = request.POST.get('smooth', '1') == '1'
+
+        try:
+            result = decode_depth(f.read(), max_dim=max_dim, smooth=smooth)
+        except Exception as exc:  # noqa: BLE001
+            return render(request, 'optikon/autostereogram_decode.html', {
+                'error': f'{type(exc).__name__}: {exc}',
+            })
+
+        ctx = {
+            'depth_b64':  base64.b64encode(result['depth_png']).decode('ascii'),
+            'orig_b64':   base64.b64encode(result['orig_png']).decode('ascii'),
+            'period':     result['period'],
+            'max_shift':  result['max_shift'],
+            'width':      result['width'],
+            'height':     result['height'],
+            'depth_min':  result['depth_min'],
+            'depth_max':  result['depth_max'],
+            'max_dim':    max_dim,
+            'smooth':     smooth,
+            'filename':   f.name,
+        }
+        return render(request, 'optikon/autostereogram_decode.html', ctx)
+
+    return render(request, 'optikon/autostereogram_decode.html', {})
+
+
+@login_required
 @require_POST
 def depth_upload(request):
     """Accept an image file, convert to a discretised depth map,
@@ -175,9 +229,15 @@ def print_view(request, slug):
     params = _resolve_params(illusion, request)
     cell = request.GET.get('cell',
                             getattr(illusion, 'DEFAULT_CELL_MM', 4.0))
-    qs = urlencode({'pattern': 'optikon',
-                     'from_optikon': illusion.SLUG,
-                     'cell': cell,
-                     **params})
+    handoff = {'pattern': 'optikon',
+                'from_optikon': illusion.SLUG,
+                'cell': cell,
+                **params}
+    # Per-illusion landscape default — the autostereogram needs a wide
+    # page so the eye-divergence period has room to repeat across A4.
+    if getattr(illusion, 'DEFAULT_PRINT_LANDSCAPE', False) \
+            and 'landscape' not in request.GET:
+        handoff['landscape'] = '1'
+    qs = urlencode(handoff)
     from django.shortcuts import redirect
     return redirect(f'/gridprint/print/?{qs}')

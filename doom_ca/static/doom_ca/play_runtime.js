@@ -1746,12 +1746,11 @@
     moveAxis('y', player, player.vy * dt);
     // Re-check onGround: a 0.05-cell probe directly below us.
     player.onGround = collisionAt(player.x, player.y + 0.05, 0.4, 0.5);
-    // Damage from cells: if our centre is inside a wall (CA grew one
-    // under us in a non-pure CA tick), bleed.
+    // Wall grew under us (non-pure CA tick): push out, no damage by
+    // default — getting crushed by terrain you didn't choose to walk
+    // into is unfair for an evolved platformer.
     var cx = Math.floor(player.x), cy = Math.floor(player.y);
     if (platformIsWall(cx, cy)) {
-      // Push player upward to escape; also count as damage.
-      hurt(2, 'crushed by a wall that grew under you');
       player.y -= 0.2; player.vy = -2;
     }
     // Move monsters along platform tops.

@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}caframe — CA frames as video{% endblock %}
+{% block content %}
+<style>
+  .cf-page { max-width: 80em; }
+  .cf-page h1 { margin: 0 0 4px; }
+  .cf-page p.intro { color: #aaa; max-width: 56em; }
+  .cf-section { margin-top: 22px; }
+  .cf-section h2 { font-size: 0.9rem; color: #888;
+                    text-transform: uppercase; letter-spacing: 0.06em;
+                    font-weight: normal; margin-bottom: 8px; }
+  .cf-grid { display: grid; grid-template-columns: repeat(auto-fill,
+              minmax(15em, 1fr)); gap: 12px; }
+  .cf-card { background: #0a0a0a; border: 1px solid #1f1f1f;
+              padding: 8px; text-decoration: none; color: inherit;
+              display: block; }
+  .cf-card:hover { border-color: #6f6; }
+  .cf-card .name { color: #fff; margin-top: 4px; font-size: 0.9rem; }
+  .cf-card .meta { color: #888; font-size: 0.72rem; margin-top: 2px; }
+  .cf-card img  { display: block; width: 100%; height: auto;
+                   image-rendering: pixelated; background: #050505; }
+  .cf-form  { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap;
+               align-items: end; }
+  .cf-form label { color: #aaa; font-size: 0.78rem; display: flex;
+                    flex-direction: column; }
+  .cf-form input, .cf-form select {
+                    background: #111; color: #ddd; border: 1px solid #333;
+                    padding: 4px 6px; font-family: inherit; min-width: 5em; }
+  .cf-form button { background: #1f3f1f; color: #cfc; border: 1px solid #4a8;
+                     padding: 5px 14px; cursor: pointer; font-family: inherit; }
+</style>
+
+<div class="cf-page">
+  <h1>caframe
+    <span style="color:#888; font-weight:400; font-size: 0.8rem;">
+      — CA outputs as video
+    </span>
+  </h1>
+  <p class="intro">
+    Chain CA outputs into <em>frames</em>: pick a rule + seed,
+    step the CA, encode as APNG.  Phase 1 ships a deterministic
+    recipe → APNG renderer (no FFmpeg, no extra deps).
+    Phase 2 will evolve recipes against frame-to-frame consistency
+    to find rules that produce <em>watchable</em> video instead of noise.
+  </p>
+
+  <p style="margin-top:6px;">
+    <a href="{% url 'caframe:evolve' %}" style="color:#cfa;">
+      → Evolve consistency (Phase 2)
+    </a>
+  </p>
+
+  <div class="cf-section">
+    <h2>Quick roll — random rule from a 32-bit seed</h2>
+    <form id="cf-quick-form" class="cf-form" onsubmit="return false;">
+      <label>seed
+        <input type="number" name="seed" min="1" max="4294967295"
+               value="3735928559">
+      </label>
+      <label>shape
+        <select name="shape">
+          <option value="hex" selected>hex (K=4)</option>
+          <option value="square">square (totalistic)</option>
+        </select>
+      </label>
+      <label>w  <input type="number" name="w" value="48" min="8" max="128"></label>
+      <label>h  <input type="number" name="h" value="48" min="8" max="128"></label>
+      <label>frames <input type="number" name="n_frames" value="40" min="2" max="180"></label>
+      <label>cell_px <input type="number" name="cell_px" value="6" min="1" max="16"></label>
+      <label>fps <input type="number" name="fps" value="8" min="1" max="60"></label>
+      <button type="button" id="cf-quick-roll">▶ render</button>
+      <button type="button" id="cf-quick-random"
+              title="Roll a fresh random seed and render."
+              style="background:#1f1f4f; color:#cdf; border:1px solid #48a;
+                     padding:3px 10px; cursor:pointer; font-family:inherit;
+                     font-size:0.78rem;">🎲 random seed</button>
+      <button type="button" id="cf-quick-save"
+              title="Persist the currently-rendered (rule, seed) tuple as a saved Sequence."
+              style="background:#1f4f1f; color:#cfc; border:1px solid #4a8;
+                     padding:3px 10px; cursor:pointer; font-family:inherit;
+                     font-size:0.78rem;">⭐ save as Sequence</button>
+    </form>
+    <div id="cf-quick-out" style="margin-top: 14px;">
+      <img id="cf-quick-img" alt="caframe demo"
+           style="image-rendering:pixelated; max-width: 100%;
+                  border:2px solid #1f1f1f; background:#050505;
+                  transition: border-color 0.2s;">
+      <div id="cf-quick-info" style="margin-top:6px; color:#888;
+                                       font-size:0.78rem;"></div>
+      <div id="cf-quick-save-msg" style="margin-top:4px; color:#888;
+                                            font-size:0.78rem;"></div>
+    </div>
+  </div>
+
+  <div class="cf-section">
+    <h2>Saved sequences</h2>
+    {% if sequences %}
+      <div class="cf-grid">
+        {% for s in sequences %}
+          <a class="cf-card" href="{% url 'caframe:detail' slug=s.slug %}">
+            <img src="{% url 'caframe:apng' slug=s.slug %}?cell_px=4&amp;fps=10"
+                 alt="{{ s.slug }} preview" loading="lazy">
+            <div class="name">{{ s.name|default:s.slug }}</div>
+            <div class="meta">
+              {{ s.get_shape_display }} · {{ s.grid_w }}×{{ s.grid_h }} ·
+              {{ s.n_frames }}f
+              {% if s.source_app %}· from {{ s.source_app }}{% endif %}
+            </div>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p style="color:#888; font-size:0.85rem;">
+        (No saved sequences yet — render some quick rolls above; later
+        we'll let you save the good ones to the catalog and evolve them.)
+      </p>
+    {% endif %}
+  </div>
+
+  <div class="cf-section">
+    <h2>Import from another app</h2>
+    <p style="color:#888; font-size:0.78rem; max-width:50em;">
+      Pull a CA recipe from elsewhere in Velour: a class-4 rule from
+      taxon, a TrainedModel's embed rule from caformer, a Mandelbrot
+      walk's seed from loupe, a spoeqi component, an escher motif.
+      The hex K=4 rule + the init seed together form the recipe;
+      every adapter falls back to a class-4 random rule when its
+      source app isn't installed.
+    </p>
+    <form id="cf-import-form" class="cf-form" onsubmit="return false;">
+      <label>source
+        <select name="source">
+          <option value="taxon">taxon (class-4)</option>
+          <option value="caformer">caformer (TrainedModel)</option>
+          <option value="loupe">loupe (Mandelbrot walk)</option>
+          <option value="spoeqi">spoeqi (Pact component)</option>
+          <option value="escher">escher (Motif)</option>
+        </select>
+      </label>
+      <label>source slug / ref
+        <input type="text" name="source_ref"
+               placeholder="(e.g. caformer-bg-prose-200g)" style="width:18em;">
+      </label>
+      <label>seed_init <input type="number" name="seed_init" value="51966"></label>
+      <label>w        <input type="number" name="w"  value="48"></label>
+      <label>h        <input type="number" name="h"  value="48"></label>
+      <label>frames   <input type="number" name="n_frames" value="40"></label>
+      <button type="button" id="cf-import-go">⤓ import as Sequence</button>
+      <span id="cf-import-msg" style="color:#888; font-size:0.78rem;
+                                        align-self:center;"></span>
+    </form>
+  </div>
+
+  <div class="cf-section">
+    <h2>Backlog</h2>
+    <ul style="color:#aaa; font-size:0.85rem; line-height:1.6;">
+      <li><strong>Phase 2</strong>: GA over (rule, seed) tuples
+          maximising consistency — minimising <code>edge_activity</code>
+          subject to consistency &gt; 0.7. Rule library: pull class-4
+          hex rules from <a href="{% url 'taxon:index' %}" style="color:#ace;">taxon</a>
+          as the seed pool.</li>
+      <li>Save quick-roll outputs as Sequence rows on click ("⭐ save")</li>
+      <li>Cross-app sources: escher motif, spoeqi component CA, loupe
+          Mandelbrot walk seed, caformer trained-model embed CA.</li>
+      <li>MP4 export via ffmpeg (gated behind binary detection)</li>
+      <li>Multi-rule sequences (rule changes mid-video)</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+(function () {
+  const form = document.getElementById('cf-quick-form');
+  const img  = document.getElementById('cf-quick-img');
+  const info = document.getElementById('cf-quick-info');
+  const saveMsg = document.getElementById('cf-quick-save-msg');
+
+  function renderQuick() {
+    const params = new URLSearchParams();
+    Array.from(form.querySelectorAll('input,select')).forEach(el => {
+      if (el.name) params.set(el.name, el.value);
+    });
+    // Cache-buster: same (seed, w, h, …) produces an identical APNG,
+    // and the browser will serve from cache → APNG animation won't
+    // restart and the image element appears frozen. ?_t=Date.now()
+    // forces a fresh fetch so the user can SEE the click landed.
+    params.set('_t', Date.now());
+    const url = `{% url 'caframe:quick_apng' %}?${params}`;
+    img.style.borderColor = '#aa6';     // amber while rendering
+    info.textContent = 'rendering…';
+    saveMsg.textContent = '';
+    const t0 = performance.now();
+    const next = new Image();
+    next.onload  = () => {
+      img.src = next.src;
+      img.style.borderColor = '#4a8';   // green flash on success
+      setTimeout(() => { img.style.borderColor = '#1f1f1f'; }, 600);
+      info.textContent = `${(performance.now() - t0).toFixed(0)} ms · ` +
+        `${next.naturalWidth}×${next.naturalHeight} · seed ` +
+        params.get('seed');
+    };
+    next.onerror = () => {
+      img.style.borderColor = '#f86';
+      info.textContent = 'render failed — check console / login';
+      console.error('caframe quick render failed for', url);
+    };
+    next.src = url;
+  }
+
+  // Render button: same-seed re-render (lets user iterate on knobs
+  // without losing their seed).
+  document.getElementById('cf-quick-roll').addEventListener(
+    'click', renderQuick);
+
+  // 🎲 Random seed: assign a fresh 32-bit seed, then render. This is
+  // probably what most users mean when they click "render" after the
+  // page already rendered once — the unchanged-output bug was making
+  // the button look broken.
+  document.getElementById('cf-quick-random').addEventListener('click', () => {
+    const seedEl = form.querySelector('[name=seed]');
+    seedEl.value = Math.floor(Math.random() * 0x7FFFFFFF) + 1;
+    renderQuick();
+  });
+
+  // ⭐ Save current (seed, params) as a Sequence row.
+  document.getElementById('cf-quick-save').addEventListener('click', async () => {
+    const params = new URLSearchParams();
+    Array.from(form.querySelectorAll('input,select')).forEach(el => {
+      if (el.name) params.set(el.name, el.value);
+    });
+    const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+    saveMsg.textContent = 'saving…';
+    try {
+      const fd = new FormData();
+      for (const [k, v] of params) fd.append(k, v);
+      const r = await fetch(`{% url 'caframe:quick_save' %}`, {
+        method: 'POST', body: fd, headers: {'X-CSRFToken': csrf},
+        credentials: 'same-origin',
+      });
+      const j = await r.json();
+      if (j.ok) {
+        saveMsg.innerHTML =
+          `✓ saved <a href="${j.detail_url}" style="color:#cea;">${j.slug}</a>`;
+      } else {
+        saveMsg.textContent = `save failed: ${j.error || 'unknown'}`;
+      }
+    } catch (err) {
+      saveMsg.textContent = `save failed: ${err.message}`;
+    }
+  });
+
+  renderQuick();          // initial render on page load
+
+  // ── Cross-app import ─────────────────────────────────────────
+  const importForm = document.getElementById('cf-import-form');
+  const importMsg  = document.getElementById('cf-import-msg');
+  document.getElementById('cf-import-go').addEventListener('click', async () => {
+    const fd = new FormData();
+    Array.from(importForm.querySelectorAll('input,select')).forEach(el => {
+      if (el.name) fd.append(el.name, el.value);
+    });
+    const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+    importMsg.textContent = 'importing…';
+    try {
+      const r = await fetch(`{% url 'caframe:import_source' %}`, {
+        method: 'POST', body: fd, headers: {'X-CSRFToken': csrf},
+        credentials: 'same-origin',
+      });
+      const j = await r.json();
+      if (j.ok) {
+        importMsg.innerHTML =
+          `✓ saved <a href="${j.detail_url}" style="color:#cea;">${j.slug}</a>`;
+      } else {
+        importMsg.textContent = `import failed: ${j.error || 'unknown'}`;
+      }
+    } catch (err) {
+      importMsg.textContent = `import failed: ${err.message}`;
+    }
+  });
+})();
+</script>
+{% endblock %}

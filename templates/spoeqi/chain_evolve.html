@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}chain evolve — {{ pact.name }}{% endblock %}
+{% block content %}
+<style>
+  .ce-page  { max-width: 84em; }
+  .ce-page h1 { margin: 0 0 4px; }
+  .ce-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 18px; }
+  .ce-page .crumbs a { color: #ace; }
+  .ce-page p.intro { color: #aaa; max-width: 56em; }
+
+  .ce-grid { display: grid; grid-template-columns: 24em 1fr; gap: 18px;
+              margin-top: 14px; }
+  .ce-form { padding: 14px 16px; border: 1px solid #1f1f1f;
+              background: #0a0a0a; }
+  .ce-form h3 { margin: 14px 0 6px; color: #888; font-size: 0.78rem;
+                 text-transform: uppercase; letter-spacing: 0.06em;
+                 font-weight: normal; }
+  .ce-form h3:first-child { margin-top: 0; }
+  .ce-form textarea, .ce-form input[type=text], .ce-form input[type=number] {
+    width: 100%; box-sizing: border-box;
+    background: #111; color: #ddd; border: 1px solid #333;
+    padding: 4px 6px; font-family: monospace;
+  }
+  .ce-form textarea { min-height: 4em; }
+  .ce-form .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .ce-metric  { display: grid; grid-template-columns: 5em 1fr; gap: 6px;
+                 align-items: center; padding: 3px 0;
+                 border-top: 1px dashed #1a1a1a; font-size: 0.8rem; }
+  .ce-metric:first-of-type { border-top: none; }
+  .ce-metric input { width: 4.6em; }
+  .ce-metric .name { color: #cfa; font-family: monospace; }
+  .ce-metric .desc { color: #888; font-size: 0.72rem; }
+  .ce-metric.default .name { color: #ffd; }
+  .ce-form button { background: #1f4f1f; color: #cfc; border: 1px solid #4a8;
+                     padding: 8px 18px; cursor: pointer; font-family: inherit;
+                     font-weight: bold; margin-top: 12px; width: 100%; }
+
+  .ce-out  { padding: 14px 16px; border: 1px solid #1f1f1f;
+              background: #0a0a0a; }
+  .ce-err  { color: #f88; padding: 8px 10px;
+              border: 1px solid #4a1d1d; background: #1a0a0a;
+              margin-bottom: 12px; }
+  .ce-hist { font-family: monospace; font-size: 0.78rem; color: #ace;
+              background: #050505; border: 1px solid #1a1a1a;
+              padding: 8px 10px; margin-top: 8px;
+              white-space: pre-wrap; }
+  .ce-best-output { font-family: monospace; font-size: 0.85rem;
+                     color: #cfc; background: #061206;
+                     border: 1px solid #2a3; padding: 10px 12px;
+                     margin-top: 10px; white-space: pre-wrap;
+                     word-break: break-word; }
+  .ce-gene-list { font-family: monospace; font-size: 0.72rem;
+                   color: #9c9; background: #050505;
+                   border: 1px solid #1a1a1a; padding: 6px 8px;
+                   max-height: 18em; overflow-y: auto; }
+  .ce-gene-list .row { display: grid; grid-template-columns: 3em 5em 1fr;
+                        gap: 6px; padding: 1px 0; }
+  .ce-stage-list { font-family: monospace; font-size: 0.72rem;
+                    color: #ddd; background: #050505;
+                    border: 1px solid #1a1a1a; padding: 6px 8px;
+                    max-height: 22em; overflow-y: auto; margin-top: 6px; }
+  .ce-stage-list .row { padding: 2px 0; border-bottom: 1px dashed #111; }
+  .ce-stage-list .row .hd { color: #aaa; font-size: 0.7rem; }
+  .ce-stage-list .row .out { color: #cfc; }
+  .ce-final { padding: 10px 12px; border: 1px solid #2a3;
+               background: #061206; color: #cfc; margin-top: 14px;
+               font-family: monospace; font-size: 0.85rem; }
+</style>
+
+<div class="ce-page">
+  <div class="crumbs">
+    <a href="{% url 'spoeqi:index' %}">spoeqi</a> ›
+    <a href="{% url 'spoeqi:detail' pact.slug %}">{{ pact.name }}</a> ›
+    <a href="{% url 'spoeqi:chain' pact.slug %}">chain</a> ›
+    evolve
+  </div>
+  <h1>chain · evolve</h1>
+  <p class="intro">
+    Evolve gene-coded chains toward a weighted sum of fitness metrics.
+    Each individual is a 64-tuple of <code>(mode, mapping)</code>
+    tasks — one per CA component.  The GA seeds from this pact's native
+    gene and mutates from there.  The intent is to find chains that are
+    <em>useful preprocessing</em> for an LLM prompt: distil, normalise,
+    or restructure the input.
+  </p>
+
+  {% if error %}<div class="ce-err">{{ error }}</div>{% endif %}
+
+  <form method="post" class="ce-grid">
+    {% csrf_token %}
+    <div class="ce-form">
+      <h3>input</h3>
+      <textarea name="input_text">{{ form.input_text }}</textarea>
+
+      <h3>reference (optional — GA toward this target)</h3>
+      <textarea name="reference_text"
+                placeholder="leave blank to disable reference matching">{{ form.reference_text }}</textarea>
+      <div style="font-size:0.72rem; color:#888; margin-top:2px;">
+        Set a non-zero weight on <code>reference_match</code> below
+        to bias the GA toward producing this exact text.
+      </div>
+
+      <h3>metric weights (0 = disabled)</h3>
+      {% for m in metric_rows %}
+        <div class="ce-metric {% if m.is_default %}default{% endif %}">
+          <input type="number" name="w_{{ m.name }}" min="-2" max="2" step="0.1"
+                 value="{{ m.weight }}">
+          <div>
+            <div class="name">{{ m.name }}</div>
+            <div class="desc">{{ m.description }}</div>
+          </div>
+        </div>
+      {% endfor %}
+      <div class="ce-metric">
+        <input type="number" name="w_reference_match" min="-2" max="4" step="0.1"
+               value="{{ form.w_reference_match }}">
+        <div>
+          <div class="name">reference_match</div>
+          <div class="desc">Token-Jaccard + length similarity to the reference text above.</div>
+        </div>
+      </div>
+
+      <h3>GA</h3>
+      <div class="row2">
+        <label style="font-size:0.78rem;color:#888;">population
+          <input type="number" name="n_population" min="2" max="40" value="{{ form.n_population }}">
+        </label>
+        <label style="font-size:0.78rem;color:#888;">generations
+          <input type="number" name="n_generations" min="1" max="40" value="{{ form.n_generations }}">
+        </label>
+        <label style="font-size:0.78rem;color:#888;">mut. rate
+          <input type="number" name="mutation_rate" min="0" max="1" step="0.05" value="{{ form.mutation_rate }}">
+        </label>
+        <label style="font-size:0.78rem;color:#888;">crossover
+          <input type="number" name="crossover_rate" min="0" max="1" step="0.05" value="{{ form.crossover_rate }}">
+        </label>
+        <label style="font-size:0.78rem;color:#888;">CA generation
+          <input type="number" name="generation" min="0" value="{{ form.generation }}">
+        </label>
+        <label style="font-size:0.78rem;color:#888;display:flex;align-items:center;gap:0.4rem;margin-top:1.5em;">
+          <input type="checkbox" name="seed_with_pact" value="1" {% if form.seed_with_pact == '1' %}checked{% endif %}>
+          seed pop with pact gene
+        </label>
+      </div>
+      <button type="submit">evolve</button>
+    </div>
+
+    <div class="ce-out">
+      <h3 style="margin-top:0;color:#888;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.06em;font-weight:normal;">
+        result
+      </h3>
+      {% if not result %}
+        <p style="color:#666;font-size:0.85rem;">
+          Pick weights and hit <em>evolve</em>.  At default settings this
+          runs in a few seconds; bumping population × generations is
+          ~quadratic in cost.
+        </p>
+      {% else %}
+        <div style="color:#cfc; font-size:0.85rem;">
+          best score: <code>{{ result.final_scores.0|floatformat:4 }}</code> ·
+          generations: {{ result.history|length }} ·
+          cache hits: {{ result.cache_hits }} ·
+          rng seed: {{ result.rng_seed }}
+        </div>
+        <div class="ce-hist">{% for h in result.history %}gen {{ h.gen|stringformat:"02d" }}: best {{ h.best_score|floatformat:4 }}  mean {{ h.mean_score|floatformat:4 }}
+{% endfor %}</div>
+
+        <h3 style="margin-top:14px;color:#888;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.06em;font-weight:normal;">
+          best gene's output
+        </h3>
+        <div class="ce-best-output">{{ result.final_outputs.0 }}</div>
+
+        <details style="margin-top:10px;">
+          <summary style="cursor:pointer;color:#cfc;font-size:0.8rem;">
+            best gene composition ({{ n_components }} components)
+          </summary>
+          <div class="ce-gene-list">
+            {% for elem in result.final_population.0 %}
+              <div class="row">
+                <span style="color:#666;">c{{ forloop.counter0 }}</span>
+                <span style="color:{% if elem.0 == 'token' %}#ace{% else %}#fc6{% endif %};">{{ elem.0 }}</span>
+                <span style="color:#cfc;">{{ elem.1 }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        </details>
+
+        {% if sample_chain %}
+        <details style="margin-top:10px;">
+          <summary style="cursor:pointer;color:#cfc;font-size:0.8rem;">
+            per-stage trace (best gene running on input)
+          </summary>
+          <div class="ce-stage-list">
+            {% for s in sample_chain %}
+              <div class="row">
+                <div class="hd">stage {{ s.stage }} · {{ s.mode }}/{{ s.mapping }} · comp {{ s.component }}</div>
+                <div class="out">{{ s.output_text }}</div>
+              </div>
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+      {% endif %}
+    </div>
+  </form>
+</div>
+{% endblock %}

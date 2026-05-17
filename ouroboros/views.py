@@ -1,0 +1,502 @@
+"""Ouroboros views — present the discovered class-4 fixed-point
+quines, their lineages, and their chain dynamics.
+"""
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import time
+from typing import Optional
+
+from django.contrib.auth.decorators import login_required
+from django.http import (Http404, HttpResponse, JsonResponse)
+from django.shortcuts import get_object_or_404, render
+from django.utils.cache import patch_response_headers
+from django.views.decorators.cache import cache_page
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────
+
+QUINE_SLUG = 'class4_quine'
+
+# Default palette for rendering a 16,384-byte LUT as a 128×128 image.
+# Same hues as spoeqi's DEFAULT_PALETTE, kept here so we don't depend
+# on view-side state.
+_PALETTE_RGB = [
+    (220,  80,  40),   # 0  vermilion
+    ( 60, 120, 210),   # 1  azure
+    ( 80, 180,  90),   # 2  verdant
+    (230, 200,  60),   # 3  amber
+]
+
+
+def _quine_qs():
+    from caformer.models import ComponentChampion
+    return ComponentChampion.objects.filter(component_slug=QUINE_SLUG)
+
+
+def _quine_meta(c) -> dict:
+    try:
+        return json.loads(c.notes or '{}') or {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def _short_sha(blob: bytes) -> str:
+    return hashlib.sha1(blob).hexdigest()[:8]
+
+
+def _walk_chain_levels(seed_bytes: bytes, depth: int) -> list[dict]:
+    """Walk the metachain and emit per-level metrics.  Stops at cycle
+    detection."""
+    from spoeqi.metachain import (
+        classify_rule, probe_activity, sr_arbitrary_sigma,
+        self_reproduce_score, hex_ca_step)
+    import numpy as np
+
+    rule_arr = np.frombuffer(seed_bytes, dtype=np.uint8).copy() & 3
+    out: list[dict] = []
+    seen: dict[bytes, int] = {}
+    current = rule_arr
+    for level in range(depth):
+        cur_bytes = bytes(current.tobytes())
+        cls, c4 = classify_rule(cur_bytes, probe_ticks=16)
+        act = probe_activity(cur_bytes, ticks=12)
+        sr_s = self_reproduce_score(cur_bytes, ticks=16)
+        sr_a = sr_arbitrary_sigma(cur_bytes, ticks=16)
+        ok = (cls == 4 and 0.05 <= act <= 0.85 and sr_a >= 0.85)
+        out.append({
+            'level':       level,
+            'sha':         hashlib.sha1(cur_bytes).hexdigest()[:8],
+            'class':       cls,
+            'c4':          float(c4),
+            'act':         float(act),
+            'sr_strict':   float(sr_s),
+            'sr_arbsigma': float(sr_a),
+            'ok':          ok,
+        })
+
+        # Next
+        state = current.reshape(128, 128).copy()
+        for _ in range(16):
+            state = hex_ca_step(state, current)
+        nxt = state.flatten() & 3
+        nb = bytes(nxt.tobytes())
+        if nb == cur_bytes:
+            out.append({'level':       level + 1,
+                        'sha':         out[-1]['sha'],
+                        'class':       out[-1]['class'],
+                        'c4':          out[-1]['c4'],
+                        'act':         out[-1]['act'],
+                        'sr_strict':   out[-1]['sr_strict'],
+                        'sr_arbsigma': out[-1]['sr_arbsigma'],
+                        'ok':          out[-1]['ok'],
+                        'note':        'fixed point — chain stable here'})
+            break
+        if nb in seen:
+            out.append({'level': level + 1,
+                        'sha':   hashlib.sha1(nb).hexdigest()[:8],
+                        'class': None, 'c4': None, 'act': None,
+                        'sr_strict': None, 'sr_arbsigma': None,
+                        'ok':    False,
+                        'note':  f'cycle entry — returns to L{seen[nb]} '
+                                 f'(period {level + 1 - seen[nb]})'})
+            break
+        seen[nb] = level + 1
+        current = nxt
+    return out
+
+
+def _lineage_graph() -> dict:
+    """Return ``{pk: {'parent': str|None, 'children': [pk,…]}}``.
+
+    Parent is inferred from the ``notes`` JSON ``ga_parent`` field
+    (short sha8) plus the ``origin`` string for deep-chain-ga rows.
+    """
+    by_pk: dict[int, dict] = {}
+    by_sha: dict[str, int] = {}
+    for c in _quine_qs().order_by('pk'):
+        sha = _short_sha(bytes(c.rules_blob))
+        m = _quine_meta(c)
+        by_pk[c.pk] = {
+            'pk':       c.pk,
+            'sha':      sha,
+            'parent':   m.get('ga_parent') or '',
+            'origin':   m.get('origin', '?'),
+            'fitness':  c.fitness,
+            'run_len':  m.get('class4_run_length', 0),
+            'ga_runlen': m.get('ga_run_length'),
+            'children': [],
+        }
+        by_sha[sha] = c.pk
+    # Resolve parent shas to pks
+    for pk, node in by_pk.items():
+        psha = node['parent']
+        if psha and psha in by_sha:
+            node['parent_pk'] = by_sha[psha]
+            by_pk[by_sha[psha]]['children'].append(pk)
+        else:
+            node['parent_pk'] = None
+    return by_pk
+
+
+# ─── Index ────────────────────────────────────────────────────────────
+
+@login_required
+def index(request):
+    """Catalogue of every saved class-4 quine, paginated.
+
+    Hashing every LUT to produce sha8 is ~1 ms/row, so without paging
+    the catalogue page was doing ~2 s of hashing alone after the L0
+    search dumped 1.7k rows.  Filter + paginate before hydration."""
+    from django.core.paginator import Paginator
+    from caformer.models import ComponentChampion
+
+    SORTS = {
+        'fitness':    '-fitness',
+        'created':    '-created_at',
+        'pk_asc':     'pk',
+        'pk_desc':    '-pk',
+    }
+    sort_key = request.GET.get('sort') or 'fitness'
+    order_by = SORTS.get(sort_key, '-fitness')
+
+    qs = _quine_qs().only('pk', 'fitness', 'run_label', 'created_at',
+                                'notes', 'rules_blob').order_by(order_by)
+
+    f_origin    = (request.GET.get('origin') or '').strip()
+    f_run_label = (request.GET.get('run_label') or '').strip()
+    f_sha       = (request.GET.get('sha') or '').strip().lower()
+    f_name      = (request.GET.get('name') or '').strip()
+    try:
+        f_min_runlen = int(request.GET.get('min_runlen') or 0)
+    except ValueError:
+        f_min_runlen = 0
+
+    if f_run_label:
+        qs = qs.filter(run_label=f_run_label)
+    if f_origin:
+        # `origin` is a notes-JSON field, no direct index — best-effort
+        # substring match via Postgres-compatible CharField filter.
+        qs = qs.filter(notes__icontains=f'"origin": "{f_origin}"')
+    if f_name:
+        # display_name is a notes-JSON field too; same trick.
+        qs = qs.filter(notes__icontains=f'"display_name": ')
+        qs = qs.filter(notes__icontains=f_name)
+    if f_sha:
+        # sha8 is computed from rules_blob; no DB-side index.  Apply
+        # AFTER pagination would be wrong (we'd skip rows), so fall back
+        # to a Python-side filter that walks the whole queryset.  Cheap
+        # enough as long as the filter narrows down to a known prefix.
+        pass  # filtered post-hydration below
+
+    total_unfiltered = _quine_qs().count()
+
+    # Distinct run_labels + origins for the filter dropdowns — cheap
+    # because both are short fields.
+    run_labels = list(
+        ComponentChampion.objects
+          .filter(component_slug=QUINE_SLUG)
+          .exclude(run_label='')
+          .values_list('run_label', flat=True)
+          .distinct()
+          .order_by('run_label'))
+
+    # Always look up the featured quine directly — independent of page.
+    featured_pk = 122
+    feat_obj = _quine_qs().filter(pk=featured_pk).first()
+    featured = None
+    if feat_obj is not None:
+        m = _quine_meta(feat_obj)
+        featured = {
+            'pk':       feat_obj.pk,
+            'sha':      _short_sha(bytes(feat_obj.rules_blob)),
+            'fitness':  feat_obj.fitness,
+            'class4_run_length': m.get('class4_run_length', 0),
+            'origin':   m.get('origin', '?'),
+        }
+
+    paginator = Paginator(qs, 50)
+    try:
+        page_num = max(1, int(request.GET.get('page') or 1))
+    except ValueError:
+        page_num = 1
+    page = paginator.get_page(page_num)
+
+    quines = []
+    for c in page.object_list:
+        m = _quine_meta(c)
+        if f_min_runlen and (m.get('class4_run_length', 0) or 0) < f_min_runlen:
+            continue
+        sha8 = _short_sha(bytes(c.rules_blob))
+        if f_sha and not sha8.startswith(f_sha):
+            continue
+        quines.append({
+            'pk':       c.pk,
+            'sha':      sha8,
+            'fitness':  c.fitness,
+            'origin':   m.get('origin', '?'),
+            'run_label': c.run_label or '',
+            'class4_run_length': m.get('class4_run_length', 0),
+            'ga_run_length':     m.get('ga_run_length'),
+            'created':  c.created_at,
+            'display_name': m.get('display_name') or '',
+        })
+
+    # Build a query string for pagination links that preserves filters.
+    keep = []
+    for k in ('sort', 'origin', 'run_label', 'sha', 'min_runlen', 'name'):
+        v = request.GET.get(k)
+        if v:
+            keep.append(f'{k}={v}')
+    qs_keep = ('&' + '&'.join(keep)) if keep else ''
+
+    return render(request, 'ouroboros/index.html', {
+        'quines':           quines,
+        'featured':         featured,
+        'total':            paginator.count,
+        'total_unfiltered': total_unfiltered,
+        'page':             page,
+        'page_size':        50,
+        'run_labels':       run_labels,
+        'sort':             sort_key,
+        'filters': {
+            'origin':     f_origin,
+            'run_label':  f_run_label,
+            'sha':        f_sha,
+            'min_runlen': f_min_runlen,
+            'name':       f_name,
+        },
+        'qs_keep':          qs_keep,
+    })
+
+
+# ─── Detail ──────────────────────────────────────────────────────────
+
+@login_required
+def detail(request, pk: int):
+    """Showcase one quine — lineage, chain, ruleset, per-level stats."""
+    c = get_object_or_404(_quine_qs(), pk=pk)
+    seed = bytes(c.rules_blob)
+    sha = _short_sha(seed)
+    meta = _quine_meta(c)
+
+    # Lineage
+    graph = _lineage_graph()
+    node = graph.get(pk, {})
+    parent_pk = node.get('parent_pk')
+    children = node.get('children', [])
+    parent = graph.get(parent_pk) if parent_pk else None
+    child_nodes = [graph[cp] for cp in children if cp in graph]
+
+    # Ancestry chain — walk back to a root
+    ancestry = []
+    cur = pk
+    visited = set()
+    while cur and cur not in visited:
+        visited.add(cur)
+        ancestry.append(graph[cur])
+        cur = graph[cur].get('parent_pk')
+    ancestry.reverse()
+
+    # Chain walk (limited depth for the detail page; deeper walks are
+    # available via the API endpoint).
+    walk_depth = int(request.GET.get('depth', 200))
+    walk_depth = max(20, min(2000, walk_depth))
+    levels = _walk_chain_levels(seed, walk_depth)
+
+    # Summary stats from the walk
+    streak = 0
+    streak_start = None
+    best_streak = 0
+    best_start = None
+    for i, lvl in enumerate(levels):
+        if lvl['ok']:
+            if streak == 0:
+                streak_start = i
+            streak += 1
+            if streak > best_streak:
+                best_streak = streak
+                best_start = streak_start
+        else:
+            streak = 0
+
+    fixed_point_level = None
+    cycle_period = None
+    for lvl in levels:
+        if lvl.get('note', '').startswith('fixed point'):
+            fixed_point_level = lvl['level']
+            cycle_period = 1
+            break
+        if lvl.get('note', '').startswith('cycle'):
+            fixed_point_level = lvl['level']
+            # parse period from the note text
+            import re
+            mtch = re.search(r'period (\d+)', lvl['note'])
+            if mtch:
+                cycle_period = int(mtch.group(1))
+            break
+
+    fp_is_class4 = False
+    if fixed_point_level is not None and fixed_point_level - 1 < len(levels):
+        fp_lvl = levels[fixed_point_level - 1] if cycle_period == 1 else None
+        if fp_lvl:
+            fp_is_class4 = bool(fp_lvl['ok'])
+
+    # Is this the breakthrough?
+    is_featured = (pk == 122)
+
+    return render(request, 'ouroboros/detail.html', {
+        'champion':            c,
+        'pk':                  pk,
+        'sha':                 sha,
+        'meta':                meta,
+        'display_name':        meta.get('display_name') or '',
+        'user_note':           meta.get('user_note') or '',
+        'parent':              parent,
+        'children_nodes':      child_nodes,
+        'ancestry':            ancestry,
+        'levels':              levels,
+        'walk_depth':          walk_depth,
+        'best_streak':         best_streak,
+        'best_start':          best_start,
+        'fixed_point_level':   fixed_point_level,
+        'cycle_period':        cycle_period,
+        'fp_is_class4':        fp_is_class4,
+        'is_featured':         is_featured,
+    })
+
+
+# ─── Annotate (name + note) ──────────────────────────────────────────
+
+@login_required
+def annotate(request, pk: int):
+    """POST endpoint: save a human-readable name + free-form note for
+    a quine.  Stored in the ComponentChampion.notes JSON blob under
+    keys ``display_name`` and ``user_note`` — no schema migration."""
+    from django.http import HttpResponseRedirect
+    from django.urls import reverse
+    if request.method != 'POST':
+        return HttpResponseRedirect(reverse('ouroboros:detail',
+                                                args=[pk]))
+    c = get_object_or_404(_quine_qs(), pk=pk)
+    meta = _quine_meta(c)
+    if 'display_name' in request.POST:
+        name = (request.POST.get('display_name') or '').strip()[:120]
+        if name:
+            meta['display_name'] = name
+        else:
+            meta.pop('display_name', None)
+    if 'user_note' in request.POST:
+        note = (request.POST.get('user_note') or '').strip()[:4000]
+        if note:
+            meta['user_note'] = note
+        else:
+            meta.pop('user_note', None)
+    c.notes = json.dumps(meta)
+    c.save(update_fields=['notes'])
+    return HttpResponseRedirect(reverse('ouroboros:detail', args=[pk]))
+
+
+# ─── Ruleset image ────────────────────────────────────────────────────
+
+@login_required
+def ruleset_png(request, pk: int):
+    """Render the 16,384-byte LUT as a 128×128 PNG image.
+
+    Each pixel = one LUT entry's output cell (0-3 mapped to the
+    default palette).  The whole rule is therefore visible as its
+    own initial-condition image — the foundation of the metachain.
+    """
+    from PIL import Image
+    c = get_object_or_404(_quine_qs(), pk=pk)
+    seed = bytes(c.rules_blob)
+    arr = bytes(b & 3 for b in seed)
+    img = Image.new('RGB', (128, 128))
+    px = img.load()
+    for i, v in enumerate(arr):
+        r, g, b = _PALETTE_RGB[v]
+        px[i % 128, i // 128] = (r, g, b)
+
+    # Optional upscale
+    try:
+        scale = max(1, min(8, int(request.GET.get('scale', 4))))
+    except (TypeError, ValueError):
+        scale = 4
+    if scale != 1:
+        img = img.resize((128 * scale, 128 * scale), Image.NEAREST)
+
+    buf = io.BytesIO()
+    img.save(buf, format='PNG', optimize=True)
+    resp = HttpResponse(buf.getvalue(), content_type='image/png')
+    patch_response_headers(resp, cache_timeout=3600)
+    return resp
+
+
+@login_required
+def chain_level_png(request, pk: int, level: int):
+    """Render one chain level's LUT-as-image.  Level 0 is the seed
+    itself; higher levels are the chain's iterated output."""
+    from PIL import Image
+    from spoeqi.metachain import hex_ca_step
+    import numpy as np
+
+    c = get_object_or_404(_quine_qs(), pk=pk)
+    seed = bytes(c.rules_blob)
+    current = np.frombuffer(seed, dtype=np.uint8).copy() & 3
+    for _ in range(level):
+        state = current.reshape(128, 128).copy()
+        for _ in range(16):
+            state = hex_ca_step(state, current)
+        current = state.flatten() & 3
+    arr = bytes(current.tolist())
+    img = Image.new('RGB', (128, 128))
+    px = img.load()
+    for i, v in enumerate(arr):
+        r, g, b = _PALETTE_RGB[v]
+        px[i % 128, i // 128] = (r, g, b)
+    try:
+        scale = max(1, min(8, int(request.GET.get('scale', 4))))
+    except (TypeError, ValueError):
+        scale = 4
+    if scale != 1:
+        img = img.resize((128 * scale, 128 * scale), Image.NEAREST)
+    buf = io.BytesIO()
+    img.save(buf, format='PNG', optimize=True)
+    resp = HttpResponse(buf.getvalue(), content_type='image/png')
+    patch_response_headers(resp, cache_timeout=3600)
+    return resp
+
+
+# ─── Walk JSON (for interactive client-side viz) ──────────────────────
+
+@login_required
+def walk_json(request, pk: int):
+    """JSON dump of per-level metrics for client-side rendering."""
+    c = get_object_or_404(_quine_qs(), pk=pk)
+    seed = bytes(c.rules_blob)
+    try:
+        depth = max(20, min(2000, int(request.GET.get('depth', 200))))
+    except (TypeError, ValueError):
+        depth = 200
+    levels = _walk_chain_levels(seed, depth)
+    return JsonResponse({
+        'pk':        pk,
+        'sha':       _short_sha(seed),
+        'depth':     depth,
+        'levels':    levels,
+    })
+
+
+# ─── Seed download ────────────────────────────────────────────────────
+
+@login_required
+def seed_bytes(request, pk: int):
+    """Raw 16,384-byte LUT — same format as spoeqi quine_seed_bytes."""
+    c = get_object_or_404(_quine_qs(), pk=pk)
+    resp = HttpResponse(bytes(c.rules_blob),
+                            content_type='application/octet-stream')
+    resp['Content-Disposition'] = (
+        f'attachment; filename="quine-{pk}-seed.bin"')
+    return resp

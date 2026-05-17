@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}spoeqi — class-4 quine search{% endblock %}
+{% block content %}
+<style>
+  .q-page { max-width: 64em; }
+  .q-page h1 { margin: 0 0 0.5rem 0; }
+  .q-page p.lede { color: #aaa; font-size: 0.9rem; max-width: 50em; }
+  .q-search { display: flex; gap: 0.6rem; align-items: center;
+                  flex-wrap: wrap; margin: 1.1rem 0;
+                  padding: 0.8rem 1rem;
+                  background: #0d1117; border: 1px solid #234; }
+  .q-search label { color: #8b949e; font-size: 0.85rem; }
+  .q-search input[type=number],
+  .q-search input[type=text] {
+    width: 5rem; background: #0d1117; color: #c9d1d9;
+    border: 1px solid #30363d; padding: 0.2rem 0.4rem;
+    font-family: ui-monospace, monospace;
+  }
+  .q-search input[type=text] { width: 9rem; }
+  .q-search button { background: #238636; color: #fff; border: 0;
+                       padding: 0.3rem 0.9rem; cursor: pointer;
+                       font-family: inherit; }
+  .q-table { width: 100%; border-collapse: collapse;
+                font-size: 0.88rem; margin-top: 0.6rem; }
+  .q-table th, .q-table td { padding: 0.35rem 0.6rem;
+                                 border-bottom: 1px solid #21262d;
+                                 text-align: right;
+                                 font-family: ui-monospace, monospace; }
+  .q-table th { color: #8b949e; text-transform: uppercase;
+                   font-size: 0.7rem; letter-spacing: 0.05em; }
+  .q-table td.label { text-align: left; }
+  .q-table tr:hover td { background: #161b22; }
+  .q-table a { color: #79c0ff; text-decoration: none; }
+  .q-msg { color: #cfa; font-size: 0.85rem;
+              padding: 0.5rem 0.8rem; background: #112; border: 1px solid #234;
+              margin: 0.6rem 0; }
+  .q-msg.warn { color: #f9c; background: #211; border-color: #432; }
+  .q-empty { color: #8b949e; font-style: italic; padding: 1rem 0; }
+  .q-help { color: #888; font-size: 0.82rem; max-width: 50em;
+              padding-top: 0.6rem; }
+</style>
+
+<div class="q-page">
+  <h1>class-4 quine search</h1>
+  <p class="lede">
+    Hunt for K=4 hex CA rules whose 16,384-byte LUT, applied to itself
+    laid out as a 128×128 grid, reproduces itself (a quine) AND exhibits
+    class-4 dynamics.  Then walk the metachain — most chains stay
+    class-4 for 10-30 nestings before tipping into a class-1 attractor.
+  </p>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="q-msg {% if m.level_tag == 'warning' %}warn{% endif %}">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <form class="q-search" method="post"
+          action="{% url 'spoeqi:quine_search' %}">
+    {% csrf_token %}
+    <label title="Block-flip trials per sweep. ~5-20 ms each. 300 ≈ 5s.">
+      trials
+      <input type="number" name="n_trials" value="300" min="50" max="2000" step="50">
+    </label>
+    <label title="Top-N candidates from the sweep to save.">
+      keep
+      <input type="number" name="n_keep" value="3" min="1" max="20">
+    </label>
+    <label title="Hill-climb passes on each kept candidate. ~15-30s per pass per candidate.">
+      climb passes
+      <input type="number" name="climb_passes" value="1" min="0" max="8">
+    </label>
+    <label title="LUT entries sampled per climb pass.">
+      climb sample
+      <input type="number" name="climb_sample" value="1024" min="128" max="4096" step="128">
+    </label>
+    <label>label
+      <input type="text" name="label" value="browser">
+    </label>
+    <button type="submit">▶ search</button>
+  </form>
+  <p class="q-help">
+    Recipe: block-flip-from-identity sweep (~1.4 s for 200 trials) →
+    keep candidates with SR&gt;0.30 and activity ∈ [0.05, 0.5] → optional
+    single-byte hill-climb (~30 s per candidate per pass).  Best so far:
+    SR≈0.42, c4≈0.85, probe-activity 0.35, class-4 chain run of ~5
+    levels.  Bigger budgets find better candidates.
+  </p>
+
+  <h2 style="margin-top:1.8rem; font-size:1.05rem;">
+    saved candidates <span style="color:#8b949e; font-weight:400;">({{ n_total }} total)</span>
+  </h2>
+  {% if rows %}
+    <table class="q-table">
+      <thead>
+        <tr>
+          <th style="text-align:right;">#</th>
+          <th style="text-align:right;">SR</th>
+          <th style="text-align:right;">SR<sub>arbσ</sub></th>
+          <th style="text-align:right;">c4</th>
+          <th style="text-align:right;">act</th>
+          <th style="text-align:right;">chain run</th>
+          <th style="text-align:left;">origin</th>
+          <th style="text-align:left;">label</th>
+          <th style="text-align:left;">created</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><a href="{% url 'spoeqi:quine_detail' pk=r.pk %}">{{ r.pk }}</a></td>
+          <td style="color:#7ee787;">{{ r.fitness|floatformat:4 }}</td>
+          <td>{{ r.arbsigma|floatformat:4 }}</td>
+          <td>{{ r.c4|floatformat:4 }}</td>
+          <td>{{ r.act|floatformat:4 }}</td>
+          <td>{{ r.run_len }}</td>
+          <td class="label" style="color:#aaa;">{{ r.origin }}</td>
+          <td class="label" style="color:#aaa;">{{ r.run_label|default:"—" }}</td>
+          <td class="label" style="color:#888;">{{ r.created|date:"D d M H:i" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if n_total > 100 %}
+    <p style="color:#888; font-size:0.8rem;">
+      Showing top 100 by fitness; {{ n_total|add:"-100" }} more in the database.
+    </p>
+    {% endif %}
+  {% else %}
+    <p class="q-empty">
+      No saved candidates yet — run the search above.  Default settings
+      should produce 3 candidates in ~30 seconds.
+    </p>
+  {% endif %}
+</div>
+{% endblock %}

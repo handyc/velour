@@ -43,6 +43,28 @@ class TournamentParams:
     progress_every: int = 1
     init_from_identity: bool = True
     init_mutation_rate: float = 0.05
+    # Board side length for fitness evaluation.  16 (the default) gives
+    # a 16×16 board — fits ``WINDOW_SIZE`` exactly so corpus windows map
+    # 1:1.  Larger sides give more cells per eval = lower-noise class-4
+    # signal at quadratic cost (32 = 4×, 64 = 16×, 128 = 64× the per-step
+    # work).  Useful when hunting for rules whose class-4 character only
+    # becomes visible at scale.
+    board_side: int = 16
+
+    # Self-reproduction validation: every ``validation_every`` gens,
+    # take the top ``validation_elite_n`` rules and test whether each
+    # one reproduces itself.  The 16,384-entry LUT is laid out as a
+    # 128×128 hex grid; that grid is used as the initial state; the
+    # rule is run for ``validation_steps`` ticks; fitness = hamming
+    # similarity (matched cells / 16,384) between the final grid and
+    # the original LUT-as-image.  Higher = more self-reproducing.
+    # Direct test of meta-evolution: a class-4 rule that re-produces
+    # itself is, by construction, a class-4 generator of a class-4.
+    # Replaces the elites' GA fitness for this gen's selection.
+    # Default disabled (validation_every = 0).
+    validation_every: int = 0
+    validation_elite_n: int = 8
+    validation_steps: int = 64
 
 
 @dataclass
@@ -54,6 +76,12 @@ class GenLog:
     # Discriminator-only — None for single-corpus runs.
     pos_mean: Optional[float] = None
     neg_mean: Optional[float] = None
+    # Self-reproduction validation: populated on the gens where the
+    # elite set was re-scored.  ``self_reproduce_scores`` is a list of
+    # (population_index, hamming_similarity_0_to_1) tuples for each
+    # elite tested this gen; the scores have already been written
+    # back to the elites' fitness for selection.
+    self_reproduce_scores: Optional[List] = None
 
 
 @dataclass
@@ -80,18 +108,92 @@ def _score_rule(rule_table: np.ndarray,
 
 def _sample_boards(corpus_sequences: List[str],
                    rng: random.Random,
-                   k: int) -> List[np.ndarray]:
+                   k: int,
+                   board_side: int = 16) -> List[np.ndarray]:
     """Pick k windows and turn them into boards.
 
     Each window seed is its index in the corpus, so a given window's
     random-fill mask is stable across generations even though we
     sample different subsets per generation.
+
+    When ``board_side != 16``, the 16×16 DNA window is tiled across the
+    larger board so the corpus seed still shapes initial state but the
+    extra cells are filled with seeded random colour — gives class-4
+    mutations a bigger canvas to express without losing the corpus
+    correlation that the discriminator path relies on.
     """
     if k >= len(corpus_sequences):
         chosen = list(range(len(corpus_sequences)))
     else:
         chosen = rng.sample(range(len(corpus_sequences)), k)
-    return [dna_to_board(corpus_sequences[i], seed=i) for i in chosen]
+    boards = []
+    for i in chosen:
+        base = dna_to_board(corpus_sequences[i], seed=i)
+        if board_side == base.shape[0]:
+            boards.append(base)
+            continue
+        big = np.empty((board_side, board_side), dtype=base.dtype)
+        # Seeded random fill so the same window gives the same big
+        # board every generation.
+        r = np.random.default_rng(i ^ 0xC1A554 ^ board_side)
+        big[:] = r.integers(0, 4, size=(board_side, board_side),
+                              dtype=base.dtype)
+        # Stamp the DNA window into the top-left corner so corpus
+        # signal still drives the initial state.
+        h = min(board_side, base.shape[0])
+        w = min(board_side, base.shape[1])
+        big[:h, :w] = base[:h, :w]
+        boards.append(big)
+    return boards
+
+
+def _self_reproduce_score(rule_table: np.ndarray, steps: int) -> float:
+    """Score how closely a rule reproduces its own LUT.
+
+    The 16,384-entry rule table is laid out as a 128×128 hex grid;
+    that grid is used as the initial state; the rule is run for
+    ``steps`` ticks; returns the fraction of cells in the final grid
+    that match the initial grid.  1.0 = perfect fixed point.
+
+    Since 4^7 = 16,384 = 128², the LUT maps cleanly onto the grid
+    with no padding or truncation — every rule entry is one cell.
+    """
+    init = rule_table.reshape(128, 128).astype(np.int8)
+    spacetime = engine.evolve(init, rule_table, steps=steps)
+    final = spacetime[-1]
+    return float((final == init).sum() / float(init.size))
+
+
+def _validate_elites_self_reproduce(*,
+                                      unpacked: List[np.ndarray],
+                                      scores: List[float],
+                                      params: 'TournamentParams') -> dict:
+    """Re-score the top ``params.validation_elite_n`` rules by how well
+    each one reproduces its own LUT-as-image after a short CA run.
+    Replaces the elites' GA fitness for the next selection step.
+
+    Returns:
+        {
+          'composite_by_index': {idx: float} self-reproduction score per
+                                 elite (matched cells / 16,384),
+          'composite_list':     [(idx, score), ...] sorted by idx for
+                                 stable JSON encoding of the GenLog.
+        }
+    """
+    elite_k = min(params.validation_elite_n, len(scores))
+    if elite_k <= 0:
+        return {'composite_by_index': {}, 'composite_list': []}
+    elite_indices = sorted(range(len(scores)),
+                              key=lambda i: -scores[i])[:elite_k]
+    composite_by_index: dict = {}
+    for i in elite_indices:
+        composite_by_index[i] = _self_reproduce_score(
+            unpacked[i], steps=params.validation_steps)
+    composite_list = sorted(composite_by_index.items(), key=lambda kv: kv[0])
+    return {
+        'composite_by_index': composite_by_index,
+        'composite_list':     composite_list,
+    }
 
 
 def run_tournament(corpus_sequences: List[str],
@@ -136,12 +238,14 @@ def run_tournament(corpus_sequences: List[str],
 
     for gen in range(p.generations):
         t0 = time.time()
-        pos_boards = _sample_boards(corpus_sequences, rng, p.windows_per_gen)
+        pos_boards = _sample_boards(corpus_sequences, rng, p.windows_per_gen,
+                                       board_side=p.board_side)
         unpacked = [engine.unpack_rule(r) for r in population]
         pos_scores = [_score_rule(u, pos_boards, p) for u in unpacked]
         if discriminator:
             neg_boards = _sample_boards(
                 neg_corpus_sequences, rng, p.windows_per_gen,
+                board_side=p.board_side,
             )
             neg_scores = [_score_rule(u, neg_boards, p) for u in unpacked]
             scores = [pos_scores[i] - neg_scores[i]
@@ -149,6 +253,22 @@ def run_tournament(corpus_sequences: List[str],
         else:
             neg_scores = None
             scores = pos_scores
+
+        # Self-reproduction validation: every Nth gen, re-score the top
+        # elites by how closely each reproduces its own LUT-as-image
+        # under its own CA, and replace their fitness with that score.
+        # Direct test of meta-evolution — a rule that reproduces itself
+        # is a class-4 generator of a class-4.
+        sr_validation = None
+        if (p.validation_every > 0
+                and ((gen + 1) % p.validation_every == 0)):
+            sr_validation = _validate_elites_self_reproduce(
+                unpacked=unpacked, scores=scores, params=p,
+            )
+            # Overwrite elites' fitness with the self-reproduction score
+            # so this gen's selection pursues self-reproducing rules.
+            for idx, sr_score in sr_validation['composite_by_index'].items():
+                scores[idx] = sr_score
 
         order = sorted(range(p.population_size), key=lambda i: -scores[i])
         ranked = [population[i] for i in order]
@@ -166,6 +286,8 @@ def run_tournament(corpus_sequences: List[str],
             elapsed_s=time.time() - t0,
             pos_mean=float(np.mean(pos_scores)) if discriminator else None,
             neg_mean=float(np.mean(neg_scores)) if discriminator else None,
+            self_reproduce_scores=(sr_validation['composite_list']
+                                       if sr_validation else None),
         )
         result.log.append(log)
         if on_generation and (gen % p.progress_every == 0):

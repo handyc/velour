@@ -100,3 +100,105 @@ def render_mandelbrot_png(cx: float, cy: float, span: float,
     buf = io.BytesIO()
     img.save(buf, format='PNG', optimize=True)
     return buf.getvalue()
+
+
+def colourise_posterized(escape: np.ndarray, iter_cap: int,
+                          palette4: Sequence[Sequence[int]],
+                          bin1: float, bin2: float) -> np.ndarray:
+    """4-colour posterise.  Bucket 3 = in-set; buckets 0/1/2 = finite
+    escapes split at ``bin1`` and ``bin2``.  Mirrors loupe.js
+    renderPosterized so server-side prints match the browser preview
+    pixel-for-pixel given the same (cx, cy, span, palette, bins)."""
+    pal = np.asarray(palette4, dtype=np.uint8)
+    if pal.shape[0] != 4:
+        raise ValueError(f'posterised palette needs 4 colours, got {pal.shape[0]}')
+    bucket = np.where(escape < bin1, 0,
+              np.where(escape < bin2, 1, 2))
+    bucket = np.where(escape >= iter_cap, 3, bucket)
+    rgb = pal[bucket]
+    return rgb.astype(np.uint8)
+
+
+def render_mandelbrot_posterized_png(cx: float, cy: float, span: float,
+                                       w: int, h: int,
+                                       palette4: Sequence[Sequence[int]],
+                                       bin1: float, bin2: float,
+                                       *, iter_cap: int | None = None
+                                       ) -> bytes:
+    """End-to-end PNG render in 4-colour posterise mode."""
+    iter_cap = iter_cap or auto_iter(span)
+    escape = mandelbrot_escape(cx, cy, span, w, h, iter_cap)
+    rgb = colourise_posterized(escape, iter_cap, palette4, bin1, bin2)
+    img = Image.fromarray(rgb, mode='RGB')
+    buf = io.BytesIO()
+    img.save(buf, format='PNG', optimize=True)
+    return buf.getvalue()
+
+
+def default_poster_palette() -> tuple[tuple[int, int, int], ...]:
+    """A reasonable 4-colour palette when the caller asks for posterize
+    without specifying one — picked so the four buckets are visually
+    distinct on both screen and paper."""
+    return (
+        ( 30,  40, 100),    # bucket 0 — deep navy (low escape)
+        (200, 110,  40),    # bucket 1 — burnt orange
+        (245, 215,  85),    # bucket 2 — sand
+        ( 18,  18,  20),    # bucket 3 — in-set
+    )
+
+
+def mandelbrot_buckets(cx: float, cy: float, span: float,
+                        w: int, h: int,
+                        *, iter_cap: int | None = None) -> np.ndarray:
+    """4-colour bucket array (0..3, uint8) for a Mandelbrot region.
+    Same auto-binning the posterised PNG renderer uses, but returns
+    the *labels* directly so callers can feed the array straight into
+    a K=4 CA without going via PNG → RGB → quantize.
+
+    Used by gridprint to seed the spoeqi CA print with a Mandelbrot
+    walk's final image instead of an LCG-random initial state.
+    """
+    iter_cap = iter_cap or auto_iter(span)
+    escape   = mandelbrot_escape(cx, cy, span, w, h, iter_cap)
+    finite   = escape[escape < iter_cap]
+    if finite.size < 3:
+        bin1, bin2 = iter_cap / 3.0, 2.0 * iter_cap / 3.0
+    else:
+        sorted_f = np.sort(finite)
+        bin1 = float(sorted_f[len(sorted_f) // 3])
+        bin2 = float(sorted_f[2 * len(sorted_f) // 3])
+        if bin2 <= bin1:
+            bin2 = bin1 + 1
+    bucket = np.where(escape < bin1, 0,
+              np.where(escape < bin2, 1, 2))
+    bucket = np.where(escape >= iter_cap, 3, bucket)
+    return bucket.astype(np.uint8)
+
+
+def render_mandelbrot_posterized_auto_png(cx: float, cy: float, span: float,
+                                            w: int, h: int,
+                                            palette4: Sequence[Sequence[int]],
+                                            *, iter_cap: int | None = None
+                                            ) -> bytes:
+    """Same as render_mandelbrot_posterized_png but derives the bin
+    boundaries from the escape array's 1/3 and 2/3 quantiles — mirrors
+    loupe.js renderPosterized's auto-bin behaviour so a server-side
+    print without explicit bins still buckets sensibly for any zoom."""
+    iter_cap = iter_cap or auto_iter(span)
+    escape   = mandelbrot_escape(cx, cy, span, w, h, iter_cap)
+    finite   = escape[escape < iter_cap]
+    if finite.size < 3:
+        bin1, bin2 = iter_cap / 3.0, 2.0 * iter_cap / 3.0
+    else:
+        # Quantile-based binning so each visible bucket carries roughly
+        # equal pixel area regardless of how deep the zoom is.
+        sorted_f = np.sort(finite)
+        bin1 = float(sorted_f[len(sorted_f) // 3])
+        bin2 = float(sorted_f[2 * len(sorted_f) // 3])
+        if bin2 <= bin1:
+            bin2 = bin1 + 1
+    rgb = colourise_posterized(escape, iter_cap, palette4, bin1, bin2)
+    img = Image.fromarray(rgb, mode='RGB')
+    buf = io.BytesIO()
+    img.save(buf, format='PNG', optimize=True)
+    return buf.getvalue()

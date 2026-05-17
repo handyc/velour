@@ -66,6 +66,11 @@
                   value="4" min="1" max="12" style="width:3rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.1rem 0.3rem;font-family:inherit;"></label>
           <label style="color:#8b949e;">seed <input type="number" name="seed"
                   value="0" style="width:3.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.1rem 0.3rem;font-family:inherit;"></label>
+          <label style="color:#8b949e;"
+                  title="Self-reproduction validation: every 5 gens, take each top elite's 16,384-entry rule LUT, lay it out as a 128×128 hex grid, run the rule for 64 ticks, and replace the elite's fitness with the fraction of cells that match the LUT. Selects for rules that produce themselves — a class-4 generator of a class-4.">
+            <input type="checkbox" name="self_reproduce" value="1"
+                    style="vertical-align:middle;"> self-repro
+          </label>
           <button type="submit"
                   title="Run a tournament inline (synchronous). Inline cap is pop × gens × windows ≤ 19,200; bigger jobs need the management command."
                   style="background:#238636;color:#fff;border:0;padding:0.2rem 0.7rem;cursor:pointer;font-family:inherit;font-size:0.75rem;">Run</button>

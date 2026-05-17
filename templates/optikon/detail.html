@@ -128,6 +128,12 @@
               formaction="/gridprint/print/" formmethod="get">
         → print at A4 via gridprint
       </button>
+      <label style="margin-left: 6px; font-size: 0.78rem; color: #aaa;
+                     display: inline-flex; align-items: center; gap: 0.3em;">
+        <input type="checkbox" name="bleed" value="1"
+               {% if illusion.DEFAULT_PRINT_BLEED %}checked{% endif %}>
+        full bleed (no white edge)
+      </label>
       <input type="hidden" name="pattern"      value="optikon">
       <input type="hidden" name="from_optikon" value="{{ illusion.SLUG }}">
       {% comment %}
@@ -137,6 +143,15 @@
       {% endcomment %}
       <input type="hidden" name="cell"
              value="{{ illusion.DEFAULT_CELL_MM|default:'4.0' }}">
+      {% if illusion.DEFAULT_PRINT_LANDSCAPE %}
+        {% comment %}
+          Per-illusion landscape default: the autostereogram needs a wide
+          page so the eye-divergence period has room to repeat.  The flag
+          rides along to gridprint where /print/ honours it both for the
+          @page CSS rule and for the SVG page dimensions.
+        {% endcomment %}
+        <input type="hidden" name="landscape" value="1">
+      {% endif %}
     </form>
 
     {% if illusion.SUPPORTS_CUSTOM_IMAGE %}

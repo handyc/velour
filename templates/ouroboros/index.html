@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% block title %}Ouroboros — the class-4 fixed-point quine{% endblock %}
+
+{% block content %}
+<style>
+  .ouro-page { max-width: 70em; }
+  .ouro-page h1 { margin: 0 0 0.3rem 0; }
+  .ouro-page .lede { color: #aaa; font-size: 0.9rem;
+                        max-width: 58em; line-height: 1.55; }
+  .ouro-page h2 { margin-top: 1.6rem; font-size: 1.05rem; }
+  .ouro-page h3 { margin-top: 1.2rem; font-size: 0.95rem; }
+  .ouro-page a { color: #79c0ff; }
+
+  .featured { margin: 1rem 0; padding: 0.9rem 1.1rem;
+                  background: #101a14; border: 1px solid #2a4a32;
+                  border-left: 4px solid #6ebb50; border-radius: 5px;
+                  display: grid; grid-template-columns: auto 1fr;
+                  gap: 1rem; align-items: start; }
+  .featured img { width: 128px; height: 128px; border: 1px solid #234;
+                       image-rendering: pixelated; }
+  .featured .meta { color: #c9d1d9; font-size: 0.85rem; line-height: 1.55; }
+  .featured .title { color: #7ee787; font-weight: 600;
+                          font-size: 1.05rem; margin-bottom: 0.2rem; }
+
+  .ouro-table { width: 100%; border-collapse: collapse;
+                    font-size: 0.85rem; font-family: ui-monospace, monospace; }
+  .ouro-table th, .ouro-table td { padding: 0.3rem 0.6rem;
+                                              border-bottom: 1px solid #21262d;
+                                              text-align: right; }
+  .ouro-table th { color: #8b949e; text-transform: uppercase;
+                          font-size: 0.65rem; letter-spacing: 0.05em; }
+  .ouro-table td.label { text-align: left; color: #aaa; }
+  .ouro-table tr.featured-row td { background: rgba(110, 187, 80, 0.08); }
+  .ouro-table tr:hover td { background: #161b22; }
+  .ouro-table a { color: #79c0ff; text-decoration: none; }
+  .ouro-table img.thumb {
+    width: 40px; height: 40px; image-rendering: pixelated;
+    vertical-align: middle; border: 1px solid #234;
+  }
+</style>
+
+<div class="ouro-page">
+  <h1>Ouroboros</h1>
+  <p class="lede">
+    The class-4 metachain quines.  Each entry below is a 16,384-byte
+    K=4 hex CA rule whose LUT, reshaped as a 128×128 grid, becomes its
+    own initial condition.  Run the CA on its own LUT-as-image for 16
+    ticks and the result is another rule — the chain.  Most chains
+    eventually settle to a homogeneous fixed point (class-1).  One
+    found so far converges to a class-4 fixed point and stays at the
+    edge of chaos forever.
+  </p>
+
+  {% if featured %}
+  <div class="featured">
+    <a href="{% url 'ouroboros:detail' pk=featured.pk %}">
+      <img src="{% url 'ouroboros:ruleset_png' pk=featured.pk %}?scale=1"
+              alt="Quine #{{ featured.pk }} as 128×128 image">
+    </a>
+    <div class="meta">
+      <div class="title">★ Quine #{{ featured.pk }} — the class-4 fixed point</div>
+      A 13-byte mutation of quine #116, discovered by the deep-chain
+      fine-tune GA.  Its chain converges at level 130 to a
+      *self-mapping* class-4 rule (cls=4, act=0.65, sr<sub>arbσ</sub>=1.000).
+      Once the chain reaches this fixed point, it stays there
+      forever — and stays class-4 forever.  Effective chain depth is
+      <b>unbounded</b>.<br>
+      <a href="{% url 'ouroboros:detail' pk=featured.pk %}">Explore →</a>
+    </div>
+  </div>
+  {% endif %}
+
+  <h2>The metachain in one sentence</h2>
+  <p class="lede">
+    Take a K=4 hex CA rule — a lookup table of <code>4<sup>7</sup> = 16,384</code>
+    entries.  Reshape it as a <code>128 × 128</code> grid (since
+    16,384 = 128²).  Run the rule on that grid for 16 ticks.  The
+    output is another 16,384 cells, hence another rule.  Iterate.
+    A *class-4 quine chain* is one where every iterated rule
+    stays at the edge of chaos.  A *class-4 fixed point* is a rule
+    that maps to itself under this operation AND is itself class-4.
+    Find one and the chain has infinite class-4 depth — the structure
+    we hunt for.
+  </p>
+
+  <h2>All saved quines
+    <span style="color:#8b949e; font-weight:400;">
+      ({{ total }}
+      {% if total != total_unfiltered %}of {{ total_unfiltered }}{% endif %}
+      total{% if page.paginator.num_pages > 1 %}, page {{ page.number }}/{{ page.paginator.num_pages }}{% endif %})
+    </span>
+  </h2>
+
+  <form method="get" style="margin-bottom: 0.8rem; padding: 0.6rem 0.8rem;
+                                background: #0d1117; border: 1px solid #21262d;
+                                border-radius: 4px; display: flex; flex-wrap: wrap;
+                                gap: 0.6rem; align-items: center;
+                                font-size: 0.78rem; color: #aaa;">
+    <label>sort
+      <select name="sort" style="background:#0d1117;color:#c9d1d9;
+                                       border:1px solid #30363d;
+                                       padding:2px 4px;font-family:inherit;">
+        <option value="fitness" {% if sort == "fitness" %}selected{% endif %}>fitness ↓</option>
+        <option value="created" {% if sort == "created" %}selected{% endif %}>created ↓</option>
+        <option value="pk_desc" {% if sort == "pk_desc" %}selected{% endif %}>pk ↓</option>
+        <option value="pk_asc"  {% if sort == "pk_asc"  %}selected{% endif %}>pk ↑</option>
+      </select>
+    </label>
+    <label>run label
+      <select name="run_label" style="background:#0d1117;color:#c9d1d9;
+                                              border:1px solid #30363d;
+                                              padding:2px 4px;font-family:inherit;">
+        <option value="">— any —</option>
+        {% for rl in run_labels %}
+        <option value="{{ rl }}" {% if filters.run_label == rl %}selected{% endif %}>{{ rl }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>origin
+      <input type="text" name="origin" value="{{ filters.origin }}"
+             placeholder="e.g. deep-chain-ga"
+             style="width:11em; background:#0d1117; color:#c9d1d9;
+                       border:1px solid #30363d; padding:2px 6px;
+                       font-family:inherit;">
+    </label>
+    <label>sha prefix
+      <input type="text" name="sha" value="{{ filters.sha }}"
+             placeholder="2a497a0c"
+             style="width:7em; background:#0d1117; color:#c9d1d9;
+                       border:1px solid #30363d; padding:2px 6px;
+                       font-family:ui-monospace,monospace;">
+    </label>
+    <label>name
+      <input type="text" name="name" value="{{ filters.name }}"
+             placeholder="ouroboros"
+             style="width:9em; background:#0d1117; color:#c9d1d9;
+                       border:1px solid #30363d; padding:2px 6px;
+                       font-family:inherit;">
+    </label>
+    <label>min run
+      <input type="number" name="min_runlen" min="0"
+             value="{{ filters.min_runlen|default_if_none:'' }}"
+             style="width:6em; background:#0d1117; color:#c9d1d9;
+                       border:1px solid #30363d; padding:2px 6px;
+                       font-family:inherit;">
+    </label>
+    <button type="submit" style="background:#1f6feb; color:#fff;
+                                       border:0; padding:4px 12px;
+                                       cursor:pointer; font-family:inherit;
+                                       font-size:0.78rem;">apply</button>
+    <a href="{% url 'ouroboros:index' %}" style="color:#79c0ff;">clear</a>
+  </form>
+
+  <table class="ouro-table">
+    <thead>
+      <tr>
+        <th>&nbsp;</th>
+        <th>pk</th>
+        <th class="label">name</th>
+        <th>SR</th>
+        <th>class-4 run</th>
+        <th>GA run</th>
+        <th class="label">origin</th>
+        <th class="label">run label</th>
+        <th class="label">created</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for q in quines %}
+      <tr{% if q.pk == 122 %} class="featured-row"{% endif %}>
+        <td><a href="{% url 'ouroboros:detail' pk=q.pk %}">
+          <img class="thumb"
+               src="{% url 'ouroboros:ruleset_png' pk=q.pk %}?scale=1"
+               alt="#{{ q.pk }}"></a></td>
+        <td><a href="{% url 'ouroboros:detail' pk=q.pk %}">
+          {{ q.pk }}{% if q.pk == 122 %} ★{% endif %}
+        </a></td>
+        <td class="label" style="color:#d2a8ff;">
+          {% if q.display_name %}{{ q.display_name }}{% else %}<span style="color:#444;">—</span>{% endif %}
+        </td>
+        <td style="color:#7ee787;">{{ q.fitness|floatformat:3 }}</td>
+        <td>{{ q.class4_run_length }}</td>
+        <td>{% if q.ga_run_length %}{{ q.ga_run_length }}{% else %}—{% endif %}</td>
+        <td class="label">{{ q.origin }}</td>
+        <td class="label">{{ q.run_label|default:"—" }}</td>
+        <td class="label" style="color:#888;">{{ q.created|date:"D d M H:i" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if page.paginator.num_pages > 1 %}
+  <nav style="margin-top: 1rem; font-size:0.8rem; color:#aaa;
+                  display:flex; gap:0.6rem; align-items:center;
+                  flex-wrap:wrap;">
+    {% if page.has_previous %}
+      <a href="?page=1{{ qs_keep }}">« first</a>
+      <a href="?page={{ page.previous_page_number }}{{ qs_keep }}">‹ prev</a>
+    {% else %}
+      <span style="color:#444;">« first</span>
+      <span style="color:#444;">‹ prev</span>
+    {% endif %}
+    <span style="color:#888;">
+      page {{ page.number }} of {{ page.paginator.num_pages }}
+      ({{ page_size }}/page)
+    </span>
+    {% if page.has_next %}
+      <a href="?page={{ page.next_page_number }}{{ qs_keep }}">next ›</a>
+      <a href="?page={{ page.paginator.num_pages }}{{ qs_keep }}">last »</a>
+    {% else %}
+      <span style="color:#444;">next ›</span>
+      <span style="color:#444;">last »</span>
+    {% endif %}
+    <span style="color:#666; margin-left:0.6rem;">
+      jump:
+      <input type="number" min="1" max="{{ page.paginator.num_pages }}"
+                value="{{ page.number }}"
+                style="width:4em; background:#0d1117; color:#c9d1d9;
+                          border:1px solid #30363d; padding:1px 4px;"
+                onchange="window.location='?page=' + this.value
+                            + '{{ qs_keep|escapejs }}'">
+    </span>
+  </nav>
+  {% endif %}
+
+  <p style="color:#888; font-size:0.8rem; margin-top:1.4rem;">
+    The thumbnails are each rule's 16,384 bytes painted as a
+    <code>128 × 128</code> image with the 4-colour palette.  These
+    are the rules' own initial conditions for the metachain walk.
+  </p>
+</div>
+{% endblock %}

@@ -97,6 +97,12 @@ def apply_lora_inplace(weight: torch.Tensor, A: torch.Tensor,
 # Picked because it's a plain 2D Linear/Conv1D weight that strongly
 # affects token logits without being tied to the embedding (which
 # would cascade into both input and output). Override with --target.
+#
+# `karpathy/minGPT-*` entries route through the vendored minGPT class
+# (spoeqi.vendor.mingpt_model) instead of HF AutoModelForCausalLM —
+# same GPT-2 weights, transparent hackable architecture.  Useful when
+# you want to *see* what's being perturbed instead of trusting an HF
+# black box.
 DEFAULT_TARGETS = {
     'distilgpt2':                                      'transformer.h.5.attn.c_proj.weight',
     'gpt2':                                            'transformer.h.11.attn.c_proj.weight',
@@ -105,7 +111,88 @@ DEFAULT_TARGETS = {
     'TinyLlama/TinyLlama-1.1B-Chat-v1.0':              'model.layers.21.self_attn.o_proj.weight',
     'TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T':
                                                        'model.layers.21.self_attn.o_proj.weight',
+    'karpathy/minGPT-gpt2':                            'transformer.h.11.attn.c_proj.weight',
+    'karpathy/minGPT-gpt2-medium':                     'transformer.h.23.attn.c_proj.weight',
+    'karpathy/minGPT-gpt2-large':                      'transformer.h.35.attn.c_proj.weight',
+    'karpathy/minGPT-gpt2-xl':                         'transformer.h.47.attn.c_proj.weight',
 }
+
+
+MINGPT_PREFIX = 'karpathy/minGPT-'
+
+
+def is_mingpt_name(model_name: str) -> bool:
+    return model_name.startswith(MINGPT_PREFIX)
+
+
+class _MinGPTOut:
+    """Tiny stand-in for transformers' CausalLMOutput — only exposes
+    the ``.logits`` attribute that spoeqi's MoE generator reads."""
+    def __init__(self, logits):
+        self.logits = logits
+
+
+class _MinGPTHFAdapter(torch.nn.Module):
+    """Wraps Karpathy's minGPT GPT to look like a HuggingFace
+    AutoModelForCausalLM for the slice of API spoeqi uses:
+
+        out = self(input_ids=tensor)        # → out.logits
+        ids = self.generate(input_ids=...)  # → tensor of token ids
+
+    The wrapped GPT is exposed at `self.transformer` so dotted target
+    paths (e.g. `transformer.h.11.attn.c_proj.weight`) resolve through
+    `find_weight` exactly like the HF case.
+    """
+
+    def __init__(self, gpt):
+        super().__init__()
+        self.gpt = gpt
+        self.transformer = gpt.transformer
+
+    def forward(self, input_ids=None, **_kw):
+        logits, _loss = self.gpt(input_ids)
+        return _MinGPTOut(logits)
+
+    def generate(self, input_ids=None, max_new_tokens=40,
+                 do_sample=False, temperature=1.0,
+                 pad_token_id=None, **_kw):
+        # minGPT.generate ignores pad_token_id — its loop is plain
+        # autoregressive sampling, no padding semantics.
+        return self.gpt.generate(
+            input_ids, max_new_tokens,
+            do_sample=do_sample, temperature=temperature,
+        )
+
+
+def load_backbone(model_name: str, *, device: str | None = None):
+    """Load a (tokenizer, model) pair for ``model_name``.
+
+    Routes ``karpathy/minGPT-*`` names through the vendored minGPT;
+    everything else goes through transformers' AutoModelForCausalLM.
+    The returned model exposes the same minimal surface in both cases
+    so generate() / generate_moe() can stay backbone-agnostic.
+    """
+    from transformers import AutoTokenizer
+    if is_mingpt_name(model_name):
+        sub = model_name[len(MINGPT_PREFIX):]   # 'gpt2', 'gpt2-medium', ...
+        from .vendor.mingpt_model import GPT
+        # minGPT mirrors HF's GPT-2 BPE vocab exactly, so the gpt2
+        # tokenizer is the right partner regardless of size.
+        tok = AutoTokenizer.from_pretrained('gpt2')
+        if tok.pad_token_id is None:
+            tok.pad_token = tok.eos_token
+        gpt = GPT.from_pretrained(sub)
+        model = _MinGPTHFAdapter(gpt)
+    else:
+        from transformers import AutoModelForCausalLM
+        tok = AutoTokenizer.from_pretrained(model_name)
+        if tok.pad_token_id is None:
+            tok.pad_token = tok.eos_token
+        model = AutoModelForCausalLM.from_pretrained(model_name)
+    if device is not None:
+        model = model.to(device)
+    model.eval()
+    return tok, model
 
 
 def default_target_weight(model_name: str) -> str:
@@ -123,6 +210,12 @@ def default_target_weight(model_name: str) -> str:
     raise ValueError(
         f'no default target_weight known for {model_name!r}; '
         f'pass --target / target_weight= explicitly')
+
+
+def list_known_models() -> list[str]:
+    """Backbones registered for use in evolution chains.  Returned in
+    a stable order so UI dropdowns / CLI --help renders are reproducible."""
+    return list(DEFAULT_TARGETS.keys())
 
 
 def find_weight(model: torch.nn.Module, dotted_name: str) -> torch.Tensor:
@@ -153,14 +246,7 @@ def generate(pact: Pact, prompt: str, *,
     """
     if target_weight is None:
         target_weight = default_target_weight(model_name)
-    from transformers import AutoTokenizer, AutoModelForCausalLM
-    tok = AutoTokenizer.from_pretrained(model_name)
-    if tok.pad_token_id is None:
-        tok.pad_token = tok.eos_token
-    model = AutoModelForCausalLM.from_pretrained(model_name)
-    if device is not None:
-        model = model.to(device)
-    model.eval()
+    tok, model = load_backbone(model_name, device=device)
     weight = find_weight(model, target_weight)
     A, B = derive_lora(pact, component, generation,
                        (weight.shape[0], weight.shape[1]), rank)

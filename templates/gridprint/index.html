@@ -170,11 +170,21 @@
                    border:1px solid #30363d;padding:0.25rem;">
           </label>
         </div>
+        <label style="display:flex;align-items:center;gap:0.4rem;
+                       margin-top:0.3rem;color:#c9d1d9;">
+          <input type="checkbox" name="poster" value="1">
+          posterize → 4 colours
+        </label>
         <div style="color:#6e7681;font-size:0.72rem;">
           Sets <code>?from_loupe=&lt;slug&gt;</code>.  Server-side numpy
           Mandelbrot renderer paints the walk's viewport at the chosen
-          resolution and wraps it as A4 SVG.  Pair with deep links
-          from <a href="{% url 'loupe:walks' %}" style="color:#58a6ff;">/loupe/walks/</a>.
+          resolution and wraps it as A4 SVG.  When <code>posterize</code>
+          is on, the server picks a default 4-colour palette and bucket
+          boundaries from the escape-time quantiles — for an exact match
+          to a loupe walk that's posterized in-browser, follow the
+          "→ Gridprint" button on the walk page (it forwards the live
+          palette + bins).  Pair with deep links from
+          <a href="{% url 'loupe:walks' %}" style="color:#58a6ff;">/loupe/walks/</a>.
         </div>
       </div>
     </details>
@@ -327,6 +337,54 @@
           16,384 flowers total per rule.  Set page 0..127 to walk all
           configurations.  Center filter narrows to 4,096 flowers per
           self-state.
+        </div>
+      </div>
+    </details>
+
+    <details style="grid-column:1/3;background:#0d1117;border:1px solid #30363d;
+            border-radius:4px;padding:0.4rem 0.6rem;">
+      <summary style="cursor:pointer;color:#8b949e;font-size:0.78rem;">
+        Hanbprint — pack 61-hex hanbs across the page for cutting
+      </summary>
+      <div style="display:grid;grid-template-columns:1fr;gap:0.4rem;
+           margin-top:0.4rem;font-size:0.78rem;color:#8b949e;">
+        <label style="display:flex;align-items:center;gap:0.4rem;
+                color:#c9d1d9;">
+          <input type="checkbox" name="mode" value="hanbprint"> hanbprint mode
+        </label>
+        <div style="display:flex;gap:0.4rem;">
+          <label style="flex:1;">inner cell (mm)
+            <input type="number" name="cell" value="4" step="0.5" min="1" max="30"
+                   style="width:100%;background:#0d1117;color:#c9d1d9;
+                   border:1px solid #30363d;padding:0.25rem;">
+          </label>
+          <label style="flex:1;">gap between hanbs (mm)
+            <input type="number" name="gap" value="3" step="0.5" min="0" max="40"
+                   style="width:100%;background:#0d1117;color:#c9d1d9;
+                   border:1px solid #30363d;padding:0.25rem;">
+          </label>
+        </div>
+        <div style="display:flex;gap:0.4rem;">
+          <label style="flex:1;">outline colour
+            <input type="color" name="outline_color" value="#333333"
+                   style="width:100%;height:1.6rem;background:#0d1117;
+                   border:1px solid #30363d;padding:0.1rem;">
+          </label>
+          <label style="flex:1;">outline width (mm)
+            <input type="number" name="outline_width" value="0.4" step="0.05"
+                   min="0.05" max="4"
+                   style="width:100%;background:#0d1117;color:#c9d1d9;
+                   border:1px solid #30363d;padding:0.25rem;">
+          </label>
+        </div>
+        <div style="color:#6e7681;font-size:0.72rem;">
+          Each hanb is a regular flat-top hexagon built from
+          1+6+12+18+24 = 61 pointy-top inner cells.
+          Hanb flat-to-flat width = 14 × inner cell (mm).
+          The hex-lattice arrangement of hanbs is shifted outward to
+          create a uniform <em>gap</em> between adjacent hanbs.  Top
+          cell/stroke controls above apply to the inner cells; the
+          outline colour + width are the scissor-guide line.
         </div>
       </div>
     </details>

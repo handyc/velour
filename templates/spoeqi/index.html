@@ -40,6 +40,14 @@
   <a class="new-btn" href="{% url 'spoeqi:create' %}">+ new Pact</a>
   <a class="new-btn" href="{% url 'spoeqi:album_new' %}" style="margin-left:8px;"
      title="Create a pact whose seed and rule are derived from a holiday-album of cover images">+ from album</a>
+  <a class="new-btn" href="{% url 'spoeqi:metapact_list' %}" style="margin-left:8px;"
+     title="Metapacts — small recipes that deterministically expand to full CAformer models">
+    → Metapacts
+  </a>
+  <a class="new-btn" href="{% url 'spoeqi:quine_index' %}" style="margin-left:8px;"
+     title="Class-4 quine search: find K=4 hex rules whose LUT reproduces itself; walk the metachain for nested-quine depth">
+    → Quine search
+  </a>
 </p>
 
 {% if pacts %}

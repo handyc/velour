@@ -63,7 +63,9 @@
     <a href="{% url 'spoeqi:textmask' pact.slug %}">text mask</a> ›
     chain
     &nbsp;|&nbsp;
-    <a href="{% url 'spoeqi:evolve' pact.slug %}">evolve →</a>
+    <a href="{% url 'spoeqi:chain_evolve' pact.slug %}">evolve chain →</a>
+    &nbsp;·&nbsp;
+    <a href="{% url 'spoeqi:evolve' pact.slug %}">evolve heads →</a>
   </div>
   <h1>chain</h1>
   <p>
@@ -82,7 +84,59 @@
     <label style="display:block;color:#cfc;margin-bottom:6px;">input text</label>
     <textarea name="text" rows="3">{{ form.text }}</textarea>
 
-    <div style="margin-top:10px;">
+    <div style="margin-top:14px; padding:10px 12px; border:1px solid #2a2;
+                 background:#061206;">
+      <div style="color:#cfc; font-size:0.85rem; margin-bottom:6px;">
+        🧬 Gene-coded chain — all {{ n_components }} components in sequence
+        <span style="color:#888; font-weight:normal;">
+          — each component has its own <em>(mode, mapping)</em> task,
+          picked deterministically from this pact's CA bytes.  Same
+          pact → same gene → same chain semantics.
+        </span>
+      </div>
+      <div style="display:grid; grid-template-columns: auto 1fr 5em auto;
+                   gap:8px; align-items:center;">
+        <label style="color:#888; font-size:0.78rem;">prefer mode:</label>
+        <select name="chain64_prefer_mode" id="chain64-prefer">
+          <option value="auto"  {% if form.chain64_prefer_mode == 'auto'  %}selected{% endif %}>auto (gene picks)</option>
+          <option value="char"  {% if form.chain64_prefer_mode == 'char'  %}selected{% endif %}>char (force)</option>
+          <option value="token" {% if form.chain64_prefer_mode == 'token' %}selected{% endif %}>token (force)</option>
+        </select>
+        <input type="number" name="chain64_generation" min="0"
+               value="{{ form.chain64_generation }}"
+               title="generation (same for every stage)">
+        <button type="submit" name="chain_64" value="1"
+                style="background:#1f4f1f; color:#cfc; border:1px solid #4a8;
+                       padding:6px 14px; cursor:pointer;">
+          run gene-chain
+        </button>
+      </div>
+
+      {% if gene_preview %}
+      <details style="margin-top:8px;">
+        <summary style="cursor:pointer; color:#cfc; font-size:0.8rem;">
+          show gene preview ({{ gene_preview|length }} components)
+        </summary>
+        <div style="margin-top:6px; max-height:18em; overflow-y:auto;
+                     border:1px solid #1a3a1a; padding:6px 8px; background:#040804;
+                     font-family:monospace; font-size:0.74rem; color:#9c9;">
+          {% for g in gene_preview %}
+            <div style="display:grid; grid-template-columns:3em 5em 1fr;
+                         gap:6px; padding:1px 0;">
+              <span style="color:#666;">c{{ g.component }}</span>
+              <span style="color:{% if g.mode == 'token' %}#ace{% else %}#fc6{% endif %};">{{ g.mode }}</span>
+              <span style="color:#cfc;">{{ g.mapping }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      </details>
+      {% endif %}
+    </div>
+
+    <div style="margin-top:14px;">
+      <div style="color:#888; font-size:0.85rem; margin-bottom:6px;">
+        — or — pick up to 4 stages manually:
+      </div>
       <div class="stage" style="font-weight:600;color:#888;border-top:none;padding-bottom:2px;">
         <label>#</label>
         <label>mode</label>
@@ -184,5 +238,6 @@
     populate(modeSel, mappingSel, INITIAL[idx].mapping);
     modeSel.addEventListener('change', () => populate(modeSel, mappingSel, null));
   });
+
 </script>
 {% endblock %}

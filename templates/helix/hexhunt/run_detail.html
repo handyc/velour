@@ -91,8 +91,10 @@
 <svg id="gen-chart" width="640" height="160" style="background:#0d1117;border:1px solid #30363d;display:block;"></svg>
 <p style="color:#8b949e;font-size:0.8rem;margin-top:0.3rem;">
   <span style="color:#7ee787;">█</span> best per generation &nbsp;
-  <span style="color:#79c0ff;">█</span> mean per generation
+  <span style="color:#79c0ff;">█</span> mean per generation &nbsp;
+  <span style="color:#f0883e;">●</span> self-reproduction score per elite
 </p>
+<p id="sr-summary" style="color:#8b949e;font-size:0.8rem;margin:0.2rem 0;display:none;"></p>
 {{ run.generation_log_json|default_if_none:""|json_script:"gen-log-data" }}
 
 <script>
@@ -126,6 +128,23 @@
     }
     poly('mean', '#79c0ff');
     poly('best', '#7ee787');
+    // Self-reproduction validation markers: small orange dot per
+    // elite at the gen where the SR pass ran.  Plotted on the same
+    // y-axis as the GA fitness because the elites' scores have
+    // already been overwritten to the SR composite.
+    log.forEach(d => {
+      if (!d.sr_scores) return;
+      d.sr_scores.forEach(([_idx, s]) => {
+        const x = pad + (d.gen - xs[0]) / xspan * (W - 2*pad);
+        const y = H - pad - (s - ymin) / yspan * (H - 2*pad);
+        const c = document.createElementNS(SVGNS, 'circle');
+        c.setAttribute('cx', x); c.setAttribute('cy', y);
+        c.setAttribute('r', '2');
+        c.setAttribute('fill', '#f0883e');
+        c.setAttribute('opacity', '0.7');
+        svg.appendChild(c);
+      });
+    });
     function txt(x, y, s, fill){
       const el = document.createElementNS(SVGNS, 'text');
       el.setAttribute('x', x); el.setAttribute('y', y);
@@ -141,6 +160,21 @@
     txt(pad, H - 4, 'gen ' + xs[0]);
   }
 
+  function paintSrSummary(log) {
+    const events = log.filter(d => d.sr_scores);
+    const el = document.getElementById('sr-summary');
+    if (!el) return;
+    if (!events.length) { el.style.display = 'none'; return; }
+    const last = events[events.length - 1];
+    el.style.display = 'block';
+    el.innerHTML =
+      'Self-repro: ' + events.length + ' event' + (events.length === 1 ? '' : 's') +
+      ' · latest @ gen ' + last.gen +
+      ' (' + last.sr_scores.length + ' elites, ' +
+      'mean ' + last.sr_mean.toFixed(4) +
+      ', range [' + last.sr_min.toFixed(4) + ', ' + last.sr_max.toFixed(4) + '])';
+  }
+
   // Initial paint from the server-rendered log (might be empty).
   let initial = [];
   try {
@@ -148,6 +182,7 @@
     initial = JSON.parse(raw || '[]') || [];
   } catch (e) { /* empty log on first render */ }
   paintChart(initial);
+  paintSrSummary(initial);
 
   // ── Live poll while status='running' ────────────────────────────
   const strip = document.getElementById('progress-strip');
@@ -179,6 +214,7 @@
 
         const log = j.log || [];
         paintChart(log);
+        paintSrSummary(log);
         if (log.length) {
           const best = log[log.length - 1].best;
           document.getElementById('prog-best').textContent =

@@ -1,0 +1,1018 @@
+{% extends "base.html" %}
+{% block title %}Chat · CAformer{% endblock %}
+{% block content %}
+<style>
+  .chat-meta   { color: #888; font-size: 0.85rem; max-width: 78ch; }
+  .chat-warn   { background: #2a1a0a; border-left: 3px solid #c87;
+                 color: #fc9; padding: 8px 12px; margin: 12px 0;
+                 font-size: 0.85rem; max-width: 78ch; }
+  .chat-knobs  { display: flex; flex-wrap: wrap; gap: 14px;
+                 align-items: end; margin: 12px 0; padding: 10px 14px;
+                 background: #0a0a0a; border: 1px solid #1f1f1f; }
+  .chat-knobs label { color: #aaa; font-size: 0.78rem;
+                      display: flex; flex-direction: column; gap: 2px; }
+  .chat-knobs input { width: 6em; background: #111; color: #ddd;
+                      border: 1px solid #333; padding: 3px 6px;
+                      font-family: inherit; font-size: 0.85rem; }
+
+  .chat-layout { display: grid; grid-template-columns: 1fr 220px;
+                 gap: 18px; align-items: start; max-width: 1100px; }
+  @media (max-width: 760px) {
+    .chat-layout { grid-template-columns: 1fr; }
+  }
+
+  .chat-log    { background: #0a0a0a; border: 1px solid #1f1f1f;
+                 padding: 14px; min-height: 280px; max-height: 60vh;
+                 overflow-y: auto; }
+  .chat-msg    { margin-bottom: 14px; }
+  .chat-msg .role { font-family: ui-monospace, monospace; color: #888;
+                    font-size: 0.78rem; padding-bottom: 2px;
+                    display: flex; gap: 0.5em; align-items: baseline; }
+  .chat-msg .role.you b { color: #6cf; }
+  .chat-msg .role.ca  b { color: #cfa; }
+  .chat-msg .role .ts { color: #555; font-size: 0.7rem; }
+  .chat-msg .role .info { color: #666; font-size: 0.7rem;
+                           margin-left: auto; }
+  .chat-msg pre { margin: 0; padding: 8px 10px; background: #111;
+                   border: 1px solid #222; color: #ddd;
+                   font-family: ui-monospace, monospace; font-size: 0.85rem;
+                   white-space: pre-wrap; word-break: break-all;
+                   max-width: 80ch; min-height: 1.2em; }
+  .chat-msg pre .cursor { display: inline-block; width: 0.5em;
+                          background: #cfa; height: 1em;
+                          vertical-align: text-bottom;
+                          animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .chat-form   { display: flex; gap: 8px; margin-top: 12px; }
+  .chat-form input[name="q"] {
+                 flex: 1; background: #111; color: #ddd;
+                 border: 1px solid #333; padding: 8px 12px;
+                 font-family: inherit; font-size: 0.9rem; }
+  .chat-form button { background: #1f4f1f; color: #cfc;
+                      border: 1px solid #4a8; padding: 8px 18px;
+                      cursor: pointer; font-family: inherit; }
+  .chat-form button:disabled { opacity: 0.5; cursor: wait; }
+  .chat-form button.stop { background: #4f1f1f; border-color: #a48;
+                            color: #fcc; }
+
+  /* Per-reply 'fix this' control + the inline autotrain panel it
+     toggles open.  Reuses the pipeline autotrain SSE endpoint so the
+     code path is the same as the pipeline page's panel. */
+  .chat-fix-btn { background: #1f3f5f; color: #cef;
+                   border: 1px solid #48a; padding: 1px 8px;
+                   cursor: pointer; font-family: inherit;
+                   font-size: 0.72rem; margin-left: 8px; }
+  .chat-fix-btn.open { background: #4f3f1f; border-color: #a84;
+                        color: #fc6; }
+  .chat-fix-panel { margin-top: 6px; padding: 8px 10px;
+                     background: #0a1118; border: 1px solid #48a;
+                     font-size: 0.78rem; }
+  .chat-fix-panel .row { display: flex; gap: 6px; align-items: end;
+                          flex-wrap: wrap; }
+  .chat-fix-panel label { color: #aaa; font-size: 0.72rem;
+                           display: flex; flex-direction: column; gap: 1px; }
+  .chat-fix-panel input[type="text"] {
+                  width: 14em; background: #111; color: #cef;
+                  border: 1px solid #333; padding: 2px 6px;
+                  font-family: inherit; font-size: 0.82rem; }
+  .chat-fix-panel input[type="number"] {
+                  width: 4em; background: #111; color: #cef;
+                  border: 1px solid #333; padding: 2px 6px;
+                  font-family: inherit; font-size: 0.82rem; }
+  .chat-fix-panel .prompt { color: #888; font-family: ui-monospace, monospace;
+                             font-size: 0.74rem; padding: 2px 6px;
+                             background: #050505; border: 1px solid #222;
+                             border-radius: 2px; }
+  .chat-fix-panel .go   { background: #1f3f5f; color: #cef;
+                           border: 1px solid #48a; padding: 3px 10px;
+                           cursor: pointer; font-weight: bold; font-size: 0.78rem; }
+  .chat-fix-panel .save { background: #1f4f1f; color: #cfc;
+                           border: 1px solid #4a8; padding: 3px 10px;
+                           cursor: pointer; font-size: 0.78rem; }
+  .chat-fix-panel .stop { background: #4f1f1f; color: #fcc;
+                           border: 1px solid #a48; padding: 3px 10px;
+                           cursor: pointer; font-size: 0.78rem; }
+  .chat-fix-panel .status { color: #888; font-size: 0.72rem;
+                             margin-top: 4px; font-family: ui-monospace, monospace; }
+  .chat-fix-panel .bar { height: 4px; background: #080808;
+                          border: 1px solid #246; margin-top: 4px; }
+  .chat-fix-panel .bar > div { background: #48a; height: 100%; width: 0; }
+
+  /* Live-strip below the user input — one tiny thumbnail per trace
+     board so a query's full pipeline state is visible per token in
+     one bar.  Width matches the input row (which is the chat-form
+     itself), so the strip auto-fits. */
+  .chat-thumbrow { display: flex; align-items: center; gap: 8px;
+                    margin: 6px 0 0; padding: 4px 6px;
+                    background: #0a0a0a; border: 1px solid #1f1f1f; }
+  .chat-thumbrow .chat-thumblead { color: #cfa; font-size: 0.7rem;
+                                     font-family: ui-monospace, monospace;
+                                     text-transform: uppercase;
+                                     letter-spacing: 0.04em; }
+  .chat-thumbstrip { display: grid;
+                      grid-auto-flow: column;
+                      /* `minmax(0, 2em)` caps each cell at 2em wide so
+                         a single-item trace (hybrid mode emits just the
+                         embed grid) can't stretch one canvas to the
+                         full strip width and block the chat input. */
+                      grid-auto-columns: minmax(0, 2em);
+                      gap: 1px; padding: 2px; background: #000;
+                      border: 1px solid #333;
+                      flex: 1; height: 2em;
+                      justify-content: start; }
+  .chat-thumbstrip canvas { display: block; width: 100%; height: 100%;
+                              max-width: 2em; max-height: 2em;
+                              image-rendering: pixelated; background: #1a1a1a; }
+  .chat-thumbstrip canvas.active { outline: 1px solid #cfa; }
+  .chat-thumblabel { color: #888; font-size: 0.7rem;
+                      font-family: ui-monospace, monospace; }
+
+  .live-panel  { background: #0a0a0a; border: 1px solid #1f1f1f;
+                 padding: 10px; font: 0.78rem ui-monospace, monospace;
+                 color: #aaa; }
+  .live-panel canvas {
+                 background: #000; image-rendering: pixelated;
+                 display: block; width: 200px; height: 200px;
+                 margin: 0 auto 8px; border: 1px solid #1f1f1f; }
+
+  /* Per-module trace grid: a wrapping row of small CAs labelled by
+     the primitive that produced each one.  Lives below the live panel
+     so on narrow screens it stacks under the chat log. */
+  .trace-panel { margin-top: 14px; padding: 10px 14px;
+                  background: #0a0a0a; border: 1px solid #1f1f1f;
+                  font: 0.78rem ui-monospace, monospace; color: #aaa; }
+  .trace-panel h3 { font-size: 0.85rem; color: #cfa; margin: 0 0 6px;
+                     font-family: inherit; }
+  .trace-row    { display: flex; flex-wrap: wrap; gap: 10px; }
+  .trace-cell   { width: 84px; }
+  .trace-cell canvas {
+                 background: #000; image-rendering: pixelated;
+                 display: block; width: 80px; height: 80px;
+                 border: 1px solid #1f1f1f; }
+  .trace-cell .name {
+                 color: #cfa; font-size: 0.74rem; margin-top: 2px;
+                 text-align: center; }
+  .trace-cell .note {
+                 color: #777; font-size: 0.68rem;
+                 text-align: center; min-height: 0.8em; }
+  /* Per-module families get a left-edge accent so the eye can group
+     them at a glance — embedding/norm/qkv/attn/mlp/output flow. */
+  .trace-cell[data-fam="embed"]  .name { color: #cef; }
+  .trace-cell[data-fam="norm"]   .name { color: #ccc; }
+  .trace-cell[data-fam="q"]      .name { color: #f9a; }
+  .trace-cell[data-fam="k"]      .name { color: #faa; }
+  .trace-cell[data-fam="v"]      .name { color: #fab; }
+  .trace-cell[data-fam="score"]  .name { color: #fca; }
+  .trace-cell[data-fam="mix"]    .name { color: #fec; }
+  .trace-cell[data-fam="merge"]  .name { color: #afc; }
+  .trace-cell[data-fam="mlp"]    .name { color: #acf; }
+  .trace-cell[data-fam="output"] .name { color: #fcf; }
+  .live-panel h3 { font-size: 0.85rem; color: #cfa; margin: 0 0 6px;
+                    font-family: inherit; }
+  .live-panel table { width: 100%; }
+  .live-panel td:first-child { color: #888; padding-right: 8px; }
+  .live-panel td b { color: #fff; font-weight: normal; }
+  .live-panel .pb {
+                 width: 100%; height: 6px; background: #1a1a1a;
+                 margin-top: 8px; border: 1px solid #2a2a2a;
+                 position: relative;
+  }
+  .live-panel .pb .fill {
+                 position: absolute; top: 0; left: 0; height: 100%;
+                 background: linear-gradient(90deg, #4a8, #cfa);
+                 width: 0;
+  }
+</style>
+
+<p><a href="{% url 'caformer:index' %}" style="color:#888;">← caformer</a></p>
+<h1 style="margin-bottom:4px;">Chat · CAformer
+  <span style="color:#888; font-weight:400; font-size:0.78rem;">
+    — your chat is the training corpus (<b style="color:#cef;">{{ chat_turn_count }}</b>
+    turn{{ chat_turn_count|pluralize }} saved &middot;
+    <a href="{% url 'caformer:train' %}" style="color:#cea;">train on it →</a>)
+  </span>
+</h1>
+<p class="chat-meta">
+  Char-level prompt → ca_generate_qkv (the fully-CA forward pass) →
+  text response, <b>streamed token-by-token</b> via Server-Sent Events.
+  Each input character is one token (vocab_size = 256).  See the
+  <a href="{% url 'caformer:composition' slug='nano_gpt' %}"
+     style="color:#ace;">nano_gpt composition</a> for the underlying
+  architecture.  Live panel on the right shows the K=4 hex CA grid
+  for the most-recently-sampled token's embedding.
+</p>
+
+<div class="chat-warn">
+  ⚠ The model is currently <b>random rule tables</b>: no training has
+  happened yet.  Output will be incoherent — the point is that the
+  pipeline is end-to-end CA, not that the model is smart.  Run
+  <code>caformer.ga.evolve_full_stack</code> to evolve toward
+  meaningful predictions.
+</div>
+
+<form class="chat-knobs" id="chat-knobs" onsubmit="return false;">
+  <label>max new tokens
+    <input type="number" name="n"           min="1" max="4096" value="32">
+  </label>
+  <label>n_blocks
+    <input type="number" name="n_blocks"    min="1" max="4"   value="2">
+  </label>
+  <label>temperature
+    <input type="number" name="temperature" min="0" max="20"  step="0.1"
+           value="0.8">
+  </label>
+  <label>seed
+    <input type="number" name="seed"        min="1" max="2147483647"
+           value="51966">
+  </label>
+  <label>model
+    <select name="model" style="background:#111;color:#ddd;
+                                  border:1px solid #333;padding:3px 6px;
+                                  font-family:inherit;font-size:0.85rem;">
+      <option value="">— random rules (untrained) —</option>
+      {% for m in trained %}
+      <option value="{{ m.slug }}"
+              data-n-blocks="{{ m.n_blocks }}">{{ m.name }} (fit {{ m.final_fitness|floatformat:3 }})</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label title="Real LLM backbone for the reply. Default mode is LLM-only (fast: ~20-50 ms/token warm). Add CA experts via the next knob to blend in evolved-CA logits at the cost of seconds per token.">
+    backbone
+    <select name="backbone" style="background:#111;color:#ddd;
+                                     border:1px solid #333;padding:3px 6px;
+                                     font-family:inherit;font-size:0.85rem;">
+      <option value="">— pure CA (no LLM) —</option>
+      {% for b in backbones %}
+      <option value="{{ b }}">{{ b }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label title="How many CA experts to mix with the LLM. 0 = LLM only (fast). 1-3 = MoE blend where the cheap CA router picks 2 of {ca_experts+1} experts per token. Each CA expert adds ~1-2 s/token at seq_len=16.">
+    CA experts
+    <select name="ca_experts" style="background:#111;color:#ddd;
+                                     border:1px solid #333;padding:3px 6px;
+                                     font-family:inherit;font-size:0.85rem;">
+      <option value="0">0 — LLM only</option>
+      <option value="1">1 — light blend</option>
+      <option value="2">2 — balanced</option>
+      <option value="3">3 — heavy CA mix</option>
+    </select>
+  </label>
+  <label title="Stream a CA grid per module (embed, q, k, v, score, mix, merge, mlp, norm, output) so you can see the whole pipeline in motion. Adds ~256 ints per module per token to the wire — fine for n_blocks=1–2.">
+    <input type="checkbox" id="chat-trace" name="trace" value="1" checked>
+    show all modules
+  </label>
+  <button type="button" id="palette-roll"
+          title="Re-roll the 4-colour palette"
+          style="background:#1f1f4f;color:#cdf;border:1px solid #48a;
+                 padding:3px 10px;cursor:pointer;font-family:inherit;
+                 font-size:0.78rem;">
+    🎨 random palette
+  </button>
+  <label title="Mask non-printable byte logits to -inf before sampling — same model, just samples from the legible region of byte space.">
+    sampler
+    <select name="alphabet" style="background:#111;color:#ddd;
+                                     border:1px solid #333;padding:3px 6px;
+                                     font-family:inherit;font-size:0.85rem;">
+      <option value="">unrestricted (all 256 bytes)</option>
+      <option value="ascii_only">ASCII printable only</option>
+      <option value="corpus">corpus alphabet only</option>
+    </select>
+  </label>
+</form>
+
+<div class="chat-layout">
+  <div>
+    <div class="chat-log" id="chat-log"></div>
+    <form class="chat-form" id="chat-form">
+      <input type="text" name="q" id="chat-input" autocomplete="off"
+             placeholder="type a prompt…" autofocus>
+      <button type="submit" id="chat-send">send</button>
+      <button type="button" id="chat-stop" class="stop" disabled>stop</button>
+    </form>
+
+    <!-- Live-strip: tiny thumbnail per trace board, same pipeline as
+         /caformer/pipeline/.  Sits directly below the input so each
+         streamed token visibly sweeps through every CA module.
+         Auto-populates on the first 'token' event; pre-seeded with
+         placeholders so the bar is visible from page load. -->
+    <div class="chat-thumbrow"
+         title="live trace · every CA module's grid for the last sampled token, in pipeline order">
+      <span class="chat-thumblead">live trace →</span>
+      <div class="chat-thumbstrip" id="chat-thumbstrip"></div>
+      <span id="chat-thumbcount" class="chat-thumblabel">— boards · type to start</span>
+    </div>
+  </div>
+
+  <aside class="live-panel">
+    <h3>Live inference</h3>
+    <canvas id="live-grid" width="200" height="200"></canvas>
+    <p style="color:#777; font-size:0.72rem; margin: -6px 0 6px;
+              text-align:center;">last sampled token's embed CA</p>
+    <table>
+      <tr><td>tick</td>     <td><b id="lp-tick">—</b></td></tr>
+      <tr><td>token</td>    <td><b id="lp-token">—</b></td></tr>
+      <tr><td>char</td>     <td><b id="lp-char">—</b></td></tr>
+      <tr><td>top-3</td>    <td><b id="lp-top">—</b></td></tr>
+      <tr><td>seq len</td>  <td><b id="lp-seq">—</b></td></tr>
+      <tr><td>elapsed</td>  <td><b id="lp-elapsed">—</b></td></tr>
+      <tr><td>per-tok</td>  <td><b id="lp-pertok">—</b></td></tr>
+    </table>
+    <div class="pb"><div class="fill" id="lp-bar"></div></div>
+    <p style="color:#666; margin-top:10px; font-size:0.72rem;">
+      Grid = embedding-CA state of the last sampled token (16×16 K=4 hex).
+    </p>
+  </aside>
+</div>
+
+<div class="trace-panel" id="trace-panel" style="display:none;">
+  <h3>All modules · <span style="color:#888;font-weight:400;">
+      embed → norm-pre → q,k,v → score,mix → merge → norm-mid → mlp → merge-out → norm-final → output
+  </span></h3>
+  <p style="color:#777;margin:0 0 8px;">
+    One CA grid per pipeline stage for the most-recent token. Hover a
+    cell to see its rule name and per-step note (e.g. attention's
+    chosen <code>j*</code>).  Reflects the model's actual mid-step
+    states — not just the input embedding.
+  </p>
+  <div class="trace-row" id="trace-row"></div>
+</div>
+
+<script>
+(function () {
+  const log     = document.getElementById('chat-log');
+  const input   = document.getElementById('chat-input');
+  const sendBtn = document.getElementById('chat-send');
+  const stopBtn = document.getElementById('chat-stop');
+  const form    = document.getElementById('chat-form');
+  const knobs   = document.getElementById('chat-knobs');
+  const canvas  = document.getElementById('live-grid');
+  const ctx     = canvas.getContext('2d');
+
+  // Pre-fill the form from URL params so links can deep-link a
+  // working (model, n_blocks, temperature, prompt) tuple.  Honoured
+  // fields: model, n_blocks, temperature, seed, n, prompt|q.
+  (function applyUrlParams() {
+    const p = new URLSearchParams(window.location.search);
+    const setKnob = (name, val) => {
+      if (val == null || val === '') return;
+      const el = knobs.querySelector('[name="' + name + '"]');
+      if (el) el.value = val;
+    };
+    setKnob('model',       p.get('model'));
+    setKnob('n_blocks',    p.get('n_blocks'));
+    setKnob('temperature', p.get('temperature'));
+    setKnob('seed',        p.get('seed'));
+    setKnob('n',           p.get('n'));
+    const q = p.get('prompt') || p.get('q');
+    if (q != null && q !== '') input.value = q;
+  })();
+
+  // When a saved model is picked, auto-set n_blocks to whatever the
+  // model was trained with — otherwise the chat sends with the form's
+  // default n_blocks (=2) and a positional QRPair trained at n_blocks=1
+  // produces garbage.  Only override if the URL didn't pin n_blocks.
+  (function autoSyncNBlocks() {
+    const modelSel = knobs.querySelector('select[name="model"]');
+    const nBlocksEl = knobs.querySelector('[name="n_blocks"]');
+    if (!modelSel || !nBlocksEl) return;
+    const urlPinned =
+      new URLSearchParams(window.location.search).has('n_blocks');
+    function sync(force) {
+      const opt = modelSel.options[modelSel.selectedIndex];
+      const nb = opt && opt.getAttribute('data-n-blocks');
+      if (nb && (force || !urlPinnedRef.value)) {
+        nBlocksEl.value = nb;
+      }
+    }
+    // Wrap urlPinned so the user typing in n_blocks AFTER load doesn't
+    // re-stick the URL value.  Track "did the user touch this knob?"
+    const urlPinnedRef = { value: urlPinned };
+    nBlocksEl.addEventListener('input', () => {
+      urlPinnedRef.value = true;   // user has now overridden manually
+    });
+    modelSel.addEventListener('change', () => sync(true));
+    // Sync at startup once the URL params have been applied.
+    sync(false);
+  })();
+
+  // K=4 palette — mutable so the random-palette button can re-roll.
+  let PALETTE = [[220, 80, 40], [60, 120, 210],
+                  [80, 180, 90], [230, 200, 60]];
+
+  // Random palette: HSV-spread so the four colours are visually
+  // distinct.  Same trick spoeqi uses for its per-component palettes.
+  function rollPalette() {
+    const baseHue = Math.random();
+    PALETTE = [0, 0.25, 0.5, 0.75].map(off => {
+      const h = (baseHue + off) % 1;
+      const s = 0.6 + Math.random() * 0.3;
+      const v = 0.7 + Math.random() * 0.25;
+      // HSV → RGB (standard formula)
+      const i = Math.floor(h * 6);
+      const f = h * 6 - i;
+      const p = v * (1 - s);
+      const q = v * (1 - f * s);
+      const t = v * (1 - (1 - f) * s);
+      const [r, g, b] = [
+        [v, t, p], [q, v, p], [p, v, t],
+        [p, q, v], [t, p, v], [v, p, q],
+      ][i % 6];
+      return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+    });
+  }
+  document.getElementById('palette-roll').addEventListener('click', () => {
+    rollPalette();
+    // Repaint every palette-coloured surface from cached data so the
+    // whole chatbot adopts the new theme at once — main grid, every
+    // per-module trace cell, and the live-strip thumbnails.
+    if (lastGrid)  paintGrid(lastGrid);
+    if (lastTrace) {
+      paintTrace(lastTrace);
+      paintThumbStrip(lastTrace);
+    }
+    // Tint the chat header / send button so the palette shift feels
+    // identity-wide rather than just grid-deep — a step toward each
+    // chatbot carrying its own visual identity.
+    applyPaletteToChrome();
+  });
+  let lastGrid  = null;
+  let lastTrace = null;
+
+  // Apply PALETTE to a few non-grid UI elements so the visual identity
+  // is consistent across the page, not just inside the CA grids.  Pure
+  // visual sugar — touches header accent + send button + the role chip
+  // colour of the "ca" reply lines.
+  function applyPaletteToChrome() {
+    const [c0, c1, c2, c3] = PALETTE.map(([r,g,b]) => `rgb(${r},${g},${b})`);
+    // Header accent (the small ★/quote ribbon if present)
+    document.documentElement.style.setProperty('--ca-pal-0', c0);
+    document.documentElement.style.setProperty('--ca-pal-1', c1);
+    document.documentElement.style.setProperty('--ca-pal-2', c2);
+    document.documentElement.style.setProperty('--ca-pal-3', c3);
+    // The send button reflects palette[1] (typically the cool tone).
+    const send = document.getElementById('chat-send');
+    if (send) send.style.background = c1;
+    // The "ca" role badge picks up palette[2].
+    document.querySelectorAll('.chat-msg .role.ca').forEach(el => {
+      el.style.color = c2;
+    });
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c =>
+      ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+  }
+
+  // HH:MM:SS local-time stamp; matches the project's 24h preference.
+  function nowStamp() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  function appendMsg(role, text, extra) {
+    const div = document.createElement('div');
+    div.className = 'chat-msg';
+    const r = role === 'you' ? 'you' : 'ca';
+    const tag = r === 'you' ? 'you' : 'caformer';
+    const info = extra ? `<span class="info">${escapeHtml(extra)}</span>` : '';
+    div.innerHTML =
+      `<div class="role ${r}">` +
+        `<b>${tag}</b> <span class="ts">${nowStamp()}</span>${info}` +
+      `</div>` +
+      `<pre>${escapeHtml(text)}</pre>`;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return div;
+  }
+
+  function paintGrid(grid) {
+    if (!grid || !grid.length) return;
+    paintGridOn(ctx, canvas, grid);
+  }
+
+  /* Generic hex-CA grid painter so the trace cells can reuse it. */
+  function paintGridOn(c2d, cvs, grid) {
+    if (!grid || !grid.length) return;
+    const H = grid.length, W = grid[0].length;
+    const cell = Math.floor(cvs.width / (W + 1));
+    c2d.fillStyle = '#000';
+    c2d.fillRect(0, 0, cvs.width, cvs.height);
+    for (let r = 0; r < H; r++) {
+      const xoff = (r & 1) ? cell / 2 : 0;
+      const y = Math.round(r * cell * 0.866);
+      for (let c = 0; c < W; c++) {
+        const v = grid[r][c] & 3;
+        const [R, G, B] = PALETTE[v];
+        c2d.fillStyle = `rgb(${R},${G},${B})`;
+        c2d.fillRect(c * cell + xoff, y, cell, cell);
+      }
+    }
+  }
+
+  /* Per-module trace panel. Cells are created lazily and reused across
+     ticks so we don't churn the DOM at every token. */
+  const tracePanel = document.getElementById('trace-panel');
+  const traceRow   = document.getElementById('trace-row');
+  const traceCells = new Map();    // name → {wrapper, canvas, ctx, note}
+
+  function familyForName(name) {
+    // "b0-q" / "embed" / "norm-final" → "q" / "embed" / "norm"
+    const m = name.replace(/^b\d+-/, '');
+    if (m.startsWith('norm'))   return 'norm';
+    if (m === 'merge' || m === 'merge-out') return 'merge';
+    return m;
+  }
+
+  function ensureTraceCell(name) {
+    if (traceCells.has(name)) return traceCells.get(name);
+    const wrapper = document.createElement('div');
+    wrapper.className = 'trace-cell';
+    wrapper.dataset.fam = familyForName(name);
+    const cvs = document.createElement('canvas');
+    cvs.width = 80; cvs.height = 80;
+    const label = document.createElement('div');
+    label.className = 'name'; label.textContent = name;
+    const note = document.createElement('div');
+    note.className = 'note';
+    wrapper.appendChild(cvs);
+    wrapper.appendChild(label);
+    wrapper.appendChild(note);
+    traceRow.appendChild(wrapper);
+    const cell = {wrapper, canvas: cvs, ctx: cvs.getContext('2d'),
+                   note, label};
+    traceCells.set(name, cell);
+    return cell;
+  }
+
+  function paintTrace(trace) {
+    if (!trace || !trace.length) {
+      tracePanel.style.display = 'none';
+      return;
+    }
+    tracePanel.style.display = '';
+    for (const item of trace) {
+      const cell = ensureTraceCell(item.name);
+      if (item.grid) paintGridOn(cell.ctx, cell.canvas, item.grid);
+      cell.note.textContent = item.note || '';
+    }
+  }
+
+  // ── Live-strip thumbnails (below the chat input) ──────────────
+  const thumbStrip  = document.getElementById('chat-thumbstrip');
+  const thumbCount  = document.getElementById('chat-thumbcount');
+  const thumbByName = {};   // trace name → <canvas>
+
+  function ensureThumbs(names) {
+    if (Object.keys(thumbByName).length === names.length) return;
+    thumbStrip.innerHTML = '';
+    for (const k in thumbByName) delete thumbByName[k];
+    for (const n of names) {
+      const cv = document.createElement('canvas');
+      cv.width = 16; cv.height = 16;     // 1 px per cell; CSS upscales
+      cv.title = n;                       // hover tooltip = trace name
+      thumbStrip.appendChild(cv);
+      thumbByName[n] = cv;
+    }
+    thumbCount.textContent = names.length + ' boards · hover for name';
+  }
+
+  // Paint one 16×16 K=4 grid into a thumbnail canvas using the
+  // current chat PALETTE (so re-rolling the palette re-themes the
+  // strip on the next token).
+  function paintThumb(canvas, grid) {
+    const ctx = canvas.getContext('2d');
+    const img = ctx.createImageData(16, 16);
+    // grid may arrive as a flat array of 256, or as a 16×16 nested
+    // array — handle both.
+    const flat = (grid.length === 16 && Array.isArray(grid[0]))
+                  ? grid.flat() : grid;
+    for (let i = 0; i < 256; i++) {
+      const c = flat[i] & 3;
+      const [r, g, b] = PALETTE[c];
+      img.data[i * 4 + 0] = r;
+      img.data[i * 4 + 1] = g;
+      img.data[i * 4 + 2] = b;
+      img.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  function paintThumbStrip(trace) {
+    if (!trace || !trace.length) return;
+    ensureThumbs(trace.map(t => t.name));
+    for (const item of trace) {
+      const cv = thumbByName[item.name];
+      if (!cv || !item.grid) continue;
+      paintThumb(cv, item.grid);
+      cv.classList.add('active');
+      setTimeout(() => cv.classList.remove('active'), 180);
+    }
+  }
+
+  // Pre-populate placeholders on page load so the bar is visibly
+  // present even before the first send. Trace-shape mirrors what
+  // ca_forward_qkv produces (3 + 10·n_blocks).
+  function buildPlaceholderStrip() {
+    const nb = parseInt(
+      knobs.querySelector('[name="n_blocks"]').value, 10) || 2;
+    const names = ['embed'];
+    for (let b = 0; b < nb; b++) {
+      for (const stage of ['norm-pre', 'q', 'k', 'v', 'score', 'mix',
+                            'merge', 'norm-mid', 'mlp', 'merge-out']) {
+        names.push('b' + b + '-' + stage);
+      }
+    }
+    names.push('norm-final', 'output');
+    ensureThumbs(names);
+    // Quadrant-pattern fills so the user sees the strip exists.
+    for (let i = 0; i < names.length; i++) {
+      const cv = thumbByName[names[i]];
+      if (!cv) continue;
+      const cells = new Uint8Array(256);
+      for (let j = 0; j < 256; j++) cells[j] = (i + ((j >> 4) ^ (j & 15))) & 3;
+      paintThumb(cv, cells);
+    }
+    thumbCount.textContent =
+      names.length + ' boards · waiting for send · hover for name';
+  }
+  buildPlaceholderStrip();
+  // Rebuild placeholders when the user changes n_blocks pre-send.
+  knobs.querySelector('[name="n_blocks"]').addEventListener('input',
+    buildPlaceholderStrip);
+
+  let evtSrc = null;
+  let activePre = null;          // <pre> we're streaming into
+  let activeRole = null;         // <div class=role> for that message
+  let metaInfo = null;
+  let plannedTokens = 32;
+
+  function setRunning(on) {
+    sendBtn.disabled = on;
+    stopBtn.disabled = !on;
+    Array.from(knobs.querySelectorAll('input')).forEach(i => i.disabled = on);
+    Array.from(form.querySelectorAll('input')).forEach(i => i.disabled = on);
+  }
+
+  function stop() {
+    if (evtSrc) { evtSrc.close(); evtSrc = null; }
+    // Strip the blinking cursor on the active reply, if any.
+    if (activePre) {
+      const cur = activePre.querySelector('.cursor');
+      if (cur) cur.remove();
+      activePre = null;
+    }
+    setRunning(false);
+  }
+
+  function start(q) {
+    appendMsg('you', q);
+    q_for_this_reply = q;             // remember for the fix button
+    const params = new URLSearchParams({q});
+    Array.from(knobs.querySelectorAll('input, select')).forEach(i => {
+      if (i.name && i.value !== '') params.set(i.name, i.value);
+    });
+    plannedTokens = parseInt(params.get('n'), 10) || 32;
+
+    const div = appendMsg('ca', '');
+    activePre = div.querySelector('pre');
+    activeRole = div.querySelector('.role');
+    activePre.innerHTML = '<span class="cursor"></span>';
+
+    evtSrc = new EventSource(
+      `{% url 'caformer:chat_reply_stream' %}?${params}`);
+
+    evtSrc.addEventListener('meta', e => {
+      const m = JSON.parse(e.data);
+      metaInfo = m;
+      // Show config in the reply's role row so the user knows what
+      // settings produced this output.
+      const old = activeRole.querySelector('.info');
+      let txt = `n_blocks=${m.n_blocks} · T=${m.temperature} · seed=${m.seed}`;
+      if (m.dispatched) {
+        txt += ` · ↪ ${m.dispatched}`;
+      } else if (m.model) {
+        txt += ` · model=${m.model}`;
+      }
+      if (old) old.textContent = txt;
+      else activeRole.insertAdjacentHTML('beforeend',
+        `<span class="info">${escapeHtml(txt)}</span>`);
+    });
+
+    // Backbone load + byte-projection can take 5-30s on first call —
+    // surface that as a visible status line so the user knows the
+    // request is alive, not stuck.
+    evtSrc.addEventListener('status', e => {
+      const s = JSON.parse(e.data);
+      const cur = activePre.querySelector('.cursor');
+      let line = activePre.querySelector('.status-line');
+      if (!line) {
+        line = document.createElement('div');
+        line.className = 'status-line';
+        line.style.color = '#888';
+        line.style.fontSize = '0.78rem';
+        activePre.insertBefore(line, cur);
+      }
+      line.textContent = '⏳ ' + s.msg;
+      if (s.phase === 'ready') {
+        // Fade ready line away so it doesn't clutter the reply.
+        line.textContent = '✓ ' + s.msg;
+        setTimeout(() => { if (line.parentNode) line.remove(); }, 800);
+      }
+    });
+
+    evtSrc.addEventListener('error', e => {
+      if (!e.data) return;            // generic connection error
+      try {
+        const d = JSON.parse(e.data);
+        activePre.insertAdjacentText('beforeend',
+          '\n[ERROR: ' + d.msg + ']');
+      } catch (_) {}
+    });
+
+    evtSrc.onmessage = e => {
+      const d = JSON.parse(e.data);
+      // Append the new char before the blinking cursor.
+      const cur = activePre.querySelector('.cursor');
+      const text = document.createTextNode(d.char);
+      activePre.insertBefore(text, cur);
+      log.scrollTop = log.scrollHeight;
+
+      // Live panel updates.
+      document.getElementById('lp-tick').textContent    = d.tick;
+      document.getElementById('lp-token').textContent   = d.token;
+      document.getElementById('lp-char').textContent    =
+        JSON.stringify(d.char);
+      document.getElementById('lp-top').textContent     =
+        d.top3.join(', ');
+      document.getElementById('lp-seq').textContent     = d.last_seq_len;
+      document.getElementById('lp-elapsed').textContent =
+        (d.elapsed_ms / 1000).toFixed(1) + ' s';
+      document.getElementById('lp-pertok').textContent  =
+        Math.round(d.elapsed_ms / (d.tick + 1)) + ' ms';
+      const pct = Math.min(100, ((d.tick + 1) / plannedTokens) * 100);
+      document.getElementById('lp-bar').style.width = pct + '%';
+      lastGrid = d.last_grid;
+      paintGrid(d.last_grid);
+      if (d.trace) {
+        lastTrace = d.trace;
+        paintTrace(d.trace);
+        paintThumbStrip(d.trace);
+      }
+    };
+
+    evtSrc.addEventListener('end', e => {
+      // Add a 'fix this' button to the just-finished reply so the
+      // user can launch an inline Q→R autotrain against that exact
+      // (prompt, reply) pair.
+      if (activeRole && activePre) {
+        const replyText = activePre.textContent.replace(/​/g, '');
+        attachFixButton(activeRole, q_for_this_reply, replyText);
+      }
+      stop();
+    });
+    evtSrc.onerror = () => stop();
+    setRunning(true);
+  }
+
+  // Track the prompt that started each in-flight reply so the fix
+  // button knows what Q produced the R.
+  let q_for_this_reply = '';
+
+  // ── Per-reply Q→R autotrain ───────────────────────────────────
+  // Adds a "✏ fix this" button to each finished ca reply.  Clicking
+  // opens an inline form to evolve the model to produce a different
+  // (correct) response.  Reuses /pipeline/autotrain/{stream,save}/.
+  const modelSelect = knobs.querySelector('select[name="model"]');
+
+  function attachFixButton(roleDiv, prompt, currentReply) {
+    if (!roleDiv) return;
+    if (roleDiv.querySelector('.chat-fix-btn')) return;  // already added
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chat-fix-btn';
+    btn.textContent = '✏ fix this';
+    btn.title = 'Evolve the model to produce a different reply '
+                + 'for this prompt.';
+    roleDiv.appendChild(btn);
+    btn.addEventListener('click', () => toggleFixPanel(btn, prompt,
+                                                          currentReply));
+  }
+
+  function toggleFixPanel(btn, prompt, currentReply) {
+    const msg = btn.closest('.chat-msg');
+    let panel = msg.querySelector('.chat-fix-panel');
+    if (panel) {
+      panel.remove(); btn.classList.remove('open');
+      btn.textContent = '✏ fix this'; return;
+    }
+    btn.classList.add('open'); btn.textContent = '✕ close';
+    panel = document.createElement('div');
+    panel.className = 'chat-fix-panel';
+    panel.innerHTML = `
+      <div style="color:#888; margin-bottom:4px;">
+        Prompt:
+        <span class="prompt">${escapeHtml(prompt)}</span>
+        <span style="color:#666;">→ currently:</span>
+        <span class="prompt" style="color:#fc8;">${escapeHtml(currentReply.slice(0, 60))}</span>
+      </div>
+      <div class="row">
+        <label>expected reply
+          <input type="text" class="expected" placeholder="hello"
+                 autocomplete="off" autofocus></label>
+        <label title="GA population size per phase. CLI-tuned default is 24; smaller is faster but may not converge.">pop
+          <input type="number" class="pop" min="4" max="48" value="24"></label>
+        <label title="Generations per phase. CLI-tuned default is 40.">gens
+          <input type="number" class="gens" min="1" max="100" value="40"></label>
+        <label title="Mutation rate. Higher explores more, lower exploits. CLI default 0.012.">mut
+          <input type="number" class="mut" min="0.001" max="0.2" step="0.001" value="0.012"></label>
+        <label title="Polish trials per phase (monotone coordinate descent after the GA).">pol
+          <input type="number" class="pol" min="20" max="400" value="200"></label>
+        <button type="button" class="go">▶ autotrain</button>
+        <button type="button" class="stop" disabled>■ stop</button>
+        <button type="button" class="save" disabled>💾 save + use</button>
+      </div>
+      <div class="bar"><div></div></div>
+      <div class="status">type the desired reply, click autotrain · the GA
+        evolves the current model toward producing it.</div>
+    `;
+    msg.appendChild(panel);
+
+    const expEl    = panel.querySelector('.expected');
+    const popEl    = panel.querySelector('.pop');
+    const gensEl   = panel.querySelector('.gens');
+    const mutEl    = panel.querySelector('.mut');
+    const polEl    = panel.querySelector('.pol');
+    const goBtn    = panel.querySelector('.go');
+    const stopBtn2 = panel.querySelector('.stop');
+    const saveBtn  = panel.querySelector('.save');
+    const statusEl = panel.querySelector('.status');
+    const barEl    = panel.querySelector('.bar > div');
+    let tEvt = null;
+    let totalEvals = 0, doneEvals = 0;
+
+    function fire() {
+      const expected = (expEl.value || '').trim();
+      if (!expected) {
+        statusEl.textContent = 'enter an expected reply first';
+        return;
+      }
+      if (tEvt) tEvt.close();
+      goBtn.disabled = true; stopBtn2.disabled = false; saveBtn.disabled = true;
+      barEl.style.width = '0'; doneEvals = 0;
+      statusEl.textContent = 'connecting…';
+      const params = new URLSearchParams();
+      params.set('q', prompt);
+      params.set('expected', expected);
+      params.set('pop', popEl.value);
+      params.set('gens', gensEl.value);
+      params.set('mut', mutEl.value);
+      params.set('pol', polEl.value);
+      params.set('n_blocks',
+                  knobs.querySelector('[name="n_blocks"]').value);
+      // Warm-start from whichever model the chat is currently using.
+      params.set('model', modelSelect.value || '');
+      const url = "{% url 'caformer:pipeline_autotrain_stream' %}?" + params;
+      tEvt = new EventSource(url);
+      tEvt.addEventListener('meta', e => {
+        const d = JSON.parse(e.data);
+        totalEvals = d.total_evals;
+        statusEl.textContent = 'autotrain · ' + d.pop_size + 'p × '
+                                + d.generations + 'g · base=' + d.base_model;
+      });
+      tEvt.addEventListener('ind', e => {
+        const d = JSON.parse(e.data);
+        doneEvals += 1;
+        barEl.style.width =
+          (100 * doneEvals / Math.max(1, totalEvals)) + '%';
+        const c = d.char || '?';
+        statusEl.textContent = `▶ phase ${d.gen+1}/${d.n_pos} `
+                                + `→ target byte ${JSON.stringify(c)} `
+                                + `· evolving…`;
+      });
+      tEvt.addEventListener('gen', e => {
+        const d = JSON.parse(e.data);
+        const sym = d.match ? '✓' : '✗';
+        statusEl.textContent = `${sym} phase ${d.gen}/${d.n_pos} `
+                                + `target=${JSON.stringify(d.target)} `
+                                + `argmax=${JSON.stringify(d.argmax)} `
+                                + `fit=${d.best.toFixed(3)} `
+                                + `(${(d.elapsed_ms/1000).toFixed(1)}s)`;
+      });
+      // Mid-phase heartbeat events from the server — keeps the panel
+      // lively during the silent ~10-30s GA loop per byte (classroom-
+      // friendly).  Server emits these every 1s while a phase runs.
+      tEvt.addEventListener('status', e => {
+        const d = JSON.parse(e.data);
+        if (d.phase === 'working' && d.msg) {
+          statusEl.textContent = '… ' + d.msg;
+        } else if (d.msg) {
+          statusEl.textContent = d.msg;
+        }
+      });
+      tEvt.addEventListener('error', e => {
+        const d = e.data ? JSON.parse(e.data) : null;
+        statusEl.textContent = 'ERROR: ' + (d ? d.msg : 'connection');
+        goBtn.disabled = false; stopBtn2.disabled = true;
+      });
+      tEvt.addEventListener('end', e => {
+        const d = JSON.parse(e.data);
+        barEl.style.width = '100%';
+        tEvt.close(); tEvt = null;
+        goBtn.disabled = false; stopBtn2.disabled = true;
+        saveBtn.disabled = !d.savable;
+        // Positional trainer auto-deploys on best_exact, so if the
+        // backend reports a deployed_slug the new pair is already in
+        // the dispatcher pool — the next time you type the same
+        // prompt, the chat will route to it automatically.  No need
+        // to click "save + use" (that exists for the case where you
+        // want to FORCE-select the slug regardless of prompt).
+        if (d.auto_deployed && d.deployed_slug) {
+          // Add the new slug to the dropdown WITHOUT selecting it,
+          // so the dispatcher stays in charge.
+          if (!modelSelect.querySelector(
+                  `option[value="${d.deployed_slug}"]`)) {
+            const opt = document.createElement('option');
+            opt.value = d.deployed_slug;
+            opt.textContent = d.deployed_slug + ' (fit '
+                                + d.best_fitness.toFixed(3) + ')';
+            opt.dataset.nBlocks = '1';
+            modelSelect.appendChild(opt);
+          }
+          statusEl.textContent =
+            `★ trained · fitness ${d.best_fitness.toFixed(4)}`
+            + (d.exact ? ' (exact ✓) · ' : ' · ')
+            + `dispatcher now routes ${JSON.stringify(d.prompt)} → `
+            + `${d.deployed_slug}.  Just type the prompt to use it.`;
+        } else {
+          statusEl.textContent = '★ done · fitness '
+                                  + d.best_fitness.toFixed(4)
+                                  + ' · ready to save';
+        }
+      });
+      tEvt.onerror = () => {
+        statusEl.textContent = 'SSE connection error';
+        goBtn.disabled = false; stopBtn2.disabled = true;
+      };
+    }
+
+    async function save() {
+      saveBtn.disabled = true;
+      statusEl.textContent = 'saving…';
+      const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+      const r = await fetch("{% url 'caformer:pipeline_autotrain_save' %}", {
+        method: 'POST', body: new FormData(),
+        headers: {'X-CSRFToken': csrf},
+        credentials: 'same-origin',
+      });
+      const j = await r.json();
+      if (!j.ok) {
+        statusEl.textContent = 'save failed: ' + (j.error || '?');
+        return;
+      }
+      // Append the new model to the chat dropdown but DON'T force-
+      // select it.  With the per-prompt dispatcher running, typing the
+      // trained prompt is enough — the dispatcher routes you to this
+      // slug automatically and per-prompt dispatch keeps working for
+      // every OTHER prompt too.  Manual selection here would lock the
+      // chat to this one model and break composition of multiple pairs.
+      if (!modelSelect.querySelector(`option[value="${j.slug}"]`)) {
+        const opt = document.createElement('option');
+        opt.value = j.slug;
+        opt.textContent = j.slug + ' (fit ' + j.fitness.toFixed(3) + ')';
+        opt.dataset.nBlocks = '1';
+        modelSelect.appendChild(opt);
+      }
+      statusEl.textContent = '✓ saved · ' + j.slug
+                              + ' · dispatcher routes the prompt to this now.';
+    }
+
+    function stop2() {
+      if (tEvt) { tEvt.close(); tEvt = null; }
+      statusEl.textContent = 'stopped';
+      goBtn.disabled = false; stopBtn2.disabled = true;
+    }
+
+    goBtn   .addEventListener('click', fire);
+    stopBtn2.addEventListener('click', stop2);
+    saveBtn .addEventListener('click', save);
+    expEl   .addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); fire(); }
+    });
+    expEl.focus();
+  }
+
+  form.addEventListener('submit', e => {
+    e.preventDefault();
+    const q = input.value.trim();
+    if (!q || sendBtn.disabled) return;
+    input.value = '';
+    start(q);
+    input.focus();
+  });
+  stopBtn.addEventListener('click', stop);
+})();
+</script>
+{% endblock %}

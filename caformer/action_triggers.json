@@ -1,0 +1,16 @@
+{
+  "_comment": "Action triggers — phrase-driven expert dispatch. The chat dispatcher consults this file BEFORE exact-prompt match, so a trigger fires even for prompts that aren't trained. Each trigger routes to an `expert_slug` (a TrainedModel slug) with a payload extracted from the user's input.\n\nFields:\n  phrase           — substring to match (case-insensitive)\n  expert_slug      — the TrainedModel/QRPair-deployed slug to invoke\n  payload_extract  — after-phrase | before-phrase | full-prompt | fixed\n  payload_literal  — used only when payload_extract='fixed'\n  n_tokens         — override max generated tokens (default = chat's n)\n  n_blocks         — override caformer block depth (default = pair's value)\n  priority         — higher wins on overlap (default 0)\n  enabled          — set false to disable without deleting\n\nEdit this file freely; it's re-read on every request. No server restart needed.",
+  "triggers": [
+    {
+      "phrase": "say hi",
+      "expert_slug": "qr-positional-hi-hello-56163",
+      "payload_extract": "fixed",
+      "payload_literal": "hi",
+      "n_tokens": 5,
+      "n_blocks": 1,
+      "priority": 10,
+      "enabled": true,
+      "description": "Demo: 'please say hi to me' → invokes the hi→hello pair with canonical payload 'hi' → returns 'hello'. Shows the trigger pattern; replace with real triggers as you train more experts."
+    }
+  ]
+}

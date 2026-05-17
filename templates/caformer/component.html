@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}caformer — {{ component.name }}{% endblock %}
+{% block content %}
+<style>
+  .cc-page { max-width: 60em; }
+  .cc-page h1 { margin: 0 0 4px; }
+  .cc-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 14px; }
+  .cc-page .crumbs a { color: #ace; }
+  .cc-page p.one { color: #cfc; max-width: 50em; font-size: 0.95rem; }
+  .cc-section { margin-top: 18px; padding: 12px 14px;
+                 border: 1px solid #1f1f1f; background: #0a0a0a; }
+  .cc-section h2 { font-size: 0.78rem; color: #888;
+                    text-transform: uppercase; letter-spacing: 0.06em;
+                    font-weight: normal; margin: 0 0 6px; }
+  .cc-section .body { color: #ddd; font-size: 0.88rem; line-height: 1.55;
+                       white-space: pre-wrap; }
+  .cc-meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+              font-size: 0.78rem; color: #aaa; margin-top: 14px; }
+  .cc-meta .k { color: #888; font-size: 0.7rem;
+                 text-transform: uppercase; letter-spacing: 0.05em; }
+  .cc-meta .v { color: #cfc; font-family: monospace; }
+  .status-sketch    { color: #ccc; }
+  .status-partial   { color: #fc6; }
+  .status-working   { color: #6f6; }
+  .status-optimised { color: #6cf; }
+  .cc-related li, .cc-questions li { color: #ace; font-family: monospace;
+                                       font-size: 0.78rem; line-height: 1.6; }
+  .cc-questions li { color: #fc6; }
+  .cc-nav { margin-top: 22px; padding: 10px 0; border-top: 1px solid #1f1f1f;
+             font-size: 0.8rem; }
+  .cc-nav a { color: #ace; text-decoration: none; margin-right: 1.2em; }
+</style>
+
+<div class="cc-page">
+  <div class="crumbs">
+    <a href="{% url 'caformer:index' %}">caformer</a> ›
+    {{ component.name }}
+  </div>
+  <h1>{{ component.name }}
+    <span class="status-{{ component.status }}"
+          style="font-size:0.7rem; padding:2px 8px; border:1px solid;
+                  border-radius:2px; vertical-align:middle;">
+      {{ component.status }}
+    </span>
+  </h1>
+  <p class="one">{{ component.one_liner }}</p>
+
+  <div class="cc-meta">
+    <div><div class="k">inputs</div>  <div class="v">{{ component.inputs }}</div></div>
+    <div><div class="k">outputs</div> <div class="v">{{ component.outputs }}</div></div>
+    <div><div class="k">grid</div>    <div class="v">{{ component.grid }}</div></div>
+  </div>
+
+  <div class="cc-section">
+    <h2>What it does in a real LLM</h2>
+    <div class="body">{{ component.real_llm }}</div>
+  </div>
+
+  <div class="cc-section" style="border-color:#2a3; background:#061206;">
+    <h2 style="color:#cfc;">CA-based design</h2>
+    <div class="body" style="color:#cfc;">{{ component.ca_design }}</div>
+  </div>
+
+  {% include "caformer/_mechanism.html" %}
+
+  {% if c_source %}
+  <div class="cc-section">
+    <h2 style="color:#f0883e;">distilled C — what gets baked into the standalone binary</h2>
+    <p style="color:#8b949e; font-size:0.85rem;">
+      The standalone tinyformer binary (~24-58 KB, exported via
+      <code style="color:#79c0ff;">manage.py emit_tinyformer &lt;model_slug&gt;</code>) contains
+      this for the <b>{{ component.name }}</b> stage.  The rule LUT it
+      references (e.g. <code>RULE_EMBED</code>) is baked in as a 4,096-byte
+      2-bit-packed static array.  See <code>caformer/management/commands/
+      emit_tinyformer.py</code> for the full file template.
+    </p>
+    <pre style="background:#0d1117; color:#c9d1d9; padding:0.8rem 1rem;
+                border:1px solid #30363d; overflow-x:auto;
+                font-family:ui-monospace,monospace; font-size:0.8rem;
+                line-height:1.45;">{{ c_source }}</pre>
+  </div>
+  {% endif %}
+
+  {% if component.related %}
+  <div class="cc-section">
+    <h2>related code in Velour</h2>
+    <ul class="cc-related">
+      {% for r in component.related %}<li>{{ r }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if component.open_questions %}
+  <div class="cc-section">
+    <h2>open questions</h2>
+    <ul class="cc-questions">
+      {% for q in component.open_questions %}<li>? {{ q }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div class="cc-nav">
+    {% for c in components %}
+      {% if c.slug == component.slug %}
+        <span style="color:#fff;">[{{ c.name }}]</span>
+      {% else %}
+        <a href="{% url 'caformer:component' slug=c.slug %}">{{ c.name }}</a>
+      {% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

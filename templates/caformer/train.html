@@ -1,0 +1,797 @@
+{% extends "base.html" %}
+{% block title %}Train · CAformer{% endblock %}
+{% block content %}
+<style>
+  .tr-meta   { color: #888; font-size: 0.85rem; max-width: 80ch; }
+  .tr-knobs  { display: flex; flex-wrap: wrap; gap: 14px;
+               align-items: end; margin: 12px 0; padding: 10px 14px;
+               background: #0a0a0a; border: 1px solid #1f1f1f; }
+  .tr-knobs label { color: #aaa; font-size: 0.78rem;
+                    display: flex; flex-direction: column; gap: 2px; }
+  .tr-knobs input { width: 6em; background: #111; color: #ddd;
+                    border: 1px solid #333; padding: 3px 6px;
+                    font-family: inherit; font-size: 0.85rem; }
+  textarea.tr-corpus {
+                    width: 100%; min-height: 8em; background: #111;
+                    color: #ddd; border: 1px solid #333; padding: 8px;
+                    font: 0.8rem ui-monospace, monospace; }
+  .tr-go     { background: #1f4f1f; color: #cfc; border: 1px solid #4a8;
+                padding: 6px 14px; cursor: pointer; font-family: inherit; }
+  .tr-stop   { background: #4f1f1f; color: #fcc; border: 1px solid #a48;
+                padding: 6px 14px; cursor: pointer; font-family: inherit; }
+  .tr-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 18px;
+                align-items: start; margin-top: 14px; }
+  @media (max-width:760px) { .tr-layout { grid-template-columns: 1fr; } }
+  .tr-chart  { background: #0a0a0a; border: 1px solid #1f1f1f;
+                padding: 10px; }
+  .tr-chart canvas { display: block; background: #050505;
+                      width: 100%; height: 200px; }
+  .tr-stats  { font: 0.8rem ui-monospace, monospace; color: #aaa; }
+  .tr-stats td:first-child { color: #888; padding-right: 12px; }
+  .tr-stats td b { color: #fff; }
+  .tr-save   { background: #0a0a0a; border: 1px solid #1f1f1f;
+                padding: 10px; }
+  .tr-save input[type="text"] {
+                width: 100%; background: #111; color: #ddd;
+                border: 1px solid #333; padding: 4px 6px;
+                font-family: inherit; font-size: 0.85rem;
+                margin-bottom: 6px; }
+  .tr-save button {
+                background: #1f4f1f; color: #cfc; border: 1px solid #4a8;
+                padding: 5px 12px; cursor: pointer; font-family: inherit;
+                width: 100%; margin-top: 4px; }
+  .tr-save button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .tr-list   { font: 0.8rem ui-monospace, monospace; margin-top: 12px; }
+  .tr-list a { color: #ace; }
+</style>
+
+<p><a href="{% url 'caformer:index' %}" style="color:#888;">← caformer</a></p>
+<h1 style="margin-bottom:4px;">Train · CAformer</h1>
+<p class="tr-meta">
+  Genetic algorithm evolves the 10 rule tables (Q/K/V/score/mix/merge/MLP/
+  norm/output/embed) that <code>ca_forward_qkv</code> needs, so the chat
+  endpoint at <a href="{% url 'caformer:chat' %}" style="color:#ace;">/caformer/chat/</a>
+  predicts the *next byte* of your corpus better than chance.  Drop a few
+  paragraphs of text below, hit start, watch the fitness climb, save the
+  winner under a name, then load it from chat with <code>?model=&lt;slug&gt;</code>.
+</p>
+
+<form id="tr-form" onsubmit="return false;">
+  <p style="margin:8px 0 4px; color:#aaa; font-size:0.85rem;">
+    Training corpus &mdash; paste, drop files, or fetch a URL
+    (<span id="corpus-bytes" style="color:#cfa;">0</span> bytes loaded;
+    cap 2 MB):
+  </p>
+  <textarea name="corpus" class="tr-corpus" id="tr-corpus"
+            placeholder="Paste text, drag .txt files onto this area, or fetch a URL below.">In the beginning the Universe was created. This has made a lot of people very angry and been widely regarded as a bad move.</textarea>
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+              margin-top:6px; font-size:0.78rem;">
+    <label style="color:#aaa; cursor:pointer;
+                  background:#161616; border:1px solid #333;
+                  padding:4px 10px; border-radius:2px;">
+      📂 add files
+      <input type="file" id="tr-files" multiple
+             accept=".txt,.md,.rst,.py,.js,.html,.csv,.json,.log,text/*"
+             style="display:none;">
+    </label>
+    <span id="tr-file-list" style="color:#888;"></span>
+    <span style="flex:1;"></span>
+    <input type="text" id="tr-url" placeholder="https://example.com/text.txt"
+           style="flex:1; min-width:18em; background:#0d0d0d; color:#cfa;
+                  border:1px solid #333; padding:4px 8px;
+                  font-family:inherit;">
+    <button type="button" id="tr-url-fetch"
+            style="background:#1f1f4f; color:#cdf; border:1px solid #48a;
+                   padding:4px 12px; cursor:pointer; font-family:inherit;
+                   font-size:0.78rem;">fetch &amp; append</button>
+    <button type="button" id="tr-clear"
+            title="Clear the corpus textarea"
+            style="background:#221; color:#caa; border:1px solid #533;
+                   padding:4px 10px; cursor:pointer; font-family:inherit;
+                   font-size:0.78rem;">clear</button>
+    <button type="button" id="tr-from-chat"
+            title="Use your chat history as the training corpus"
+            style="background:#1f3f3f; color:#cef; border:1px solid #4aa;
+                   padding:4px 10px; cursor:pointer; font-family:inherit;
+                   font-size:0.78rem;">💬 from chat</button>
+  </div>
+
+  <div class="tr-knobs">
+    <label>pop size
+      <input type="number" name="pop_size"    min="4" max="32"  value="8">
+    </label>
+    <label>generations
+      <input type="number" name="generations" min="1" max="40"  value="6">
+    </label>
+    <label>n_blocks
+      <input type="number" name="n_blocks"    min="1" max="4"   value="2">
+    </label>
+    <label>n_windows
+      <input type="number" name="n_windows"   min="4" max="64"  value="16">
+    </label>
+    <label>window_len
+      <input type="number" name="window_len"  min="4" max="64"  value="12">
+    </label>
+    <label>seed
+      <input type="number" name="seed"        min="1" max="2147483647"
+             value="212954293">
+    </label>
+    <button type="button" id="tr-go"   class="tr-go">▶ start training</button>
+    <button type="button" id="tr-stop" class="tr-stop" disabled>■ stop</button>
+    <span id="tr-status" style="color:#888; font-size:0.78rem;
+                                 padding-left:8px;">idle</span>
+  </div>
+</form>
+
+<div class="tr-layout">
+  <div class="tr-chart">
+    <canvas id="tr-chart"></canvas>
+    <table class="tr-stats" style="margin-top: 10px;">
+      <tr><td>generation</td>      <td><b id="s-gen">—</b> / <span id="s-gens">—</span></td></tr>
+      <tr><td>individual</td>      <td><b id="s-ind">—</b> / <span id="s-pop">—</span>
+                                       (last score <span id="s-last">—</span>)</td></tr>
+      <tr><td>evals so far</td>    <td><b id="s-evals">0</b> / <span id="s-totalevals">—</span></td></tr>
+      <tr><td>best fitness</td>    <td><b id="s-best">—</b></td></tr>
+      <tr><td>mean fitness</td>    <td><b id="s-mean">—</b></td></tr>
+      <tr><td>elapsed</td>          <td><b id="s-elapsed">—</b></td></tr>
+      <tr><td>est. wall-clock</td>  <td><b id="s-eta">—</b></td></tr>
+    </table>
+    <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+      <button type="button" id="polish-btn" disabled
+              title="Coordinate descent on the GA winner — strictly monotone polish"
+              style="background:#1f3f1f; color:#cfc; border:1px solid #4a8;
+                     padding:5px 12px; cursor:pointer; font-family:inherit;
+                     font-size:0.82rem;">
+        ✨ polish winner
+      </button>
+      <input type="number" id="polish-trials" value="60" min="1" max="400"
+             title="trials (60 ≈ 30 s)"
+             style="width:5em; background:#111; color:#cfc;
+                    border:1px solid #333; padding:3px 6px;
+                    font-family:inherit; font-size:0.78rem;">
+      <span id="polish-status" style="color:#888; font-size:0.78rem;">
+        run a GA job first, then polish.
+      </span>
+    </div>
+  </div>
+
+  <div class="tr-save">
+    <h3 style="margin:0 0 8px; color:#cfa; font-size:0.9rem;">
+      Save winner as TrainedModel
+    </h3>
+    <p style="color:#888; font-size:0.78rem; margin:0 0 8px;">
+      Run a training job first; once it finishes, fill in name + slug
+      and click save.  The chat will load it with
+      <code>?model=&lt;slug&gt;</code>.
+    </p>
+    <label style="color:#aaa; font-size:0.78rem;">name
+      <input type="text" id="save-name" placeholder="e.g. shakespeare-tiny">
+    </label>
+    <label style="color:#aaa; font-size:0.78rem;">slug (URL-safe)
+      <input type="text" id="save-slug" placeholder="e.g. shakespeare-tiny">
+    </label>
+    <label style="color:#aaa; font-size:0.78rem;">notes
+      <input type="text" id="save-notes" placeholder="optional">
+    </label>
+    <button id="save-btn" disabled>save model</button>
+    <p id="save-msg" style="color:#888; font-size:0.78rem; margin-top:8px;"></p>
+  </div>
+</div>
+
+<div style="margin-top:18px; background:#0a0e14; border:1px solid #246;
+            padding:12px;">
+  <h2 style="font-size:0.9rem; color:#9cf; text-transform:uppercase;
+              letter-spacing:0.06em; font-weight:normal; margin:0 0 6px;">
+    No-training import — distill an LLM into a CA in one shot
+  </h2>
+  <p style="color:#888; font-size:0.78rem; margin:0 0 8px;">
+    Walk 16,384 LLM forwards (batched), set each LUT entry to the
+    LLM's argmax-bucket of next-byte. ~5 s for distilgpt2 (warm).
+    No GA, no SGD — the resulting <code>output_rule</code> mimics
+    the LLM's first-byte distribution.  Other 9 rules get sensible
+    defaults; you can polish or evolve them on top later.
+  </p>
+  <div style="display:flex; gap:10px; align-items:end; flex-wrap:wrap;
+              font-size:0.78rem;">
+    <label style="color:#aaa;">backbone
+      <select id="distill-backbone"
+              style="background:#111; color:#cdf; border:1px solid #333;
+                     padding:3px 6px; font-family:inherit;">
+        {% for b in backbones %}
+          <option value="{{ b }}">{{ b }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label style="color:#aaa;">slug
+      <input type="text" id="distill-slug" placeholder="(auto)"
+             style="width:18em; background:#111; color:#cdf;
+                    border:1px solid #333; padding:3px 6px;
+                    font-family:inherit;">
+    </label>
+    <button type="button" id="distill-go"
+            style="background:#1f3f5f; color:#cef; border:1px solid #48a;
+                   padding:5px 14px; cursor:pointer; font-family:inherit;
+                   font-size:0.82rem;">
+      ⤓ distill (no training)
+    </button>
+    <span id="distill-status" style="color:#888; font-size:0.78rem;
+                                       padding-left:8px;">idle</span>
+  </div>
+  <div id="distill-bar-wrap" style="margin-top:10px; background:#080808;
+                                      border:1px solid #246; height:6px;
+                                      display:none;">
+    <div id="distill-bar" style="background:#48a; height:100%; width:0;"></div>
+  </div>
+</div>
+
+<div class="tr-list">
+  <p style="color:#888; margin-bottom:6px;">Existing TrainedModels:</p>
+  {% if trained %}
+    {% for m in trained %}
+      <div>
+        <code>{{ m.slug }}</code> &middot;
+        fitness <b style="color:#cfa;">{{ m.final_fitness|floatformat:3 }}</b>
+        &middot; {{ m.generations }}g × {{ m.pop_size }}p
+        &middot; {{ m.created_at|date:"D d M H:i" }}
+        &middot;
+        <a href="{% url 'caformer:chat' %}?model={{ m.slug }}">chat with it →</a>
+        &middot;
+        <a href="{% url 'caformer:export' slug=m.slug %}"
+           title="Download a self-contained C binary (target ≤ 64 KB) with this model's 10 CA rule tables baked in.">⤓ 64 KB binary</a>
+        <span style="color:#555;">/</span>
+        <a href="{% url 'caformer:export' slug=m.slug %}?format=c"
+           style="color:#888;" title="Download the .c source instead of compiling.">.c</a>
+        &middot;
+        {% include "caframe/_export_button.html" with source="caformer" source_ref=m.slug label="→ caframe video" %}
+      </div>
+    {% endfor %}
+  {% else %}
+    <p style="color:#666;">(none yet — run a training job)</p>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  const form    = document.getElementById('tr-form');
+  const goBtn   = document.getElementById('tr-go');
+  const stopBtn = document.getElementById('tr-stop');
+  const saveBtn = document.getElementById('save-btn');
+  const canvas  = document.getElementById('tr-chart');
+  const ctx     = canvas.getContext('2d');
+  let evtSrc = null;
+  let series = [];           // {gen, best, mean, worst}
+  let totalGens = 0;
+  const corpusEl = document.getElementById('tr-corpus');
+  const bytesEl  = document.getElementById('corpus-bytes');
+  const fileListEl = document.getElementById('tr-file-list');
+  const polishBtn  = document.getElementById('polish-btn');
+  const polishStatus = document.getElementById('polish-status');
+
+  function updateByteCount() {
+    const n = new TextEncoder().encode(corpusEl.value).length;
+    bytesEl.textContent = n.toLocaleString();
+    bytesEl.style.color = n >= 2_000_000 ? '#f86' :
+                            n >= 32 ? '#cfa' : '#888';
+  }
+  corpusEl.addEventListener('input', updateByteCount);
+  updateByteCount();
+
+  // ── File picker + drag-and-drop ─────────────────────────────
+  document.getElementById('tr-files').addEventListener('change', async e => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    await appendFiles(files);
+    e.target.value = '';
+  });
+
+  // Drop anywhere on the textarea.
+  corpusEl.addEventListener('dragover', e => {
+    e.preventDefault();
+    corpusEl.style.borderColor = '#4a8';
+  });
+  corpusEl.addEventListener('dragleave', () => {
+    corpusEl.style.borderColor = '';
+  });
+  corpusEl.addEventListener('drop', async e => {
+    e.preventDefault();
+    corpusEl.style.borderColor = '';
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length) await appendFiles(files);
+  });
+
+  async function appendFiles(files) {
+    const labels = [];
+    let added = 0;
+    for (const f of files) {
+      try {
+        const text = await f.text();
+        if (corpusEl.value && !corpusEl.value.endsWith('\n\n'))
+          corpusEl.value += '\n\n';
+        corpusEl.value += text;
+        labels.push(`${f.name} (${f.size.toLocaleString()} B)`);
+        added += f.size;
+      } catch (err) {
+        labels.push(`${f.name} (read failed)`);
+      }
+    }
+    fileListEl.textContent = labels.join('  ·  ');
+    updateByteCount();
+  }
+
+  // ── URL fetch ────────────────────────────────────────────────
+  document.getElementById('tr-url-fetch').addEventListener('click', async () => {
+    const url = document.getElementById('tr-url').value.trim();
+    if (!url) return;
+    polishStatus.textContent = '';
+    fileListEl.textContent = `fetching ${url} …`;
+    try {
+      const fd = new FormData();
+      fd.append('url', url);
+      const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+      const r = await fetch(`{% url 'caformer:train_post_corpus' %}`, {
+        method: 'POST', body: fd,
+        headers: {'X-CSRFToken': csrf}, credentials: 'same-origin',
+      });
+      const j = await r.json();
+      if (!j.ok) {
+        fileListEl.textContent = `fetch failed: ${j.error}`;
+        return;
+      }
+      // Server stashed the fetched text; pull it back into the textarea
+      // so the user can see it. Append to whatever's already there.
+      if (corpusEl.value && !corpusEl.value.endsWith('\n\n'))
+        corpusEl.value += '\n\n';
+      // The session has the combined corpus; we don't read it back here
+      // (no GET endpoint for that). Show the byte count instead.
+      fileListEl.textContent =
+        `fetched ${j.sources.fetched_from} → session corpus is now ${j.len.toLocaleString()} B`;
+      updateByteCount();
+    } catch (err) {
+      fileListEl.textContent = `fetch failed: ${err.message}`;
+    }
+  });
+
+  // ── Clear ────────────────────────────────────────────────────
+  document.getElementById('tr-clear').addEventListener('click', () => {
+    corpusEl.value = '';
+    fileListEl.textContent = '';
+    updateByteCount();
+  });
+
+  // ── Train from chat history ──────────────────────────────────
+  // When this fires, the session already has the chat corpus stashed
+  // server-side, and we pass `source=chat` to /train/stream/ so the
+  // server fetches it from the session unconditionally. The textarea
+  // gets locked + banner'd so the user can't accidentally invalidate
+  // the chat-source state by typing into the field.
+  let corpusFromChat = false;
+
+  function setChatSourceUI(on, info) {
+    if (on) {
+      corpusEl.readOnly = true;
+      corpusEl.style.opacity = '0.55';
+      corpusEl.style.cursor = 'not-allowed';
+      let banner = document.getElementById('tr-chat-banner');
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'tr-chat-banner';
+        banner.style.cssText =
+          'background:#0a1a14; color:#cfc; border:1px solid #4a8;'
+          + 'padding:8px 10px; margin:6px 0; font-size:0.82rem;'
+          + 'display:flex; align-items:center; gap:10px;';
+        corpusEl.parentElement.insertBefore(banner, corpusEl);
+      }
+      banner.innerHTML = '';
+      const txt = document.createElement('span');
+      txt.style.flex = '1';
+      txt.innerHTML = '💬 <b>chat-corpus mode</b> — '
+                      + 'training will use your chat history ('
+                      + info.turn_count + ' turns, '
+                      + info.len.toLocaleString() + ' B). '
+                      + 'Textarea is locked. Click "edit text instead" to switch.';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'edit text instead';
+      btn.style.cssText =
+        'background:#221; color:#caa; border:1px solid #533;'
+        + 'padding:3px 10px; cursor:pointer; font-family:inherit;'
+        + 'font-size:0.78rem;';
+      btn.addEventListener('click', () => setChatSourceUI(false));
+      banner.appendChild(txt);
+      banner.appendChild(btn);
+    } else {
+      corpusFromChat = false;
+      corpusEl.readOnly = false;
+      corpusEl.style.opacity = '';
+      corpusEl.style.cursor = '';
+      const banner = document.getElementById('tr-chat-banner');
+      if (banner) banner.remove();
+      updateByteCount();
+    }
+  }
+
+  document.getElementById('tr-from-chat').addEventListener('click', async () => {
+    fileListEl.textContent = 'pulling chat history…';
+    try {
+      const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+      const r = await fetch(`{% url 'caformer:train_from_chat' %}`, {
+        method: 'POST', headers: {'X-CSRFToken': csrf},
+        credentials: 'same-origin',
+      });
+      const j = await r.json();
+      if (!j.ok) {
+        fileListEl.textContent = `from-chat failed: ${j.error}`;
+        return;
+      }
+      corpusFromChat = true;
+      const placeholder =
+        `(using chat corpus: ${j.turn_count} turns / ${j.len.toLocaleString()} B — `
+        + `textarea locked while in chat-source mode; hit start)`;
+      corpusEl.value = placeholder;
+      setChatSourceUI(true, j);
+      fileListEl.textContent =
+        `✓ chat corpus stashed (${j.turn_count} turns, ${j.len.toLocaleString()} B)`;
+      bytesEl.textContent = j.len.toLocaleString();
+      bytesEl.style.color = '#cfa';
+    } catch (err) {
+      fileListEl.textContent = `from-chat failed: ${err.message}`;
+    }
+  });
+
+  function setRunning(on) {
+    goBtn.disabled = on;
+    stopBtn.disabled = !on;
+    Array.from(form.querySelectorAll('input,textarea,button:not(#tr-go):not(#tr-stop)'))
+      .forEach(el => el.disabled = on && el !== stopBtn);
+  }
+
+  function paintChart() {
+    const w = canvas.width  = canvas.offsetWidth || 400;
+    const h = canvas.height = 200;
+    ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, w, h);
+    if (series.length < 2) return;
+    // Auto-scale to whatever range the fitness happens to occupy —
+    // logprob fitness is negative (range ~[-5.5, 0]), argmax is in
+    // [0, 1]. Pin the axis to the actual min/max of the series so
+    // both modes plot legibly.
+    const all = series.flatMap(p => [p.best, p.mean, p.worst]);
+    let lo = Math.min(...all), hi = Math.max(...all);
+    if (hi - lo < 1e-6) { hi = lo + 1e-6; }
+    const pad = (hi - lo) * 0.08;
+    lo -= pad; hi += pad;
+    function plot(key, color) {
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      series.forEach((p, i) => {
+        const x = (i / (totalGens - 1 || 1)) * (w - 24) + 12;
+        const y = h - 12 - ((p[key] - lo) / (hi - lo)) * (h - 24);
+        if (i === 0) ctx.moveTo(x, y);
+        else         ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+    plot('worst', '#a44');
+    plot('mean',  '#aa6');
+    plot('best',  '#4ca');
+    // Y-axis labels (top + bottom).
+    ctx.fillStyle = '#666'; ctx.font = '10px ui-monospace';
+    ctx.fillText(hi.toFixed(2), 2, 12);
+    ctx.fillText(lo.toFixed(2), 2, h - 2);
+    // Legend
+    ctx.fillStyle = '#cfa'; ctx.font = '11px ui-monospace';
+    ctx.fillText('best',  w - 130, 14);
+    ctx.fillStyle = '#aa6'; ctx.fillText('mean',  w -  90, 14);
+    ctx.fillStyle = '#a44'; ctx.fillText('worst', w -  50, 14);
+  }
+
+  function setStatus(msg, color) {
+    const el = document.getElementById('tr-status');
+    el.textContent = msg;
+    el.style.color = color || '#888';
+  }
+
+  function autofillSaveNameSlug(bestFit) {
+    // Don't clobber a name the user already typed.
+    const nameEl = document.getElementById('save-name');
+    const slugEl = document.getElementById('save-slug');
+    // Grab the first few "real" words from the corpus to make a
+    // human-recognisable label, then append a fitness suffix so two
+    // runs over the same corpus produce different slugs.
+    const corpus = (form.querySelector('[name=corpus]').value || '')
+      .replace(/\s+/g, ' ').trim();
+    const tokens = corpus.split(/[^A-Za-z0-9]+/).filter(Boolean);
+    const stem = (tokens.slice(0, 3).join('-') || 'caformer-run')
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '')
+      .slice(0, 32) || 'caformer-run';
+    const fit = (bestFit || 0).toFixed(3).replace('.', '');
+    // Short timestamp keeps the slug unique across saves.
+    const t = new Date();
+    const stamp = (
+      String(t.getFullYear()).slice(2)
+      + String(t.getMonth() + 1).padStart(2, '0')
+      + String(t.getDate()).padStart(2, '0')
+      + '-'
+      + String(t.getHours()).padStart(2, '0')
+      + String(t.getMinutes()).padStart(2, '0')
+    );
+    const slug = `${stem}-fit${fit}-${stamp}`.slice(0, 80);
+    const name = `${stem} (fit ${(bestFit || 0).toFixed(3)})`;
+    if (!nameEl.value.trim()) nameEl.value = name;
+    if (!slugEl.value.trim()) slugEl.value = slug;
+  }
+
+  async function start() {
+    try {
+      console.log('[train] start clicked');
+      setStatus('preparing…');
+      series = [];
+      totalGens = parseInt(
+        form.querySelector('[name=generations]').value, 10) || 6;
+      saveBtn.disabled = true;
+      document.getElementById('save-msg').textContent = '';
+      document.getElementById('s-gens').textContent = totalGens;
+      paintChart();
+
+      // POST the corpus first so the GET-only EventSource doesn't
+      // need to carry it (sidesteps URL length limits — most browsers
+      // cap GET URLs around 8 KB but a real corpus is paragraphs of
+      // text; trying to put it all in the query string was the
+      // silent failure when the page looked dead).
+      // Skip when from-chat: the session already holds the chat
+      // corpus, and posting the textarea (which contains a
+      // placeholder string) would clobber it.
+      const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+      if (corpusFromChat) {
+        console.log('[train] corpus from chat — skipping post-corpus');
+      } else {
+        const corpus = form.querySelector('[name=corpus]').value;
+        const fd = new FormData();
+        fd.append('corpus', corpus);
+        const r = await fetch(`{% url 'caformer:train_post_corpus' %}`, {
+          method: 'POST', body: fd,
+          headers: {'X-CSRFToken': csrf},
+          credentials: 'same-origin',
+        });
+        if (!r.ok) throw new Error('corpus stash failed: HTTP ' + r.status);
+        const stashed = await r.json();
+        console.log('[train] corpus stashed', stashed);
+      }
+
+      // Now build the EventSource URL with everything EXCEPT corpus.
+      const params = new URLSearchParams();
+      Array.from(form.querySelectorAll('input')).forEach(
+        el => { if (el.name) params.set(el.name, el.value); });
+      // When chat-source mode is on, tell the server explicitly so
+      // it ignores any posted textarea content and uses the chat
+      // corpus stashed in the session by /train/from-chat/.
+      if (corpusFromChat) params.set('source', 'chat');
+      const streamUrl = `{% url 'caformer:train_stream' %}?${params}`;
+      console.log('[train] opening EventSource', streamUrl);
+      setStatus('opening stream…');
+      evtSrc = new EventSource(streamUrl);
+      setRunning(true);
+
+      evtSrc.addEventListener('meta', e => {
+        const m = JSON.parse(e.data);
+        console.log('[train] meta', m);
+        document.getElementById('s-pop').textContent       = m.pop_size;
+        document.getElementById('s-totalevals').textContent = m.total_evals;
+        setStatus(`running · corpus ${m.corpus_len} B`, '#cfa');
+      });
+
+      // Per-individual: fired after each fitness eval. Cheap update —
+      // text only, no chart redraw — so the page stays responsive even
+      // with hundreds of evals streaming through.
+      let evals = 0;
+      evtSrc.addEventListener('individual', e => {
+        const d = JSON.parse(e.data);
+        evals += 1;
+        document.getElementById('s-ind').textContent  = d.ind + 1;
+        document.getElementById('s-last').textContent = d.score.toFixed(3);
+        document.getElementById('s-evals').textContent = evals;
+        document.getElementById('s-elapsed').textContent =
+          (d.elapsed_ms / 1000).toFixed(1) + ' s';
+        const totalEvals = parseInt(
+          document.getElementById('s-totalevals').textContent, 10) || 1;
+        const eta = d.elapsed_ms / Math.max(1, evals) * totalEvals / 1000;
+        document.getElementById('s-eta').textContent = eta.toFixed(1) + ' s';
+        setStatus(
+          `gen ${d.gen + 1}/${totalGens} · ind ${d.ind + 1} ` +
+          `· score ${d.score.toFixed(3)} · ${evals}/${totalEvals} evals`,
+          '#cfa');
+      });
+
+      // Per-generation: full chart-paint update with best/mean/worst.
+      evtSrc.onmessage = e => {
+        const d = JSON.parse(e.data);
+        series.push(d);
+        document.getElementById('s-gen').textContent     = d.gen + 1;
+        document.getElementById('s-best').textContent    = d.best.toFixed(3);
+        document.getElementById('s-mean').textContent    = d.mean.toFixed(3);
+        document.getElementById('s-elapsed').textContent =
+          (d.elapsed_ms / 1000).toFixed(1) + ' s';
+        const eta = d.elapsed_ms / (d.gen + 1) * totalGens / 1000;
+        document.getElementById('s-eta').textContent =
+          eta.toFixed(1) + ' s';
+        paintChart();
+        setStatus(`gen ${d.gen + 1}/${totalGens} · best ${d.best.toFixed(3)}`,
+                   '#cfa');
+      };
+      evtSrc.addEventListener('end', e => {
+        const d = JSON.parse(e.data);
+        saveBtn.disabled = false;
+        polishBtn.disabled = false;
+        polishStatus.textContent =
+          `winner ready (fit ${d.best_fitness.toFixed(3)}) — polish or save.`;
+        polishStatus.style.color = '#cfa';
+        // Auto-fill name + slug so the user can just hit save. Take a
+        // few words from the corpus + the fitness to keep names unique.
+        autofillSaveNameSlug(d.best_fitness);
+        document.getElementById('save-msg').textContent =
+          `Trained.  Best fitness ${d.best_fitness.toFixed(3)}.  ` +
+          `Name + slug auto-filled — polish or edit + save.`;
+        setStatus(`done · best ${d.best_fitness.toFixed(3)} · ` +
+                   `${(d.elapsed_ms / 1000).toFixed(1)}s`, '#4ca');
+        stop();
+      });
+      evtSrc.onerror = () => {
+        console.warn('[train] EventSource error');
+        setStatus('stream error / disconnected', '#f86');
+        stop();
+      };
+    } catch (err) {
+      console.error('[train] start failed', err);
+      setStatus(`error: ${err.message}`, '#f86');
+      stop();
+    }
+  }
+  function stop() {
+    if (evtSrc) { evtSrc.close(); evtSrc = null; }
+    setRunning(false);
+  }
+  goBtn.addEventListener('click', start);
+  stopBtn.addEventListener('click', stop);
+
+  // ── Polish (coordinate descent on the GA winner) ────────────
+  let polishSrc = null;
+  polishBtn.addEventListener('click', () => {
+    if (polishSrc) return;
+    const trials = parseInt(
+      document.getElementById('polish-trials').value, 10) || 60;
+    polishStatus.textContent = `polish · 0/${trials} trials …`;
+    polishStatus.style.color = '#cfa';
+    polishBtn.disabled = true;
+    saveBtn.disabled = true;
+    let polishStart = null;
+    let lastScore = null;
+    let improvements = 0;
+    polishSrc = new EventSource(
+      `{% url 'caformer:train_polish' %}?trials=${trials}`);
+    polishSrc.addEventListener('meta', e => {
+      const m = JSON.parse(e.data);
+      polishStart = m.starting_fitness;
+      lastScore = m.starting_fitness;
+      polishStatus.textContent =
+        `polish · 0/${m.trials} trials · start ${polishStart.toFixed(3)}`;
+    });
+    polishSrc.onmessage = e => {
+      const d = JSON.parse(e.data);
+      lastScore = d.score;
+      if (d.improved) improvements += 1;
+      polishStatus.textContent =
+        `polish · ${d.trial + 1}/${trials} trials · ` +
+        `score ${d.score.toFixed(3)} · ${improvements} improvements · ` +
+        `${(d.elapsed_ms / 1000).toFixed(1)}s`;
+    };
+    polishSrc.addEventListener('end', e => {
+      const d = JSON.parse(e.data);
+      polishStatus.textContent =
+        `polished · ${d.starting_fitness.toFixed(3)} → ` +
+        `${d.best_fitness.toFixed(3)} · ${d.improvements} improvements · ` +
+        `${(d.elapsed_ms / 1000).toFixed(1)}s`;
+      polishStatus.style.color = '#4ca';
+      polishBtn.disabled = false;
+      saveBtn.disabled = false;
+      // Refresh the auto-filled save fields with the new fitness.
+      const slugEl = document.getElementById('save-slug');
+      const nameEl = document.getElementById('save-name');
+      // Only refresh if user hasn't edited from the autofill default.
+      slugEl.value = ''; nameEl.value = '';
+      autofillSaveNameSlug(d.best_fitness);
+      polishSrc.close(); polishSrc = null;
+    });
+    polishSrc.onerror = () => {
+      polishStatus.textContent = 'polish stream error / disconnected';
+      polishStatus.style.color = '#f86';
+      polishBtn.disabled = false;
+      saveBtn.disabled = false;
+      if (polishSrc) { polishSrc.close(); polishSrc = null; }
+    };
+  });
+
+  // Save handler.
+  saveBtn.addEventListener('click', async () => {
+    const name = document.getElementById('save-name').value.trim();
+    const slug = document.getElementById('save-slug').value.trim();
+    if (!name || !slug) {
+      document.getElementById('save-msg').textContent =
+        'need both name and slug';
+      return;
+    }
+    const fd = new FormData();
+    fd.append('name',  name);
+    fd.append('slug',  slug);
+    fd.append('notes', document.getElementById('save-notes').value);
+    const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+    const r = await fetch(`{% url 'caformer:train_save' %}`, {
+      method: 'POST', body: fd,
+      headers: {'X-CSRFToken': csrf},
+      credentials: 'same-origin',
+    });
+    const j = await r.json();
+    document.getElementById('save-msg').textContent =
+      j.ok ? `Saved as ${j.slug} (fitness ${j.fitness.toFixed(3)}). Reload page to see it in the list.`
+            : `Error: ${j.error}`;
+  });
+
+  // ── No-training distillation ─────────────────────────────────
+  let distillSrc = null;
+  document.getElementById('distill-go').addEventListener('click', () => {
+    if (distillSrc) return;
+    const backbone = document.getElementById('distill-backbone').value;
+    const slug     = document.getElementById('distill-slug').value.trim();
+    const statusEl = document.getElementById('distill-status');
+    const barWrap  = document.getElementById('distill-bar-wrap');
+    const bar      = document.getElementById('distill-bar');
+    const goBtn    = document.getElementById('distill-go');
+    if (!backbone) {
+      statusEl.textContent = 'pick a backbone'; return;
+    }
+    statusEl.textContent = `loading ${backbone} (first call ~5-10 s) …`;
+    statusEl.style.color = '#cef';
+    barWrap.style.display = 'block';
+    bar.style.width = '0';
+    goBtn.disabled = true;
+    const url = `{% url 'caformer:train_distill' %}?backbone=` +
+      encodeURIComponent(backbone) +
+      (slug ? `&slug=${encodeURIComponent(slug)}` : '');
+    distillSrc = new EventSource(url);
+    distillSrc.addEventListener('meta', e => {
+      const m = JSON.parse(e.data);
+      statusEl.textContent =
+        `distilling ${m.backbone} → slug=${m.slug} (${m.lut_size} LUT entries) …`;
+    });
+    distillSrc.onmessage = e => {
+      const d = JSON.parse(e.data);
+      bar.style.width = `${d.pct}%`;
+      statusEl.textContent =
+        `distilling · ${d.done.toLocaleString()}/${d.total.toLocaleString()} ` +
+        `(${d.pct}%) · ${(d.elapsed_ms/1000).toFixed(1)}s`;
+    };
+    distillSrc.addEventListener('end', e => {
+      const d = JSON.parse(e.data);
+      goBtn.disabled = false;
+      if (d.error) {
+        statusEl.textContent = `error: ${d.error}`;
+        statusEl.style.color = '#f86';
+      } else {
+        bar.style.width = '100%';
+        statusEl.innerHTML =
+          `✓ saved <code style="color:#cef;">${d.slug}</code> in ` +
+          `${(d.elapsed_ms/1000).toFixed(1)}s · ` +
+          `<a href="${d.chat_url}" style="color:#cea;">chat with it →</a>`;
+        statusEl.style.color = '#4ca';
+      }
+      distillSrc.close(); distillSrc = null;
+    });
+    distillSrc.onerror = () => {
+      statusEl.textContent = 'distill stream error / disconnected';
+      statusEl.style.color = '#f86';
+      goBtn.disabled = false;
+      if (distillSrc) { distillSrc.close(); distillSrc = null; }
+    };
+  });
+})();
+</script>
+{% endblock %}

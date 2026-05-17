@@ -13,7 +13,7 @@ from django.http import HttpResponse
 from django.shortcuts import render
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
-from . import ca_fill, hex_flowers, svg
+from . import ca_fill, hanb, hex_flowers, svg
 
 
 def _float(req, name, default, lo=None, hi=None):
@@ -72,8 +72,11 @@ def grid_svg(request):
         ?fper=                     (flowers per page; omit to fill the page)
         ?fcentre=0..3              (filter to one centre colour)
     """
-    if (request.GET.get('mode') or '').strip() == 'flowers':
+    mode = (request.GET.get('mode') or '').strip()
+    if mode == 'flowers':
         return _flowers_svg(request)
+    if mode == 'hanbprint':
+        return _hanbprint_svg(request)
 
     pattern = (request.GET.get('pattern') or 'hex_pointy').strip()
 
@@ -104,6 +107,21 @@ def grid_svg(request):
     optikon_slug = (request.GET.get('from_optikon') or '').strip()
     if optikon_slug or pattern == 'optikon':
         return _optikon_svg(request, optikon_slug)
+
+    # Spoeqi-CA mode: take one component CA from a pact, run it forward
+    # `iterations` ticks on a `grid_w` × `grid_w` grid seeded from
+    # `init_seed`, render to PNG, embed in A4 SVG.  Triggered by
+    # ?pattern=spoeqi_ca or ?from_spoeqi_ca=<pact_slug>.
+    spoeqi_ca_slug = (request.GET.get('from_spoeqi_ca') or '').strip()
+    if spoeqi_ca_slug or pattern == 'spoeqi_ca':
+        return _spoeqi_ca_svg(request, spoeqi_ca_slug)
+
+    # Tessera-all mode: print all 4096 hex tiles (or all 256 square tiles)
+    # from a Tessera Source as one big A4 grid PNG.  Triggered by
+    # ?pattern=tessera_all or ?from_tessera_all=<set_slug>.
+    tessera_all_slug = (request.GET.get('from_tessera_all') or '').strip()
+    if tessera_all_slug or pattern == 'tessera_all':
+        return _tessera_all_svg(request, tessera_all_slug)
 
     if pattern not in svg.PATTERNS or pattern in ('tilesmith', 'escher',
                                                      'loupe'):
@@ -330,15 +348,65 @@ def _loupe_svg(request, slug: str):
         png_h = res
         png_w = max(16, int(res * inner_w_mm / inner_h_mm))
     iter_cap = int(g.get('iter') or renderer.auto_iter(g['span']))
-    png = renderer.render_mandelbrot_png(
-        float(g['cx']), float(g['cy']), float(g['span']),
-        png_w, png_h, iter_cap=iter_cap,
-    )
+    poster = request.GET.get('poster') == '1'
+    if poster:
+        # Two modes:
+        # (a) caller knows the palette + bins — happens when the loupe
+        #     walk_detail "→ Gridprint" button forwards both, so the
+        #     printed PNG matches the on-screen view pixel-for-pixel.
+        # (b) caller just asks for posterize — gridprint picks a default
+        #     4-colour palette and computes the bin boundaries from the
+        #     escape array's quantiles, same as loupe.js does in-browser.
+        pal_arg  = (request.GET.get('pal') or '').strip()
+        bins_arg = (request.GET.get('bins') or '').strip()
+        try:
+            if pal_arg:
+                pal4 = []
+                for h in pal_arg.split(','):
+                    h = h.strip().lstrip('#')
+                    if len(h) != 6:
+                        raise ValueError(f'bad hex {h!r}')
+                    pal4.append((int(h[0:2], 16),
+                                  int(h[2:4], 16),
+                                  int(h[4:6], 16)))
+                if len(pal4) != 4:
+                    raise ValueError(f'need 4 colours, got {len(pal4)}')
+            else:
+                pal4 = renderer.default_poster_palette()
+        except Exception as exc:  # noqa: BLE001
+            return _err(f'bad poster pal: {exc}')
+
+        # If bins are supplied, use them; otherwise sample the escape
+        # array and pick 1/3 + 2/3 quantiles — matches the JS engine.
+        if bins_arg:
+            try:
+                b1, b2 = (float(x) for x in bins_arg.split(','))
+            except Exception as exc:  # noqa: BLE001
+                return _err(f'bad poster bins: {exc}')
+            png = renderer.render_mandelbrot_posterized_png(
+                float(g['cx']), float(g['cy']), float(g['span']),
+                png_w, png_h, pal4, b1, b2, iter_cap=iter_cap,
+            )
+        else:
+            png = renderer.render_mandelbrot_posterized_auto_png(
+                float(g['cx']), float(g['cy']), float(g['span']),
+                png_w, png_h, pal4, iter_cap=iter_cap,
+            )
+    else:
+        png = renderer.render_mandelbrot_png(
+            float(g['cx']), float(g['cy']), float(g['span']),
+            png_w, png_h, iter_cap=iter_cap,
+        )
     b64 = base64.b64encode(png).decode('ascii')
 
+    # When the caller asks the SVG to embed (iframe preview), drop
+    # the intrinsic mm dimensions so the SVG scales to fit its
+    # container instead of overflowing at native physical size.
+    embed = request.GET.get('embed') == '1'
+    dims = '' if embed else f'width="{page_w}mm" height="{page_h}mm" '
     body = (
         f'<svg xmlns="http://www.w3.org/2000/svg" '
-        f'width="{page_w}mm" height="{page_h}mm" '
+        f'{dims}'
         f'viewBox="0 0 {page_w} {page_h}" '
         f'preserveAspectRatio="xMidYMid meet">'
         f'<rect x="0" y="0" width="{page_w}" height="{page_h}" fill="#fff" />'
@@ -463,9 +531,20 @@ def _optikon_svg(request, slug: str):
     Query knobs (in addition to the usual cell/margin/landscape):
       ``from_optikon=<illusion_slug>`` — required
       ``cell=<mm>``                    — hex side in mm (default 4)
-      ``margin=<mm>``                  — page margin (default 10)
+      ``margin=<mm>``                  — page margin (default 10);
+                                          set 0 with ``bleed`` for
+                                          full-bleed printing
+      ``bleed=<mm>``                   — extend rendered area this many
+                                          mm past every page edge so
+                                          browser/printer margins
+                                          don't reveal a white strip
+                                          (default 0; ``bleed=1`` turns
+                                          on with a 3 mm default).
+                                          Forces margin to 0 when set.
       ``landscape=1``
-      ``border=1``
+      ``border=1``                     — ignored when ``bleed`` is set
+                                          (a printable border defeats
+                                          the point of full-bleed)
       ``download=1``                   — content-disposition attachment
       <illusion-specific params>       — same names as the optikon form
     """
@@ -473,8 +552,27 @@ def _optikon_svg(request, slug: str):
     from optikon import illusions as ill
 
     landscape = request.GET.get('landscape') == '1'
-    margin    = _float(request, 'margin', 10.0, lo=0.0, hi=40.0)
-    border    = request.GET.get('border') == '1'
+    # Bleed handling: ``bleed=1`` is a shortcut for the most-common
+    # ask ("3 mm extra past the edge"); a numeric value picks an
+    # explicit amount.  Any non-zero bleed forces margin → 0 so the
+    # content does extend through the page boundary instead of being
+    # inset.  Border decoration is suppressed too — it would land in
+    # the bled area and look like a frame around the picture, the
+    # opposite of what the user wants.
+    bleed_raw = (request.GET.get('bleed') or '').strip()
+    if bleed_raw == '1':
+        bleed = 3.0
+    else:
+        try:
+            bleed = max(0.0, min(10.0, float(bleed_raw))) if bleed_raw else 0.0
+        except ValueError:
+            bleed = 0.0
+    if bleed > 0:
+        margin = 0.0
+        border = False
+    else:
+        margin = _float(request, 'margin', 10.0, lo=0.0, hi=40.0)
+        border = request.GET.get('border') == '1'
     page_w    = svg.A4_H if landscape else svg.A4_W
     page_h    = svg.A4_W if landscape else svg.A4_H
 
@@ -503,7 +601,19 @@ def _optikon_svg(request, slug: str):
            for p in illusion.PARAMS if p.key in request.GET}
     params = ill.parse_params(illusion.PARAMS, raw)
 
-    page = svg.Page(w_mm=page_w, h_mm=page_h, margin_mm=margin)
+    # When bleeding, build a Page that extends `bleed` mm past every
+    # edge.  inner_w / inner_h are then larger than the physical page,
+    # so the hex grid extends past the visible area; the SVG viewBox
+    # is shifted by -bleed below so those over-the-edge cells actually
+    # render.  Net result: even if the browser/printer applies a
+    # small margin, the content under that margin is real ink, not
+    # the page background.
+    if bleed > 0:
+        page = svg.Page(w_mm=page_w + 2 * bleed,
+                          h_mm=page_h + 2 * bleed,
+                          margin_mm=0.0)
+    else:
+        page = svg.Page(w_mm=page_w, h_mm=page_h, margin_mm=margin)
     # Fill the printable area at the requested hex side.
     sqrt3 = math.sqrt(3)
     grid_w = max(8, int(page.inner_w / (cell * sqrt3)) + 2)
@@ -522,6 +632,19 @@ def _optikon_svg(request, slug: str):
                           pointy_top=True, fill=fill,
                           with_dimensions=False)
 
+    # Override the SVG's viewBox so the bled-over content is visible.
+    # We translate the user space by -bleed in both axes; the page is
+    # still page_w × page_h but the rendered area is page_w + 2·bleed
+    # × page_h + 2·bleed, anchored at (-bleed, -bleed).  Negative
+    # numbers in viewBox are valid SVG.
+    if bleed > 0:
+        import re as _re
+        body = _re.sub(
+            r'viewBox="[^"]*"',
+            f'viewBox="{-bleed} {-bleed} {page_w + 2 * bleed} '
+            f'{page_h + 2 * bleed}"',
+            body, count=1)
+
     if border:
         body = body.replace(
             '</svg>',
@@ -535,6 +658,377 @@ def _optikon_svg(request, slug: str):
     if request.GET.get('download') == '1':
         resp['Content-Disposition'] = (
             f'attachment; filename="optikon-{slug}.svg"')
+    return resp
+
+
+# ─── Spoeqi-CA-on-large-grid mode ─────────────────────────────────
+
+def _spoeqi_ca_svg(request, slug: str):
+    """Render one spoeqi component CA on a large grid, run forward N
+    ticks, embed as PNG inside an A4 SVG.  The point is to get a
+    sub-millimetre tiling pattern that fills the page — useful for
+    printing fabric, wrapping paper, or just admiring the rule's
+    long-run behaviour.
+
+    Query knobs:
+      from_spoeqi_ca=<pact_slug>   — required
+      component=<0..63>            — which of the 64 component CAs (default 0)
+      grid_w=<64..2048>            — cells across (default 1024)
+      iterations=<0..512>          — CA ticks before rendering (default 64)
+      init_seed=<int>              — random initial-state seed (default 42)
+      from_loupe_walk=<walk_slug>  — OPTIONAL: use the walk's final
+                                     Mandelbrot region (4-colour
+                                     posterised) as the initial state
+                                     instead of an LCG-random grid.
+                                     Overrides init_seed when present.
+      landscape=1                  — page orientation
+      margin=<mm>                  — page margin (default 5)
+      download=1                   — content-disposition attachment
+    """
+    import base64
+    import html as html_lib
+    import io
+    import numpy as np
+    from PIL import Image
+    from spoeqi.models import Pact
+    from caformer.primitives import hex_ca_step, lcg_bytes
+
+    landscape = request.GET.get('landscape') == '1'
+    margin    = _float(request, 'margin', 5.0, lo=0.0, hi=40.0)
+    page_w    = svg.A4_H if landscape else svg.A4_W
+    page_h    = svg.A4_W if landscape else svg.A4_H
+
+    def _err(msg: str):
+        body = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'viewBox="0 0 {page_w} {page_h}" '
+            f'preserveAspectRatio="xMidYMid meet">'
+            f'<text x="{margin}" y="{margin + 6}" '
+            f'font-family="ui-monospace,monospace" font-size="4" '
+            f'fill="#c04a4a">spoeqi_ca: {html_lib.escape(msg)}</text></svg>'
+        )
+        return HttpResponse(body, content_type='image/svg+xml; charset=utf-8')
+
+    if not slug:
+        return _err('provide ?from_spoeqi_ca=<pact_slug>')
+    pact = Pact.objects.filter(slug=slug).first()
+    if pact is None:
+        return _err(f'pact {slug!r} not found')
+
+    component  = _int(request, 'component',  0,    lo=0,  hi=63)
+    grid_w     = _int(request, 'grid_w',     1024, lo=64, hi=2048)
+    iterations = _int(request, 'iterations', 64,   lo=0,  hi=512)
+    init_seed  = _int(request, 'init_seed',  42,   lo=0,  hi=2**31)
+
+    # Pull this component's rule.  per_component_rules() handles all
+    # three diversity modes (shared/mutated/fleet) and returns 64×16384.
+    rules_flat = pact.per_component_rules()
+    rule_off = component * 16384
+    rule = np.frombuffer(rules_flat[rule_off:rule_off + 16384], dtype=np.uint8) & 3
+
+    # Initial state: by default an LCG-random grid keyed by `init_seed`,
+    # giving a byte-identical PNG for any (seed, grid_w) pair so the
+    # print stays reproducible.  When ``from_loupe_walk=<slug>`` is
+    # supplied, we instead seed the substrate with the *4-colour
+    # posterised final image* of that loupe Mandelbrot walk — gives
+    # the CA a structured starting point (the Mandelbrot bands) instead
+    # of white noise, so the run looks like the rule combing through
+    # the fractal rather than diffusing from chaos.  Init source is
+    # surfaced in the SVG footer below for traceability.
+    walk_slug = (request.GET.get('from_loupe_walk') or '').strip()
+    init_label = f'seed {init_seed}'
+    if walk_slug:
+        from loupe.models import Walk
+        from loupe import render as loupe_render
+        walk = Walk.objects.filter(slug=walk_slug).first()
+        if walk is None:
+            return _err(f'loupe walk {walk_slug!r} not found')
+        gene = walk.gene_json or []
+        if not gene:
+            return _err(f'loupe walk {walk_slug!r} has empty gene')
+        g = gene[-1]                 # last step = the walk's final view
+        iter_cap = int(g.get('iter') or loupe_render.auto_iter(g['span']))
+        state = loupe_render.mandelbrot_buckets(
+            float(g['cx']), float(g['cy']), float(g['span']),
+            grid_w, grid_w, iter_cap=iter_cap)
+        init_label = f'loupe walk {walk_slug} step {len(gene)}'
+    else:
+        state = (lcg_bytes(init_seed, grid_w * grid_w) & 3
+                  ).reshape(grid_w, grid_w)
+    for _ in range(iterations):
+        state = hex_ca_step(state, rule)
+
+    # Pick the right palette: per-component if the pact carries 64
+    # palettes, otherwise the single shared one.
+    if (isinstance(pact.palette, list) and len(pact.palette) == 64
+            and isinstance(pact.palette[0], list) and len(pact.palette[0]) == 4):
+        pal = pact.palette[component]
+    else:
+        pal = pact.palette
+    pal_arr = np.asarray(pal, dtype=np.uint8)
+    if pal_arr.shape != (4, 3):
+        pal_arr = np.array([[220, 80, 40], [60, 120, 210],
+                              [80, 180, 90], [230, 200, 60]], dtype=np.uint8)
+
+    # Map state cells → RGB via fancy-index lookup; one pixel per cell.
+    rgb = pal_arr[state]
+    img = Image.fromarray(rgb, mode='RGB')
+    buf = io.BytesIO()
+    img.save(buf, format='PNG', optimize=True)
+    b64 = base64.b64encode(buf.getvalue()).decode('ascii')
+
+    inner_w_mm = page_w - 2 * margin
+    inner_h_mm = page_h - 2 * margin
+    embed = request.GET.get('embed') == '1'
+    dims  = '' if embed else f'width="{page_w}mm" height="{page_h}mm" '
+    body = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'{dims}'
+        f'viewBox="0 0 {page_w} {page_h}" '
+        f'preserveAspectRatio="xMidYMid meet">'
+        f'<rect x="0" y="0" width="{page_w}" height="{page_h}" fill="#fff" />'
+        f'<image href="data:image/png;base64,{b64}" '
+        f'x="{margin}" y="{margin}" '
+        f'width="{inner_w_mm}" height="{inner_h_mm}" '
+        f'preserveAspectRatio="xMidYMid meet" image-rendering="pixelated"/>'
+        f'<text x="{margin:.2f}" y="{page_h - 1.5:.2f}" '
+        f'font-family="ui-monospace,monospace" font-size="2.0" fill="#888">'
+        f'spoeqi · {pact.slug} · component {component:02d} · '
+        f'{grid_w}×{grid_w} · {iterations} ticks · {init_label}'
+        f'</text>'
+        f'</svg>'
+    )
+    resp = HttpResponse(body, content_type='image/svg+xml; charset=utf-8')
+    if request.GET.get('download') == '1':
+        resp['Content-Disposition'] = (
+            f'attachment; filename="spoeqi-ca-{pact.slug}-c{component:02d}-'
+            f'{grid_w}x{iterations}t.svg"')
+    return resp
+
+
+def _tessera_all_svg(request, slug: str):
+    """Print every tile of a Tessera set as one big A4 grid.
+
+    Hex topology: 4096 tiles → 64×64 grid.  Square: 256 → 16×16.
+    Each tile is composited via render.composite_tile_for, downscaled
+    to `per_tile` px, then pasted into a single megaimage that ends
+    up base64-embedded in an A4 SVG.
+
+    Query knobs:
+      from_tessera_all=<set_slug>  — required
+      per_tile=<8..64>             — pixels per tile in the output PNG
+                                      (default 24 for hex, 64 for square)
+      labels=1                     — overlay tile-id mod-grid lines
+      landscape=1                  — page orientation
+      margin=<mm>                  — page margin (default 5)
+      download=1                   — content-disposition attachment
+    """
+    import base64
+    import html as html_lib
+    import io
+    import numpy as np
+    from PIL import Image
+    from tessera.models import TessSet
+    from tessera import render as tess_render
+
+    landscape = request.GET.get('landscape') == '1'
+    margin    = _float(request, 'margin', 5.0, lo=0.0, hi=40.0)
+    page_w    = svg.A4_H if landscape else svg.A4_W
+    page_h    = svg.A4_W if landscape else svg.A4_H
+
+    def _err(msg: str):
+        body = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'viewBox="0 0 {page_w} {page_h}" '
+            f'preserveAspectRatio="xMidYMid meet">'
+            f'<text x="{margin}" y="{margin + 6}" '
+            f'font-family="ui-monospace,monospace" font-size="4" '
+            f'fill="#c04a4a">tessera_all: {html_lib.escape(msg)}</text></svg>'
+        )
+        return HttpResponse(body, content_type='image/svg+xml; charset=utf-8')
+
+    if not slug:
+        return _err('provide ?from_tessera_all=<set_slug>')
+    s = TessSet.objects.filter(slug=slug).first()
+    if s is None:
+        return _err(f'tessera set {slug!r} not found')
+
+    edges_per_tile = s.edges_per_tile        # 4 (square) or 6 (hex)
+    n_tiles = s.tile_count                   # 256 or 4096
+    grid_n = int(round(n_tiles ** 0.5))      # 16 or 64; both perfect squares
+
+    # Default per-tile output pixels: bigger when there are fewer tiles.
+    # Hex (4096) at 24 px = 64×24 = 1536 px image; printed at ~196 dpi.
+    # Square (256) at 64 px = 16×64 = 1024 px; printed at ~130 dpi.
+    default_per_tile = 64 if n_tiles == 256 else 24
+    per_tile = _int(request, 'per_tile', default_per_tile, lo=8, hi=128)
+
+    # Walk every tile id 0..n_tiles-1, decode to base-`4` digits (most
+    # significant first → "edges 0..N-1 clockwise from top"), composite,
+    # downscale, paste into the megaimage.  Decoded edges convention
+    # matches tessera/views.py:_decode_tile_id.
+    mega = Image.new('RGB', (grid_n * per_tile, grid_n * per_tile),
+                      (255, 255, 255))
+    pal = (s.palette or [(220, 80, 40), (60, 120, 210),
+                          (80, 180, 90), (230, 200, 60)])
+
+    for tid in range(n_tiles):
+        # tid → base-4 digits, edges_per_tile-long.  Most significant
+        # first, so tid=0 → (0,0,…), tid=n_tiles-1 → (3,3,…).
+        digits = []
+        x = tid
+        for _ in range(edges_per_tile):
+            digits.append(x & 3)
+            x >>= 2
+        edges = tuple(reversed(digits))
+        try:
+            arr = tess_render.composite_tile_for(s, edges)
+        except Exception as exc:
+            return _err(f'tile {tid:0{edges_per_tile}d} composite failed: {exc}')
+        if arr.ndim == 3:
+            tile_img = Image.fromarray(arr.astype(np.uint8))
+        else:
+            tile_img = Image.fromarray(arr.astype(np.uint8), mode='L'
+                                        ).convert('RGB')
+        if tile_img.size != (per_tile, per_tile):
+            tile_img = tile_img.resize((per_tile, per_tile),
+                                          Image.Resampling.LANCZOS)
+        col = tid % grid_n
+        row = tid // grid_n
+        mega.paste(tile_img, (col * per_tile, row * per_tile))
+
+    # Encode the megaimage and embed in A4 SVG.
+    buf = io.BytesIO()
+    mega.save(buf, format='PNG', optimize=True)
+    b64 = base64.b64encode(buf.getvalue()).decode('ascii')
+
+    # Layout: square mega image centred horizontally on the page.
+    # The grid is square (grid_n × grid_n) so we fit it into the
+    # smaller of (inner_w, header_reserved_inner_h) so the labels strip
+    # fits below.
+    label_h_mm = 8.0
+    inner_w_mm = page_w - 2 * margin
+    inner_h_mm = page_h - 2 * margin - label_h_mm
+    side_mm    = min(inner_w_mm, inner_h_mm)
+    img_x      = margin + (inner_w_mm - side_mm) / 2.0
+    img_y      = margin
+
+    embed = request.GET.get('embed') == '1'
+    dims  = '' if embed else f'width="{page_w}mm" height="{page_h}mm" '
+    body = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'{dims}'
+        f'viewBox="0 0 {page_w} {page_h}" '
+        f'preserveAspectRatio="xMidYMid meet">'
+        f'<rect x="0" y="0" width="{page_w}" height="{page_h}" fill="#fff" />'
+        f'<image href="data:image/png;base64,{b64}" '
+        f'x="{img_x:.2f}" y="{img_y:.2f}" '
+        f'width="{side_mm:.2f}" height="{side_mm:.2f}" '
+        f'preserveAspectRatio="xMidYMid meet" image-rendering="pixelated"/>'
+        f'<text x="{margin:.2f}" y="{page_h - 1.5:.2f}" '
+        f'font-family="ui-monospace,monospace" font-size="2.2" fill="#666">'
+        f'tessera · {s.slug} · {s.get_topology_display()} · '
+        f'{n_tiles} tiles ({grid_n}×{grid_n}) · '
+        f'{s.get_blend_method_display()} · per-tile {per_tile}px · '
+        f'seed {s.seed}'
+        f'</text>'
+        f'</svg>'
+    )
+    resp = HttpResponse(body, content_type='image/svg+xml; charset=utf-8')
+    if request.GET.get('download') == '1':
+        resp['Content-Disposition'] = (
+            f'attachment; filename="tessera-all-{s.slug}-{n_tiles}.svg"')
+    return resp
+
+
+# ─── Hanbprint mode ────────────────────────────────────────────────
+
+def _hanbprint_svg(request):
+    """Render an A4 page packed with 'hanbs' — regular flat-top hexagons
+    composed of 61 pointy-top inner cells (the centered hexagonal number
+    of order 5).  Hanbs are tiled across the page on a flat-top hex
+    lattice with a uniform ``gap_mm`` between adjacent flat edges so
+    they're easy to separate with scissors.
+
+    Query knobs:
+      ``cell=<mm>``      inner-cell circumradius in mm (default 4.0).
+                          Hanb flat-to-flat = 14 × cell;
+                          hanb vertex-to-vertex = (28√3/3) × cell.
+      ``gap=<mm>``       visible gap between adjacent hanbs (default 3.0).
+      ``margin=<mm>``    page margin (default 10).
+      ``color``/``alpha``/``width``  stroke style for inner cells.
+      ``outline_color``  separate stroke for the cut-line hanb outline.
+                          Defaults to the cell stroke colour.
+      ``outline_width=<mm>``  stroke width for the cut-line outline.
+                          Defaults to ``2 × width`` so it stands out as
+                          the scissor guide.
+      ``landscape=1``    landscape orientation.
+      ``border=1``       faint dashed printable-area border.
+      ``download=1``     return as attachment.
+    """
+    landscape = request.GET.get('landscape') == '1'
+    margin = _float(request, 'margin', 10.0, lo=0.0, hi=40.0)
+    cell = _float(request, 'cell', 4.0, lo=1.0, hi=30.0)
+    gap = _float(request, 'gap', 3.0, lo=0.0, hi=40.0)
+    color = (request.GET.get('color') or '#888888').strip() or '#888888'
+    alpha = _float(request, 'alpha', 1.0, lo=0.0, hi=1.0)
+    width = _float(request, 'width', 0.20, lo=0.05, hi=2.5)
+    outline_color = (request.GET.get('outline_color')
+                       or color).strip() or color
+    outline_width = _float(request, 'outline_width', max(width * 2.0, 0.4),
+                              lo=0.05, hi=4.0)
+    border = request.GET.get('border') == '1'
+
+    page = svg.Page(
+        w_mm=svg.A4_H if landscape else svg.A4_W,
+        h_mm=svg.A4_W if landscape else svg.A4_H,
+        margin_mm=margin,
+    )
+    cell_style = svg.Style(color=color, width_mm=width, alpha=alpha)
+    outline_style = svg.Style(color=outline_color,
+                                width_mm=outline_width, alpha=alpha)
+
+    body, n_hanbs = hanb.render_hanbs_svg(
+        page=page, R_cell=cell, gap_mm=gap,
+        cell_style=cell_style, outline_style=outline_style)
+
+    hanb_w, hanb_h = hanb.hanb_size_mm(cell)
+    embed = request.GET.get('embed') == '1'
+    dims = (f' width="{page.w_mm}mm" height="{page.h_mm}mm"'
+              if not embed else '')
+    border_svg = (
+        f'<rect x="{page.left}" y="{page.top}" '
+        f'width="{page.inner_w}" height="{page.inner_h}" '
+        f'fill="none" stroke="#cccccc" stroke-width="0.1" '
+        f'stroke-dasharray="0.6 0.6" />'
+    ) if border else ''
+    footer = (
+        f'<text x="{margin:.2f}" y="{page.h_mm - 2:.2f}" '
+        f'font-family="ui-monospace,monospace" font-size="2.4" '
+        f'fill="#888">'
+        f'hanbprint · {n_hanbs} hanbs · cell {cell:.2f}mm · '
+        f'hanb {hanb_w:.1f}×{hanb_h:.1f}mm · gap {gap:.1f}mm'
+        f'</text>'
+    )
+    svg_doc = (
+        f'<svg xmlns="http://www.w3.org/2000/svg"{dims}'
+        f' viewBox="0 0 {page.w_mm} {page.h_mm}"'
+        f' preserveAspectRatio="xMidYMid meet">'
+        f'<title>Hanbprint — {n_hanbs} hanbs</title>'
+        f'<defs><clipPath id="page-area">'
+        f'<rect x="{page.left}" y="{page.top}" '
+        f'width="{page.inner_w}" height="{page.inner_h}" />'
+        f'</clipPath></defs>'
+        f'<g clip-path="url(#page-area)">{body}</g>'
+        f'{border_svg}{footer}'
+        f'</svg>'
+    )
+    resp = HttpResponse(svg_doc,
+                          content_type='image/svg+xml; charset=utf-8')
+    if request.GET.get('download') == '1':
+        resp['Content-Disposition'] = (
+            f'attachment; filename="hanbprint-cell{cell:.1f}mm-'
+            f'{n_hanbs}hanbs.svg"')
     return resp
 
 
@@ -889,6 +1383,39 @@ def print_view(request):
 
     landscape = request.GET.get('landscape') == '1'
     page_size = 'A4 landscape' if landscape else 'A4 portrait'
+    # Explicit physical mm dimensions for print: 100vw/100vh don't
+    # reliably equal the @page box in Chrome, and a stray sub-mm overflow
+    # was bumping landscape autostereograms onto a second page.
+    page_w_mm = 297 if landscape else 210
+    page_h_mm = 210 if landscape else 297
+
+    # Full-bleed mode: when the SVG was rendered with ``?bleed=...``,
+    # we want the print page to *also* have no margin, AND we want the
+    # SVG to spill a few mm past the physical page edge so anything
+    # the printer's hardware non-printable region clips is just an
+    # extension of the design — never the white page background.  We
+    # carry the same `bleed` query value through to the CSS calc()
+    # below.  3 mm is the typical "set Margins → None" floor for
+    # consumer inkjets/lasers; bleed>3 is wasted ink unless you've
+    # got borderless print enabled.
+    bleed_raw = (request.GET.get('bleed') or '').strip()
+    if bleed_raw == '1':
+        bleed_mm = 3.0
+    else:
+        try:
+            bleed_mm = max(0.0, min(10.0, float(bleed_raw))) \
+                       if bleed_raw else 0.0
+        except ValueError:
+            bleed_mm = 0.0
+    full_bleed = bleed_mm > 0
+
+    bleed_css = (
+        f"width: calc({page_w_mm}mm + {2 * bleed_mm}mm); "
+        f"height: calc({page_h_mm}mm + {2 * bleed_mm}mm); "
+        f"margin: -{bleed_mm}mm 0 0 -{bleed_mm}mm; "
+    ) if full_bleed else (
+        f"width: {page_w_mm}mm; height: {page_h_mm}mm;"
+    )
 
     html = f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Gridprint — print</title>
@@ -906,14 +1433,24 @@ def print_view(request):
     .help button {{ background:#1f6feb;color:#fff;border:0;
                     padding:0.3rem 0.8rem;border-radius:3px;
                     cursor:pointer;font: inherit; }}
+    .bleed-hint {{ color: #fc6; }}
   }}
   @media print {{
+    html, body {{ width: {page_w_mm}mm; height: {page_h_mm}mm;
+                   margin: 0; padding: 0; overflow: hidden; }}
     .help {{ display: none !important; }}
+    svg {{ display: block; {bleed_css}
+            page-break-inside: avoid; break-inside: avoid; }}
   }}
 </style></head>
 <body>
 <p class="help">If the dialog didn't open, click
   <button onclick="window.print()">Print again</button>.
+  {('<span class="bleed-hint">Full-bleed: pick <b>Margins → None</b> '
+    'in the print dialog.  Even then, most consumer printers leave a '
+    f'~3 mm hardware non-printable strip — enable <b>borderless</b> '
+    'in printer properties for true edge-to-edge.</span>')
+   if full_bleed else ''}
 </p>
 {svg_body}
 <script>

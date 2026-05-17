@@ -32,6 +32,43 @@ const DEFAULT_PALETTE = [
   [ 60,  60,  60], [120, 120, 120], [200, 200, 200],
 ];
 
+// ─── 4-colour posterise palette ──────────────────────────────────────
+// For sending mandelbrot views into 4-colour CAs (spoeqi, hex CA grids,
+// etc): bucket escape times into exactly 4 bins, render with 4 distinct
+// HSV-spread colours.  `seed` in [0, 1) picks the hue rotation so the
+// reroll button cycles through visually distinct palettes.
+function _hsv2rgb (h, s, v) {
+  const i = Math.floor(h * 6);
+  const f = h * 6 - i;
+  const p = v * (1 - s);
+  const q = v * (1 - f * s);
+  const t = v * (1 - (1 - f) * s);
+  let r, g, b;
+  switch (i % 6) {
+    case 0: r = v; g = t; b = p; break;
+    case 1: r = q; g = v; b = p; break;
+    case 2: r = p; g = v; b = t; break;
+    case 3: r = p; g = q; b = v; break;
+    case 4: r = t; g = p; b = v; break;
+    case 5: r = v; g = p; b = q; break;
+  }
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+
+function _makePoster4Palette (seed) {
+  // 4 hues at 90° spacing rotated by seed; saturations + values jittered
+  // from the seed so consecutive rerolls don't all look "rainbow".
+  const hue0 = seed % 1;
+  const out = [];
+  for (let i = 0; i < 4; i++) {
+    const h = (hue0 + i * 0.25) % 1;
+    const s = 0.45 + 0.45 * (((seed * 17 + i * 7) % 1));
+    const v = 0.35 + 0.55 * (((seed * 31 + i * 11) % 1));
+    out.push(_hsv2rgb(h, s, v));
+  }
+  return out;
+}
+
 // ─── core mandelbrot iteration ───────────────────────────────────────
 // Plain JS double precision.  For the 1024×768 viewer at ~256 iter
 // this is ~30 ms on a laptop.  Web Worker upgrade is a Phase-2 item.
@@ -58,6 +95,14 @@ class LoupeEngine {
     this.cx = -0.5; this.cy = 0.0; this.span = 3.0;
     this._buf = new Uint8ClampedArray(this.W * this.H * 4);
     this._image = new ImageData(this._buf, this.W, this.H);
+    // 4-colour posterise mode: when on, render() and thumbnail() bucket
+    // escape times into 4 quantile bins and use posterPalette instead of
+    // the gradient palette.  posterBins is recomputed on each render so
+    // the bucketing tracks the current view (deep zooms otherwise
+    // collapse into one bucket).
+    this.posterize = false;
+    this.posterPalette = _makePoster4Palette(Math.random());
+    this.posterBins = null;
   }
 
   // Auto-tune iter cap so deep zooms keep boundary detail.  Mirrors
@@ -100,6 +145,11 @@ class LoupeEngine {
 
   /* Render the current view to the canvas. */
   render () {
+    if (this.posterize) {
+      this.recomputePosterBins();
+      this.renderPosterized();
+      return;
+    }
     const W = this.W, H = this.H, iter = this.iter, pal = this.palette;
     const s = this.span / W;
     const ox = this.cx - s * (W * 0.5);
@@ -182,7 +232,9 @@ class LoupeEngine {
     return H;
   }
 
-  /* Render the current view at the given size and return a data URI. */
+  /* Render the current view at the given size and return a data URI.
+   * Honours posterize: when on, recomputes bins for the *current view*
+   * so each agent step gets its own per-view bucketing. */
   thumbnail (w = 128, h = 128) {
     const off = document.createElement('canvas');
     off.width = w; off.height = h;
@@ -194,21 +246,97 @@ class LoupeEngine {
     const ox = this.cx - s * (w * 0.5);
     const oy = this.cy - s * (h * 0.5);
     let i = 0;
-    for (let r = 0; r < h; r++) {
-      const y = oy + r * s;
-      for (let c = 0; c < w; c++) {
-        const e = _escape(ox + c * s, y, iter);
-        let R, G, B;
-        if (e === iter) { R = 0; G = 0; B = 0; }
-        else {
-          const p = pal[1 + (e % (pal.length - 1))];
-          R = p[0]; G = p[1]; B = p[2];
+    if (this.posterize) {
+      this.recomputePosterBins(Math.min(w, 64), Math.min(h, 64));
+      const [b1, b2] = this.posterBins;
+      const ppal = this.posterPalette;
+      for (let r = 0; r < h; r++) {
+        const y = oy + r * s;
+        for (let c = 0; c < w; c++) {
+          const e = _escape(ox + c * s, y, iter);
+          let bucket;
+          if (e === iter) bucket = 3;
+          else if (e < b1)  bucket = 0;
+          else if (e < b2)  bucket = 1;
+          else              bucket = 2;
+          const p = ppal[bucket];
+          buf[i++] = p[0]; buf[i++] = p[1]; buf[i++] = p[2]; buf[i++] = 255;
         }
-        buf[i++] = R; buf[i++] = G; buf[i++] = B; buf[i++] = 255;
+      }
+    } else {
+      for (let r = 0; r < h; r++) {
+        const y = oy + r * s;
+        for (let c = 0; c < w; c++) {
+          const e = _escape(ox + c * s, y, iter);
+          let R, G, B;
+          if (e === iter) { R = 0; G = 0; B = 0; }
+          else {
+            const p = pal[1 + (e % (pal.length - 1))];
+            R = p[0]; G = p[1]; B = p[2];
+          }
+          buf[i++] = R; buf[i++] = G; buf[i++] = B; buf[i++] = 255;
+        }
       }
     }
     octx.putImageData(img, 0, 0);
     return off.toDataURL('image/png');
+  }
+
+  /* Pick new boundaries between the 4 posterise buckets by sampling
+   * escape times in the current view.  Bucket 3 is reserved for in-set
+   * (escape == iter); the remaining finite escapes are split at the 1/3
+   * and 2/3 quantiles so each visible bucket carries roughly equal
+   * pixel area regardless of zoom depth. */
+  recomputePosterBins (sampleW = 64, sampleH = 64) {
+    const escapes = this.sampleEscapes(
+      {cx: this.cx, cy: this.cy, span: this.span, iter: this.iter},
+      sampleW, sampleH,
+    );
+    const finite = [];
+    for (let i = 0; i < escapes.length; i++) {
+      if (escapes[i] < this.iter) finite.push(escapes[i]);
+    }
+    if (finite.length < 3) {
+      this.posterBins = [this.iter / 3, 2 * this.iter / 3];
+      return;
+    }
+    finite.sort((a, b) => a - b);
+    const q1 = finite[Math.floor(finite.length / 3)];
+    const q2 = finite[Math.floor(2 * finite.length / 3)];
+    this.posterBins = [Math.max(1, q1), Math.max(q1 + 1, q2)];
+  }
+
+  rerollPosterPalette () {
+    this.posterPalette = _makePoster4Palette(Math.random());
+  }
+
+  /* Render the current view in 4-colour posterise mode (no animation,
+   * no escape-time gradient) — just bucketed CSS colours suitable for
+   * piping into a 4-colour CA. */
+  renderPosterized () {
+    if (!this.posterBins) this.recomputePosterBins();
+    const W = this.W, H = this.H, iter = this.iter;
+    const [b1, b2] = this.posterBins;
+    const pal = this.posterPalette;
+    const s = this.span / W;
+    const ox = this.cx - s * (W * 0.5);
+    const oy = this.cy - s * (H * 0.5);
+    const buf = this._buf;
+    let i = 0;
+    for (let r = 0; r < H; r++) {
+      const y = oy + r * s;
+      for (let c = 0; c < W; c++) {
+        const e = _escape(ox + c * s, y, iter);
+        let bucket;
+        if (e === iter) bucket = 3;
+        else if (e < b1)  bucket = 0;
+        else if (e < b2)  bucket = 1;
+        else              bucket = 2;
+        const p = pal[bucket];
+        buf[i++] = p[0]; buf[i++] = p[1]; buf[i++] = p[2]; buf[i++] = 255;
+      }
+    }
+    this.ctx.putImageData(this._image, 0, 0);
   }
 }
 

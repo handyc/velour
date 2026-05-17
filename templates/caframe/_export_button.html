@@ -1,0 +1,73 @@
+{% comment %}
+Reusable "→ caframe" button.  Drop this into any detail page that
+represents a CA source: caformer TrainedModel, escher Motif, spoeqi
+Pact, loupe Walk, taxon Rule.
+
+Usage:
+  {% include "caframe/_export_button.html" with source="caformer" source_ref=model.slug seed_init=42 %}
+
+Optional kwargs:
+  source       — one of taxon|caformer|loupe|spoeqi|escher  (required)
+  source_ref   — slug/id of the source object in that app   (required for non-taxon)
+  seed_init    — 32-bit init seed for the CA grid            (default 51966)
+  n_frames     — frames in the generated movie               (default 40)
+  w, h         — grid dimensions                              (default 48×48)
+  label        — button label                                 (default "→ caframe")
+  hint         — tooltip                                      (default explains the action)
+{% endcomment %}
+<button type="button" class="caframe-export-btn"
+        data-source="{{ source|default:'taxon' }}"
+        data-source-ref="{{ source_ref|default:'' }}"
+        data-seed-init="{{ seed_init|default:'51966' }}"
+        data-n-frames="{{ n_frames|default:'40' }}"
+        data-w="{{ w|default:'48' }}"
+        data-h="{{ h|default:'48' }}"
+        title="{{ hint|default:'Save this CA source as a caframe Sequence (APNG/MP4 video).' }}"
+        style="background:#1f3f3f;color:#cef;border:1px solid #4aa;
+               padding:4px 10px;cursor:pointer;font-family:inherit;
+               font-size:0.78rem;">
+  {{ label|default:"→ caframe" }}
+</button>
+<span class="caframe-export-msg" style="color:#888; font-size:0.78rem;
+                                          padding-left:6px;"></span>
+
+{# Mount the click handler exactly once per page (idempotent). #}
+{% if not request.caframe_export_inline_done %}
+  <script>
+  (function () {
+    if (window.__caframeExportInited) return;
+    window.__caframeExportInited = true;
+    document.addEventListener('click', async function (e) {
+      const btn = e.target.closest('.caframe-export-btn');
+      if (!btn) return;
+      const msg = btn.parentElement.querySelector('.caframe-export-msg');
+      if (msg) { msg.textContent = 'exporting…'; msg.style.color = '#888'; }
+      const fd = new FormData();
+      for (const k of ['source','source-ref','seed-init','n-frames','w','h']) {
+        const v = btn.dataset[k.replace(/-(.)/g, (_, c) => c.toUpperCase())];
+        if (v !== undefined && v !== '')
+          fd.append(k.replace('-', '_'), v);
+      }
+      const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+      try {
+        const r = await fetch('/caframe/import/', {
+          method: 'POST', body: fd,
+          headers: {'X-CSRFToken': csrf}, credentials: 'same-origin',
+        });
+        const j = await r.json();
+        if (j.ok) {
+          if (msg) {
+            msg.innerHTML = '✓ <a href="' + j.detail_url +
+              '" style="color:#cea;">' + j.slug + '</a>';
+            msg.style.color = '#cea';
+          }
+        } else {
+          if (msg) { msg.textContent = 'export failed: ' + (j.error || ''); msg.style.color = '#f86'; }
+        }
+      } catch (err) {
+        if (msg) { msg.textContent = 'export failed: ' + err.message; msg.style.color = '#f86'; }
+      }
+    });
+  })();
+  </script>
+{% endif %}

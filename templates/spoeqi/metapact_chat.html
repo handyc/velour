@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}chat {{ metapact.slug }} — metapact{% endblock %}
+{% block content %}
+<style>
+  .chat-log { background:#050505; border:1px solid #1f1f1f;
+              padding:10px; min-height:18em; font:0.85rem ui-monospace, monospace;
+              color:#ddd; white-space:pre-wrap; overflow-y:auto; max-height:60vh; }
+  .msg-you { color:#cfa; margin-top:6px; }
+  .msg-ca  { color:#cef; margin-top:2px; }
+</style>
+<div style="max-width:60em;">
+  <p><a href="{% url 'spoeqi:metapact_detail' slug=metapact.slug %}"
+        style="color:#888;">← {{ metapact.slug }}</a></p>
+  <h1 style="margin-bottom:4px;">Chat ·
+    <span style="color:#cef;">{{ metapact.name }}</span></h1>
+  <p style="color:#aaa; font-size:0.85rem;">
+    The 10 CAformer rule tables for this chat are derived
+    deterministically from the metapact's 16,384-byte seed —
+    no weights stored anywhere.
+  </p>
+
+  <div class="chat-log" id="chat-log"></div>
+  <form id="chat-form" style="display:flex; gap:8px; margin-top:8px;">
+    <input type="text" id="q" autocomplete="off"
+           placeholder="type a prompt…"
+           style="flex:1; background:#111; color:#ddd; border:1px solid #333;
+                  padding:6px; font-family:ui-monospace, monospace;">
+    <label style="color:#aaa; font-size:0.78rem; align-self:center;">n
+      <input type="number" id="n" value="32" min="1" max="96"
+             style="width:5em; background:#111; color:#ddd; border:1px solid #333;
+                    padding:4px;">
+    </label>
+    <label style="color:#aaa; font-size:0.78rem; align-self:center;">
+      <input type="checkbox" id="ascii_only" checked> ASCII only
+    </label>
+    <button type="submit"
+            style="background:#1f4f1f; color:#cfc; border:1px solid #4a8;
+                   padding:6px 14px; cursor:pointer; font-family:inherit;">
+      send
+    </button>
+  </form>
+</div>
+<script>
+(function() {
+  const log = document.getElementById('chat-log');
+  const form = document.getElementById('chat-form');
+  const qEl = document.getElementById('q');
+  const nEl = document.getElementById('n');
+  const aEl = document.getElementById('ascii_only');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const q = qEl.value.trim(); if (!q) return;
+    log.innerHTML += `<div class="msg-you">you: ${q}</div>`;
+    qEl.value = '';
+    const params = new URLSearchParams({
+      q: q, n: nEl.value,
+      ascii_only: aEl.checked ? '1' : '0',
+    });
+    log.innerHTML += `<div class="msg-ca">ca: <i style="color:#888;">…</i></div>`;
+    log.scrollTop = log.scrollHeight;
+    const r = await fetch(`{% url 'spoeqi:metapact_chat_reply' slug=metapact.slug %}?${params}`,
+      { credentials: 'same-origin' });
+    const j = await r.json();
+    const last = log.querySelectorAll('.msg-ca');
+    last[last.length - 1].textContent = 'ca: ' + j.reply;
+    log.scrollTop = log.scrollHeight;
+  });
+})();
+</script>
+{% endblock %}

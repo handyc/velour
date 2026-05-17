@@ -121,4 +121,30 @@
   </tr>
   {% endfor %}
 </table>
+
+<form action="{% url 'gridprint:print' %}" method="get" target="_blank"
+      style="margin-top:14px; padding:8px 12px; border:1px solid #1f1f1f;
+             background:#0a0a0a; display:flex; gap:8px; align-items:center;
+             flex-wrap:wrap; font-size:0.78rem; color:#888;">
+  <span style="color:#cfa;">🖨️ Print all {{ set.tile_count }} tiles on A4</span>
+  <input type="hidden" name="pattern"           value="tessera_all">
+  <input type="hidden" name="from_tessera_all"  value="{{ set.slug }}">
+  <label>per-tile&nbsp;px
+    <input type="number" name="per_tile" min="8" max="128"
+           value="{% if edges_per_tile == 6 %}24{% else %}64{% endif %}"
+           style="width:4em; background:#111; color:#ddd;
+                  border:1px solid #333; padding:2px 4px;">
+  </label>
+  <label style="display:flex; align-items:center; gap:0.3em;">
+    <input type="checkbox" name="landscape" value="1"> landscape
+  </label>
+  <button type="submit"
+          style="background:#1f4f1f; color:#cfc; border:1px solid #4a8;
+                 padding:4px 12px; cursor:pointer; font-family:inherit;">
+    print →
+  </button>
+  <span style="color:#666;">
+    {% if edges_per_tile == 6 %}~20 s render at default per-tile{% endif %}
+  </span>
+</form>
 {% endblock %}

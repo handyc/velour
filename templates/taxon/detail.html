@@ -70,6 +70,23 @@
       {% else %}
       <p style="color:#8b949e;">Not classified yet.</p>
       {% endif %}
+
+      {% if quine_card %}
+      <div style="margin:0.6rem 0; padding:0.6rem 0.9rem; background:#101a14;
+                  border:1px solid #2a4a32; border-left:4px solid #6ebb50;
+                  border-radius:5px;">
+        <div style="color:#7ee787; font-weight:600;">
+          Quine — nest depth {{ quine_card.nest_depth }}
+        </div>
+        <div style="color:#8b949e; font-size:0.78rem;">
+          SR<sub>strict</sub> {{ quine_card.sr_strict|floatformat:3 }}
+          · SR<sub>arbσ</sub> {{ quine_card.sr_arbsigma|floatformat:3 }}
+          {% if quine_card.origin %}
+            <br><span style="color:#6e7681;">{{ quine_card.origin }}</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
     </div>
 
     <div>
@@ -138,6 +155,8 @@
        style="background:#21262d; color:#58a6ff; border:1px solid #30363d;
               padding:0.4rem 0.8rem; border-radius:4px; text-decoration:none;
               font-family:inherit;" title="Open this rule as the live genome in s3lab Classic">→ S3 Lab</a>
+
+    {% include "caframe/_export_button.html" with source="taxon" source_ref=rule.slug label="→ caframe movie" hint="Render this rule as a caframe APNG/MP4 movie (uses the rule's bytes as the CA dynamics)." %}
 
     <button type="button" id="to-device-btn"
             style="background:#21262d; color:#58a6ff; border:1px solid #30363d;
@@ -272,11 +291,13 @@
 
 <script>
   // Live K=4 hex-CA preview. Pure JS; mirrors the canonical step
-  // function in s3lab/js/engine.mjs (offset-column, padded edges).
+  // function in s3lab/js/engine.mjs (offset-column, padded edges) for
+  // hex_k4_packed.  For hex_k4_lut (spoeqi format) we use a 1-byte-per-
+  // LUT-entry table with pointy-top, row-parity neighbour resolution
+  // (matches caformer.primitives.hex_ca_step).
   (function(){
     const GRID_W = 16, GRID_H = 16, K = 4;
-    const NSITS = 16384;            // 4^7
-    const W = (256 ** 0);           // unused — kept for clarity
+    const KIND = '{{ rule.kind }}';
     const PAL_HEX = [
       {% for hex in palette_hex %}'{{ hex }}'{% if not forloop.last %}, {% endif %}{% endfor %}
     ];
@@ -287,16 +308,24 @@
       genome[i] = parseInt(GENOME_HEX.substr(i*2, 2), 16);
     }
 
-    // Lookup the rule output for (self, n0..n5). 2 bits per cell, 4 cells per byte.
-    function lookup(self_c, n) {
+    // Lookup for hex_k4_packed (2-bit packing, flat-top column parity).
+    function lookup_packed(self_c, n) {
       const idx = self_c*4096 + n[0]*1024 + n[1]*256 + n[2]*64 + n[3]*16 + n[4]*4 + n[5];
       const byte_i = idx >> 2;
       const bit_i = (idx & 3) * 2;
       return (genome[byte_i] >> bit_i) & 0x03;
     }
 
-    // 6 hex neighbors with 0-padding for out-of-bounds.
-    function nbrs(grid, r, c) {
+    // Lookup for hex_k4_lut (1 byte per entry, pointy-top row parity).
+    // Key bits: self<<12 | nw<<10 | ne<<8 | r<<6 | se<<4 | sw<<2 | l.
+    function lookup_lut(self_c, nw, ne, r, se, sw, l) {
+      const idx = (self_c<<12) | (nw<<10) | (ne<<8)
+                  | (r<<6) | (se<<4) | (sw<<2) | l;
+      return genome[idx] & 0x03;
+    }
+
+    // 6 hex neighbours for hex_k4_packed (flat-top, column parity).
+    function nbrs_packed(grid, r, c) {
       const even = (c & 1) === 0;
       const idx = (rr, cc) => (rr >= 0 && rr < GRID_H && cc >= 0 && cc < GRID_W)
         ? grid[rr * GRID_W + cc] : 0;
@@ -310,16 +339,42 @@
       ];
     }
 
-    function step(grid) {
+    function step_packed(grid) {
       const out = new Uint8Array(grid.length);
       for (let r = 0; r < GRID_H; r++) {
         for (let c = 0; c < GRID_W; c++) {
           const self_c = grid[r * GRID_W + c];
-          out[r * GRID_W + c] = lookup(self_c, nbrs(grid, r, c));
+          out[r * GRID_W + c] = lookup_packed(self_c, nbrs_packed(grid, r, c));
         }
       }
       return out;
     }
+
+    // Spoeqi-style step: pointy-top, row-parity, toroidal (mirrors
+    // caformer.primitives.hex_ca_step which uses np.roll).
+    function step_lut(grid) {
+      const out = new Uint8Array(grid.length);
+      const W = GRID_W, H = GRID_H;
+      const at = (rr, cc) => grid[((rr + H) % H) * W + ((cc + W) % W)];
+      for (let r = 0; r < H; r++) {
+        const even = (r & 1) === 0;
+        for (let c = 0; c < W; c++) {
+          const self_c = grid[r * W + c];
+          const up = at(r-1, c), dn = at(r+1, c);
+          const l  = at(r, c-1), rt = at(r, c+1);
+          const up_l = at(r-1, c-1), up_r = at(r-1, c+1);
+          const dn_l = at(r+1, c-1), dn_r = at(r+1, c+1);
+          const nw = even ? up_l : up;
+          const ne = even ? up   : up_r;
+          const sw = even ? dn_l : dn;
+          const se = even ? dn   : dn_r;
+          out[r * W + c] = lookup_lut(self_c, nw, ne, rt, se, sw, l);
+        }
+      }
+      return out;
+    }
+
+    const step = (KIND === 'hex_k4_lut') ? step_lut : step_packed;
 
     function seed() {
       const g = new Uint8Array(GRID_W * GRID_H);

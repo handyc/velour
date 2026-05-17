@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ sequence.slug }} — caframe{% endblock %}
+{% block content %}
+<div style="max-width: 60em;">
+  <p><a href="{% url 'caframe:index' %}" style="color:#888;">← caframe</a></p>
+  <h1>{{ sequence.name|default:sequence.slug }}</h1>
+  <p style="color:#888; font-size:0.85rem;">
+    {{ sequence.get_shape_display }} · {{ sequence.grid_w }}×{{ sequence.grid_h }} ·
+    {{ sequence.n_frames }} frames · seed {{ sequence.seed }}
+    {% if sequence.source_app %}
+      · sourced from <code>{{ sequence.source_app }}</code> :: {{ sequence.source_ref }}
+    {% endif %}
+  </p>
+  <img src="{% url 'caframe:apng' slug=sequence.slug %}?cell_px=8&amp;fps=10"
+       alt="{{ sequence.slug }}"
+       style="image-rendering:pixelated; max-width:100%;
+              border:1px solid #1f1f1f; background:#050505;">
+  <p style="margin-top:8px; font-size:0.78rem; color:#888;">
+    Download:
+    <a href="{% url 'caframe:apng' slug=sequence.slug %}?cell_px=8&amp;fps=10"
+       style="color:#cea;">.apng</a>
+    &middot;
+    <a href="{% url 'caframe:mp4' slug=sequence.slug %}?cell_px=8&amp;fps=12"
+       style="color:#cea;">.mp4 (if ffmpeg installed)</a>
+  </p>
+  {% if sequence.notes %}
+    <pre style="white-space:pre-wrap; color:#aaa; margin-top:14px;
+                background:#0a0a0a; border:1px solid #1f1f1f;
+                padding:10px;">{{ sequence.notes }}</pre>
+  {% endif %}
+  <p style="margin-top:14px;">
+    Rule genome SHA1:
+    <code style="color:#cfa;">{{ sequence.rule_genome|length }} bytes</code>
+  </p>
+  {% if sequence.runs.all %}
+    <h2 style="font-size:0.9rem; color:#888; text-transform:uppercase;
+                letter-spacing:0.06em; font-weight:normal; margin-top:18px;">
+      Scored runs
+    </h2>
+    <table style="font:0.82rem ui-monospace, monospace; color:#aaa;
+                   border-collapse:collapse; width:100%;">
+      <tr style="color:#888;">
+        <th style="text-align:left; padding:4px 8px;">metric</th>
+        <th style="text-align:left; padding:4px 8px;">fitness</th>
+        <th style="text-align:left; padding:4px 8px;">when</th>
+      </tr>
+      {% for run in sequence.runs.all %}
+        <tr>
+          <td style="padding:4px 8px;">{{ run.metric_name }}</td>
+          <td style="padding:4px 8px; color:#cfa;">
+            {{ run.fitness|floatformat:4 }}
+          </td>
+          <td style="padding:4px 8px; color:#888;">
+            {{ run.created_at|date:"D d M H:i" }}
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+  {% endif %}
+</div>
+{% endblock %}

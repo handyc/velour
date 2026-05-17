@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}new metapact — spoeqi{% endblock %}
+{% block content %}
+<div style="max-width:48em;">
+  <p><a href="{% url 'spoeqi:metapact_list' %}" style="color:#888;">← metapacts</a></p>
+  <h1>New Metapact</h1>
+  <p style="color:#aaa; font-size:0.85rem;">
+    The integer seed deterministically expands to 16,384 random
+    bytes via numpy default_rng.  Two parties using the same seed
+    get the exact same metapact, so just sharing the 32-bit integer
+    + depth is enough to reproduce the entire CAformer.
+  </p>
+  <form method="post" style="margin-top:14px; background:#0a0a0a;
+                              border:1px solid #1f1f1f; padding:14px;
+                              display:grid; gap:10px;">
+    {% csrf_token %}
+    <label style="color:#aaa; font-size:0.78rem;">name
+      <input type="text" name="name" required
+             style="display:block; width:100%; background:#111; color:#ddd;
+                    border:1px solid #333; padding:6px;">
+    </label>
+    <label style="color:#aaa; font-size:0.78rem;">slug
+      <input type="text" name="slug" placeholder="(auto from name)"
+             style="display:block; width:100%; background:#111; color:#ddd;
+                    border:1px solid #333; padding:6px;">
+    </label>
+    <label style="color:#aaa; font-size:0.78rem;">seed (32-bit int)
+      <input type="number" name="seed" value="3405691582"
+             min="1" max="4294967295"
+             style="display:block; width:14em; background:#111; color:#ddd;
+                    border:1px solid #333; padding:6px; font-family:ui-monospace, monospace;">
+    </label>
+    <label style="color:#aaa; font-size:0.78rem;">depth
+      <input type="number" name="depth" value="10" min="2" max="20"
+             style="display:block; width:6em; background:#111; color:#ddd;
+                    border:1px solid #333; padding:6px;">
+    </label>
+    <label style="color:#aaa; font-size:0.78rem;">chain_ticks per level
+      <input type="number" name="chain_ticks" value="24" min="4" max="64"
+             style="display:block; width:6em; background:#111; color:#ddd;
+                    border:1px solid #333; padding:6px;">
+    </label>
+    <label style="color:#aaa; font-size:0.78rem;">leaf probe text
+      <textarea name="leaf_probe" rows="3"
+                style="display:block; width:100%; background:#111; color:#ddd;
+                       border:1px solid #333; padding:6px;
+                       font-family:ui-monospace, monospace;">In the beginning the Universe was created. This has made a lot of people very angry and been widely regarded as a bad move.</textarea>
+    </label>
+    <button type="submit"
+            style="background:#1f3f1f; color:#cfc; border:1px solid #4a8;
+                   padding:6px 14px; cursor:pointer; font-family:inherit;
+                   width:fit-content;">create metapact</button>
+  </form>
+</div>
+{% endblock %}

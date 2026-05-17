@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ project.title }} — Cahier{% endblock %}
+
+{% block content %}
+<style>
+  .cah-page { max-width: 70em; }
+  .cah-page h1 { margin: 0; }
+  .cah-page .lede { color: #aaa; font-size: 0.88rem;
+                          line-height: 1.55; max-width: 56em; }
+  .cell { margin: 0.8rem 0; }
+  .cell.md pre.cell-source { background: #0d1117; padding: 0.8rem;
+                                       border-radius: 4px; color: #c9d1d9;
+                                       white-space: pre-wrap;
+                                       font-family: ui-monospace, monospace;
+                                       font-size: 0.82rem; }
+  .cell.code .prompt { color: #79c0ff; font-size: 0.72rem;
+                                font-family: ui-monospace, monospace;
+                                margin-bottom: 2px; }
+  .cell.code pre.cell-source { background: #161b22; padding: 0.8rem;
+                                          border-radius: 4px;
+                                          font-family: ui-monospace, monospace;
+                                          font-size: 0.82rem;
+                                          border-left: 3px solid #1f6feb;
+                                          white-space: pre-wrap; }
+  .cell .output { background: #0a0d12; padding: 0.7rem;
+                       border-left: 3px solid #2da44e;
+                       font-family: ui-monospace, monospace;
+                       font-size: 0.78rem; white-space: pre-wrap;
+                       margin-top: 4px; }
+  .cell .output.error { border-left-color: #f85149; color: #ff7b72; }
+</style>
+
+<div class="cah-page">
+  <p><a href="{% url 'cahier:index' %}" style="color:#79c0ff;">← all notebooks</a></p>
+  <h1>{{ project.title }}</h1>
+
+  {% if missing %}
+    <p style="color:#f9c674;">⚠ Notebook file missing at
+    <code>{{ project.path }}</code>. Add the .ipynb to that path or
+    update the row in the admin.</p>
+  {% else %}
+    <p class="lede" style="margin-top:0.4rem;">{{ project.description|default:project.summary|linebreaksbr }}</p>
+    <p style="font-family:ui-monospace,monospace; color:#8b949e;
+                font-size:0.78rem;">
+      <code>{{ project.path }}</code> · {{ n_cells }} cells
+      ({{ n_code }} code · {{ n_markdown }} markdown) ·
+      tags: {{ project.tags|default:"—" }} ·
+      apps: {{ project.related_apps|default:"—" }} ·
+      <a href="{% url 'cahier:html' slug=project.slug %}"
+          style="color:#79c0ff;">full HTML →</a> ·
+      <a href="{% url 'cahier:download' slug=project.slug %}"
+          style="color:#79c0ff;">⬇ .ipynb</a> ·
+      <a href="{% url 'cahier:raw' slug=project.slug %}"
+          style="color:#79c0ff;">raw JSON</a>
+    </p>
+    <div class="nb-preview">
+      {{ preview_html|safe }}
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

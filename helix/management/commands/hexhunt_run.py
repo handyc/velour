@@ -40,6 +40,25 @@ class Command(BaseCommand):
                             help='Slug of a negative corpus. When set, '
                                  'fitness becomes mean(pos) - mean(neg) — '
                                  'the discriminator mode.')
+        parser.add_argument('--board-side', type=int, default=16,
+                            help='Cells per side of the eval board. 16 (the '
+                                 'default) matches the 256-base WINDOW_SIZE; '
+                                 'larger sides give lower-noise class-4 '
+                                 'signal at quadratic cost.')
+        parser.add_argument('--validate-every', type=int, default=0,
+                            help='Run self-reproduction validation every N '
+                                 'gens. 0 = disabled. The top elites lay '
+                                 'their 16,384-entry LUT out as a 128×128 '
+                                 'hex grid, run their own rule for '
+                                 '--validate-steps ticks, and have their '
+                                 'fitness replaced with the fraction of '
+                                 'cells that match the original LUT. '
+                                 'Higher = more self-reproducing.')
+        parser.add_argument('--validate-elite-n', type=int, default=8,
+                            help='How many top rules per validation event.')
+        parser.add_argument('--validate-steps', type=int, default=64,
+                            help='CA ticks to run during the self-reproduction '
+                                 'test. Default 64.')
 
     def handle(self, *args, **opts):
         try:
@@ -81,6 +100,10 @@ class Command(BaseCommand):
             scoring_fn=opts['score'],
             steps=opts['steps'],
             rng_seed=opts['seed'],
+            board_side=opts['board_side'],
+            validation_every=opts['validate_every'],
+            validation_elite_n=opts['validate_elite_n'],
+            validation_steps=opts['validate_steps'],
         )
 
         params_dict = dict(params.__dict__)

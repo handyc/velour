@@ -75,7 +75,9 @@ def parse_params(params_spec: List[Param], raw_dict: dict) -> dict:
 from . import (cafe_wall, hermann_grid, ehrenstein, bezold, munker_white,
                 poggendorff, scintillating_grid, kanizsa_triangle,
                 muller_lyer, zollner,
-                autostereogram)   # noqa: E402
+                autostereogram,
+                ishihara, white_illusion,
+                watercolor, neon_spreading, cornsweet, chubb)   # noqa: E402
 
 REGISTRY = {
     cafe_wall.SLUG:           cafe_wall,
@@ -88,7 +90,13 @@ REGISTRY = {
     kanizsa_triangle.SLUG:    kanizsa_triangle,
     bezold.SLUG:              bezold,
     munker_white.SLUG:        munker_white,
+    watercolor.SLUG:          watercolor,
+    neon_spreading.SLUG:      neon_spreading,
+    cornsweet.SLUG:           cornsweet,
+    chubb.SLUG:               chubb,
     autostereogram.SLUG:      autostereogram,
+    ishihara.SLUG:            ishihara,
+    white_illusion.SLUG:      white_illusion,
 }
 
 

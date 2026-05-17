@@ -95,6 +95,10 @@ urlpatterns = [
     path('loupe/',       include('loupe.urls')),
     path('scriptorium/', include('scriptorium.urls')),
     path('optikon/',     include('optikon.urls')),
+    path('caformer/',    include('caformer.urls')),
+    path('caframe/',     include('caframe.urls')),
+    path('ouroboros/',   include('ouroboros.urls')),
+    path('cahier/',      include('cahier.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

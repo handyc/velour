@@ -1,0 +1,381 @@
+"""caformer/models.py — DB schema for the workshop.
+
+Components themselves are defined in code (caformer/components.py) so
+their design notes are checked into git rather than living as fragile
+DB rows.  The DB only stores user *experiments* — when an interactive
+demo on a component page is run, the inputs / outputs / score get
+persisted so a researcher can come back later and compare runs.
+"""
+
+from __future__ import annotations
+from django.db import models
+
+
+class Experiment(models.Model):
+    """One run of a component's interactive demo."""
+    component = models.CharField(
+        max_length=40,
+        help_text='Slug of the component (embedding, attention, ...).')
+    pact_slug = models.CharField(
+        max_length=80, blank=True,
+        help_text='Optional spoeqi pact backing this experiment.')
+    title     = models.CharField(max_length=120, blank=True)
+    notes     = models.TextField(blank=True)
+
+    inputs    = models.JSONField(default=dict, blank=True)
+    outputs   = models.JSONField(default=dict, blank=True)
+    metrics   = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-created_at',)
+
+    def __str__(self):
+        return f'{self.component} · {self.title or self.created_at:%Y-%m-%d %H:%M}'
+
+
+class TrainedModel(models.Model):
+    """One evolved CAformer model — the 10 rule tables that
+    ca_forward_qkv needs (q, k, v, score, mix, merge, mlp, norm,
+    output, embed) plus the metadata to reproduce the run.
+
+    Each rule is a 16,384-byte ``BinaryField``; the whole model is
+    ~160 KB on disk.  The chat / DMN endpoints accept ``?model=<slug>``
+    to load these rules instead of the random defaults so users can
+    swap between a freshly-evolved model and the random baseline
+    without restarting anything.
+    """
+    name        = models.CharField(max_length=80, unique=True)
+    slug        = models.SlugField(max_length=80, unique=True)
+    notes       = models.TextField(blank=True)
+
+    # The 10 rule tables.  Each is exactly 16,384 bytes (uint8 0..3).
+    rule_q      = models.BinaryField()
+    rule_k      = models.BinaryField()
+    rule_v      = models.BinaryField()
+    rule_score  = models.BinaryField()
+    rule_mix    = models.BinaryField()
+    rule_merge  = models.BinaryField()
+    rule_mlp    = models.BinaryField()
+    rule_norm   = models.BinaryField()
+    rule_output = models.BinaryField()
+    rule_embed  = models.BinaryField()
+
+    # Reproducibility + history.
+    corpus_excerpt = models.TextField(
+        blank=True,
+        help_text='First ~500 chars of the training corpus, kept so '
+                  'the model can be re-trained on roughly the same data.')
+    vocab_size  = models.PositiveIntegerField(default=256)
+    n_blocks    = models.PositiveIntegerField(default=2)
+    pop_size    = models.PositiveIntegerField(default=8)
+    generations = models.PositiveIntegerField(default=6)
+    final_fitness = models.FloatField(default=0.0)
+    history_json  = models.JSONField(default=list, blank=True)
+    created_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-created_at',)
+
+    def __str__(self):
+        return f'{self.name} ({self.final_fitness:.3f})'
+
+    def as_genome(self):
+        """Materialise the 10 rule blobs as a {name: ndarray} genome
+        dict — the same shape the GA produces, so the chat endpoint
+        can drop it straight into ca_forward_qkv kwargs."""
+        import numpy as np
+        from .ga import FULL_STACK_NAMES
+        rules = {
+            'q':      self.rule_q,      'k':      self.rule_k,
+            'v':      self.rule_v,      'score':  self.rule_score,
+            'mix':    self.rule_mix,    'merge':  self.rule_merge,
+            'mlp':    self.rule_mlp,    'norm':   self.rule_norm,
+            'output': self.rule_output, 'embed':  self.rule_embed,
+        }
+        return {n: np.frombuffer(bytes(rules[n]), dtype=np.uint8).copy()
+                for n in FULL_STACK_NAMES}
+
+    def rule_diversity(self):
+        """Return how independent the 10 rule LUTs actually are.
+
+        A whole-stack GA can converge to "collapsed" solutions where
+        several of the named rule slots end up byte-identical — the
+        component pipeline then runs only a handful of distinct CA
+        dynamics under different labels.  This method makes that
+        visible.
+
+        Returns a dict with:
+            distinct_count: number of byte-distinct LUTs (1..10).
+            groups:         list of lists, each inner list is a set
+                              of slot names that share one LUT.
+            mean_pairwise_match: average per-byte equality across all
+                              ⁹C₂ = 45 rule pairs (0.25 = uncorrelated
+                              K=4 baseline; 1.00 = all identical).
+        """
+        import numpy as np
+        g = self.as_genome()
+        names = list(g.keys())
+        groups, seen = [], [False] * len(names)
+        for i, ni in enumerate(names):
+            if seen[i]:
+                continue
+            group = [ni]
+            seen[i] = True
+            for j in range(i + 1, len(names)):
+                if not seen[j] and np.array_equal(g[ni], g[names[j]]):
+                    group.append(names[j])
+                    seen[j] = True
+            groups.append(group)
+        # Mean pairwise byte-equality
+        total_match = 0
+        n_pairs = 0
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                total_match += int((g[names[i]] == g[names[j]]).sum())
+                n_pairs += 1
+        size = g[names[0]].size
+        return {
+            'distinct_count': len(groups),
+            'groups':         groups,
+            'mean_pairwise_match': total_match / (n_pairs * size),
+        }
+
+
+class ChatTurn(models.Model):
+    """One round of user→CA conversation, kept verbatim so the GA can
+    later train on the user's own chat history.
+
+    Every chat reply persists a row.  ``training_corpus()`` collapses
+    them into one long string suitable for ``make_text_fitness``.  The
+    point: anything the user types into chat becomes future training
+    data without an extra step — close the conversational/training loop.
+    """
+    user = models.ForeignKey(
+        'auth.User', on_delete=models.CASCADE,
+        related_name='caformer_chat_turns')
+    prompt   = models.TextField()
+    reply    = models.TextField(blank=True)
+    model_slug = models.CharField(max_length=80, blank=True)
+    backbone   = models.CharField(max_length=120, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-created_at',)
+
+    def __str__(self):
+        return f'{self.user.username} · {self.prompt[:40]}'
+
+    @classmethod
+    def training_corpus(cls, user, *, max_chars: int = 200_000) -> str:
+        """Build a training corpus from this user's chat turns.
+        Format: alternating ``user: …\\nca: …\\n\\n`` blocks so the
+        model learns the dialog shape, not just a flat byte stream."""
+        rows = list(cls.objects.filter(user=user)
+                                 .order_by('created_at')
+                                 .values_list('prompt', 'reply'))
+        if not rows:
+            return ''
+        parts = []
+        total = 0
+        for prompt, reply in rows:
+            chunk = f'user: {prompt or ""}\nca: {reply or ""}\n\n'
+            parts.append(chunk)
+            total += len(chunk)
+            if total > max_chars:
+                break
+        return ''.join(parts)[:max_chars]
+
+
+class ComponentChampion(models.Model):
+    """Best-so-far rule-table bundle for one of the 8 caformer
+    components, produced by the per-component autotournament loop.
+
+    A "bundle" is one or more 16,384-byte rule tables concatenated in
+    the order specified by ``caformer.component_fitness.COMPONENT_SPECS
+    [slug].rules``.  For single-rule components (embedding, norm, mlp,
+    output, projection-as-Q) the bundle is one rule = 16,384 bytes.
+    For composites (self_attention = 5 rules, transformer = 7 rules)
+    the bundle is up to 7 × 16,384 = 114,688 bytes.
+
+    Lineage: each champion can point to a ``parent`` — the champion
+    it was warm-started from.  The autotournament loop sets this so
+    you can walk the lineage chain backwards from any current champion
+    to its founding ancestor.
+    """
+    component_slug = models.CharField(max_length=40, db_index=True,
+                                        help_text='one of COMPONENT_SPECS keys')
+    rules_blob     = models.BinaryField()
+    rule_names_csv = models.CharField(max_length=120, default='',
+                                        help_text='comma-separated rule names in '
+                                                    'on-disk order; matches '
+                                                    'COMPONENT_SPECS[slug].rules')
+    fitness        = models.FloatField(db_index=True)
+    parent         = models.ForeignKey('self', null=True, blank=True,
+                                         on_delete=models.SET_NULL,
+                                         related_name='children')
+    generation     = models.PositiveIntegerField(default=0,
+                                                   help_text='how many lineage '
+                                                              'hops from a random '
+                                                              'ancestor')
+    run_label      = models.CharField(max_length=40, blank=True,
+                                        help_text='tag for the autotournament run '
+                                                    'that produced this champion')
+    ga_pop_size    = models.PositiveIntegerField(default=0)
+    ga_generations = models.PositiveIntegerField(default=0)
+    eval_count     = models.PositiveIntegerField(default=0,
+                                                   help_text='how many fitness '
+                                                              'evals were spent on '
+                                                              'this champion')
+    notes          = models.TextField(blank=True)
+    created_at     = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-created_at',)
+        indexes = [
+            models.Index(fields=['component_slug', '-fitness']),
+        ]
+
+    def __str__(self):
+        return (f'{self.component_slug} g{self.generation} '
+                f'f={self.fitness:.4f}')
+
+    def rule_table(self, name):
+        """Return one of this bundle's rule tables by name as a
+        numpy uint8 array of length 16,384."""
+        import numpy as np
+        names = self.rule_names_csv.split(',')
+        try:
+            idx = names.index(name)
+        except ValueError:
+            raise KeyError(
+                f'{name!r} not in champion bundle '
+                f'(have {names!r})')
+        blob = bytes(self.rules_blob)
+        start = idx * 16_384
+        return np.frombuffer(blob[start:start + 16_384], dtype=np.uint8).copy()
+
+    def genome(self):
+        """Return the full bundle as a {name: ndarray} dict."""
+        return {n: self.rule_table(n) for n in self.rule_names_csv.split(',')}
+
+    @classmethod
+    def best_for(cls, component_slug):
+        """Top-fitness champion for the named component, or None."""
+        return (cls.objects.filter(component_slug=component_slug)
+                              .order_by('-fitness', '-created_at')
+                              .first())
+        """Build a training corpus from this user's chat turns.
+        Format: alternating ``user: …\\nca: …\\n\\n`` blocks so the
+        model learns the dialog shape, not just a flat byte stream."""
+        rows = list(cls.objects.filter(user=user)
+                                 .order_by('created_at')
+                                 .values_list('prompt', 'reply'))
+        if not rows:
+            return ''
+        parts = []
+        total = 0
+        for prompt, reply in rows:
+            chunk = f'user: {prompt or ""}\nca: {reply or ""}\n\n'
+            parts.append(chunk)
+            total += len(chunk)
+            if total > max_chars:
+                break
+        return ''.join(parts)[:max_chars]
+
+
+class QRPair(models.Model):
+    """One (prompt, expected_response) pair the QR trainer evolves
+    a CAformer to produce exactly.
+
+    The trainer (``caformer.qr_trainer.train_pair``) is a long-running
+    multi-phase loop: GA bursts, polish, periodic random restarts when
+    progress stalls.  After each improvement it writes the best
+    genome's 10 rule tables back into ``best_genome_blob`` (10 ×
+    16,384 bytes concatenated in FULL_STACK_NAMES order) and records
+    what the model now generates in ``best_output``.
+
+    When ``best_exact`` flips to True, the model produces ``expected``
+    byte-for-byte from ``prompt`` under temperature-0 argmax sampling.
+    That's the signal the user wants for "hi → hello".
+    """
+    prompt   = models.CharField(max_length=200)
+    expected = models.CharField(max_length=400)
+    n_blocks = models.PositiveSmallIntegerField(default=1)
+    notes    = models.TextField(blank=True)
+    label    = models.CharField(max_length=40, blank=True,
+                                  help_text='free-form tag, e.g. a training '
+                                              "run's name")
+
+    # Updated by the trainer on every improvement.  ``best_genome_blob``
+    # is the concatenated 10 rule tables; ``None`` until the first
+    # training cycle saves something.
+    best_fitness = models.FloatField(default=-1e9)
+    best_genome_blob = models.BinaryField(null=True, blank=True)
+    best_output = models.CharField(max_length=400, blank=True,
+                                     help_text='temperature-0 argmax output '
+                                                  'of the best genome on prompt')
+    best_exact  = models.BooleanField(default=False)
+    n_evals     = models.PositiveIntegerField(default=0)
+    total_seconds = models.FloatField(default=0.0)
+    restarts    = models.PositiveIntegerField(default=0)
+    last_phase  = models.CharField(max_length=24, blank=True,
+                                     help_text='ga / polish / restart / done')
+
+    deployed_slug = models.CharField(max_length=80, blank=True,
+                                         help_text='slug of the TrainedModel '
+                                                      'this pair has been '
+                                                      'deployed to (if any)')
+
+    # Positional-mode storage: when the trainer was run with
+    # ``--positional``, the base 10 rules go in best_genome_blob and the
+    # N per-position output rules (one per target byte) are packed here
+    # back-to-back.  ``len(positional_output_blob) == n_target_bytes ×
+    # 16,384``.  Inference uses positional_output_blob[i] for output
+    # position i; falls back to best_genome_blob's output rule when
+    # this field is empty (legacy single-rule pairs).
+    positional_output_blob = models.BinaryField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('-best_exact', '-best_fitness', '-updated_at')
+
+    def __str__(self):
+        return (f'{self.prompt!r} → {self.expected!r} '
+                  f'(fit {self.best_fitness:.3f}'
+                  f'{" ✓" if self.best_exact else ""})')
+
+    def best_genome(self):
+        """Reconstruct the genome dict from ``best_genome_blob``,
+        or None if not yet trained."""
+        if not self.best_genome_blob:
+            return None
+        import numpy as np
+        from .ga import FULL_STACK_NAMES
+        blob = bytes(self.best_genome_blob)
+        out = {}
+        for i, n in enumerate(FULL_STACK_NAMES):
+            s = i * 16_384
+            out[n] = np.frombuffer(blob[s:s + 16_384],
+                                       dtype=np.uint8).copy()
+        return out
+
+    def is_positional(self):
+        """True when this pair was trained with per-position output rules."""
+        blob = self.positional_output_blob
+        return bool(blob) and len(bytes(blob)) >= 16_384
+
+    def positional_output_rules(self):
+        """Yield the N per-position output rules.  None if not in
+        positional mode."""
+        if not self.is_positional():
+            return None
+        import numpy as np
+        blob = bytes(self.positional_output_blob)
+        n = len(blob) // 16_384
+        return [np.frombuffer(blob[i * 16_384:(i + 1) * 16_384],
+                                  dtype=np.uint8).copy()
+                for i in range(n)]

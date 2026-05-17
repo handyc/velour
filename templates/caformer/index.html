@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}caformer — a transformer made of CAs{% endblock %}
+{% block content %}
+<style>
+  .cf-page { max-width: 80em; }
+  .cf-page h1 { margin: 0 0 4px; }
+  .cf-page p.intro { color: #aaa; max-width: 56em; }
+  .cf-section { margin-top: 22px; }
+  .cf-section h2 { font-size: 0.9rem; color: #888;
+                    text-transform: uppercase; letter-spacing: 0.06em;
+                    font-weight: normal; margin-bottom: 8px; }
+  .cf-grid { display: grid; grid-template-columns: repeat(auto-fill,
+              minmax(18em, 1fr)); gap: 10px; }
+  .cf-card { display: block; padding: 10px 12px; border: 1px solid #1f1f1f;
+              background: #0a0a0a; text-decoration: none; color: inherit; }
+  .cf-card:hover { border-color: #6f6; background: #061206; }
+  .cf-card .num { font-family: monospace; color: #cfc; font-size: 0.8rem; }
+  .cf-card .name { color: #fff; font-size: 1rem; margin: 2px 0 4px; }
+  .cf-card .one { color: #aaa; font-size: 0.8rem; }
+  .cf-card .status { display: inline-block; padding: 1px 6px; margin-top: 6px;
+                      font-size: 0.7rem; border: 1px solid; border-radius: 2px; }
+  .status-sketch    { color: #ccc; border-color: #555; }
+  .status-partial   { color: #fc6; border-color: #963; }
+  .status-working   { color: #6f6; border-color: #4a4; }
+  .status-optimised { color: #6cf; border-color: #48a; }
+  .cf-comp-card { border-left-width: 3px; border-left-color: #2a3; }
+  .cf-comp-card .abst { color: #fc6; font-family: monospace; font-size: 0.7rem; }
+</style>
+
+<div class="cf-page">
+  <h1>caformer
+    <span style="color:#888; font-weight:400; font-size: 0.8rem;">
+      — a transformer made of cellular automata
+    </span>
+  </h1>
+  <p class="intro">
+    Workshop for replacing every component of an LLM with a network of
+    CAs.  The 8 primitives below are the layers any transformer needs;
+    the compositions below stack and parallelise them all the way up to
+    a GPT-3-shaped model.  The plan is to <em>evolve</em> each level
+    against an appropriate fitness, then compose the winners.
+  </p>
+  <p style="margin-top:6px;">
+    <a href="{% url 'caformer:dmn' %}" style="color:#cfa;">
+      → Default-Mode loop · live viewer
+    </a>
+    &middot;
+    <a href="{% url 'caformer:chat' %}" style="color:#cfa;">
+      → Chat with caformer
+    </a>
+    &middot;
+    <a href="{% url 'caformer:train' %}" style="color:#cfa;">
+      → Train a model
+    </a>
+    &middot;
+    <a href="{% url 'caformer:diagram' %}" style="color:#cfa;">
+      → Pipeline diagram
+    </a>
+    &middot;
+    <a href="{% url 'caformer:export_best' %}" style="color:#cfa;"
+       title="Auto-export the highest-fitness TrainedModel as a self-contained, statically-linkable ≤ 64 KB C binary with all 10 CA rule tables baked in.">
+      ⤓ Export best → 64 KB binary
+    </a>
+    &middot;
+    <a href="{% url 'caformer:champions' %}" style="color:#cfa;"
+       title="Per-component autotournament — each cycle rotates through 8 components and evolves each from its current champion against a dedicated fitness metric.">
+      🏆 Component champions
+    </a>
+    &middot;
+    <a href="{% url 'caformer:pipeline' %}" style="color:#cfa;"
+       title="Watch all 8 major CA components paint their grids live as a chat query flows through the full forward pass.">
+      🛰 Live pipeline
+    </a>
+    &middot;
+    <a href="{% url 'caformer:qr_index' %}" style="color:#cfa;"
+       title="Curated Q→R training: evolve the model to produce specific responses byte-for-byte. Long-running CLI trainer with checkpointing.">
+      🎯 Q→R training
+    </a>
+    <br>
+    <span style="color:#888; font-size:0.85rem;">
+      DMN: no input, just CA + nano_gpt feeding back into itself.
+      Chat: char-level prompt → fully-CA forward → text back.
+      Train: GA-evolve the rule tables against a corpus you supply.
+    </span>
+  </p>
+
+  <div class="cf-section">
+    <h2>The 8 primitives</h2>
+    <div class="cf-grid">
+      {% for c in components %}
+        <a class="cf-card" href="{% url 'caformer:component' slug=c.slug %}">
+          <div class="num">{{ forloop.counter }}/{{ components|length }}</div>
+          <div class="name">{{ c.name }}</div>
+          <div class="one">{{ c.one_liner }}</div>
+          <span class="status status-{{ c.status }}">{{ c.status }}</span>
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="cf-section">
+    <h2>Recursive composition ladder</h2>
+    <p style="color:#888; font-size:0.82rem; max-width:56em;">
+      Each scale wraps the previous.  The pattern is "stack N in series"
+      or "fan out to N in parallel" repeated until you've reached the
+      desired complexity.  Numbers are nominal anchors — the topology
+      is what we evolve.
+    </p>
+    <div class="cf-grid">
+      {% for c in compositions %}
+        <a class="cf-card cf-comp-card" href="{% url 'caformer:composition' slug=c.slug %}">
+          <div class="abst">abstraction · L{{ c.abstraction }}</div>
+          <div class="name">{{ c.name }}</div>
+          <div class="one" style="font-family:monospace; font-size:0.72rem;
+               white-space:pre-wrap; color:#9c9;">{{ c.structure }}</div>
+          <div style="color:#888; font-size:0.72rem; margin-top:4px;">
+            ca count: {{ c.ca_count }}
+          </div>
+          <span class="status status-{{ c.status }}">{{ c.status }}</span>
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="cf-section">
+    <h2>Strategy — compress LLMs while replacing components with CAs</h2>
+    <ol style="color:#aaa; font-size:0.85rem; line-height:1.6;">
+      <li><strong>Primitive replacement.</strong>  Try replacing each
+          transformer op with a single class-4 CA.  If single-CA doesn't
+          preserve the op's behaviour, escalate to a chain or network of
+          CAs.  Single-CA stand-ins shipped:
+          <code>caformer.primitives.ca_softmax_sample</code>,
+          <code>ca_mlp</code>, <code>ca_layer_norm</code>.</li>
+      <li><strong>Evolve role-by-role.</strong>  Each component has a
+          different fitness — denoising, distillation, normalisation,
+          attention, sampling — and gets its own GA.  See
+          <a href="{% url 'spoeqi:index' %}" style="color:#ace;">spoeqi
+          chain GA</a> with its 17 role-aligned metrics for the template.</li>
+      <li><strong>Stack into nanoGPT.</strong>  Composition L2 — three
+          transformer blocks in series + embedding + output head.  Same
+          evolution loop, longer sequence.</li>
+      <li><strong>Recursive scale-up.</strong>  Wrap in series + parallel
+          for GPT-2 → XL → 3 → 3.5-shapes.  The previous level's evolved
+          outputs become the next level's building blocks.</li>
+      <li><strong>CA-generated training data.</strong>  Replace data
+          vectors themselves with deterministic CA streams — a Pact +
+          domain becomes a "dataset of N tokens".  Two researchers with
+          the same Pact instantly hold identical training corpora; no
+          dataset shipping, no licensing surface.</li>
+      <li><strong>Default-Mode loop (L6).</strong>  Once the stack works,
+          wrap it in a no-input feedback loop — CA → text → tinyLLM →
+          text → CA — so the model "thinks" continuously without
+          external prompts.  See
+          <code>caformer/dmn.py:dmn_loop</code>.</li>
+    </ol>
+  </div>
+
+  <div class="cf-section">
+    <h2>Daily collaboration cadence</h2>
+    <p style="color:#888; font-size:0.85rem; max-width:54em;">
+      The user adds things from their end every day; the AI pair adds
+      things from theirs.  We meet in the middle in this app.  When you
+      come back tomorrow, the design space here should have grown — try
+      a primitive's interactive demo, prune a metric that didn't earn
+      its weight, or sketch a new composition above L6.
+    </p>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,421 @@
+{% extends "base.html" %}
+{% block title %}metapact autotournament — spoeqi{% endblock %}
+{% block content %}
+<style>
+  .mt-page { max-width: 76em; }
+  .mt-page h1 { margin: 0 0 4px; }
+  .mt-page .intro { color: #aaa; max-width: 60em; font-size: 0.88rem; }
+  .mt-knobs { display: flex; flex-wrap: wrap; gap: 14px; align-items: end;
+              margin: 14px 0; padding: 12px 14px; background: #0a0a0a;
+              border: 1px solid #1f1f1f; }
+  .mt-knobs label { color: #aaa; font-size: 0.78rem;
+                    display: flex; flex-direction: column; gap: 2px; }
+  .mt-knobs input[type="number"], .mt-knobs input[type="text"] {
+              width: 6em; background: #111; color: #ddd;
+              border: 1px solid #333; padding: 3px 6px;
+              font-family: inherit; font-size: 0.85rem; }
+  .mt-knobs input[type="text"] { width: 10em; }
+  .mt-knobs label.cb { flex-direction: row; align-items: center; gap: 6px; }
+  .mt-go   { background: #1f4f1f; color: #cfc; border: 1px solid #4a8;
+              padding: 6px 16px; cursor: pointer; font-family: inherit;
+              font-weight: bold; }
+  .mt-stop { background: #4f1f1f; color: #fcc; border: 1px solid #a48;
+              padding: 6px 14px; cursor: pointer; font-family: inherit; }
+  .mt-status { color: #888; font-size: 0.82rem; padding-left: 8px; }
+
+  .mt-layout { display: grid; grid-template-columns: minmax(280px, 1fr) 2fr;
+               gap: 18px; align-items: start; margin-top: 14px; }
+  @media (max-width: 880px) { .mt-layout { grid-template-columns: 1fr; } }
+  .mt-panel  { padding: 12px 14px; background: #0a0a0a;
+               border: 1px solid #1f1f1f; }
+  .mt-panel h3 { color: #cfa; font-size: 0.78rem; text-transform: uppercase;
+                  letter-spacing: 0.05em; font-weight: normal; margin: 0 0 8px; }
+  .mt-bracket { display: grid; gap: 6px; margin-top: 6px; }
+  .mt-bracket .round { padding: 6px 10px; background: #050505;
+                        border: 1px solid #161616; font-family: ui-monospace,
+                        monospace; font-size: 0.82rem; color: #aaa; }
+  .mt-bracket .round.active { border-color: #cfa; color: #cfc; }
+  .mt-bracket .round.done   { border-color: #4a8; color: #cfc; }
+  .mt-bracket .round .tag   { color: #cfa; font-weight: bold; }
+  .mt-bracket .round .stats { color: #888; font-size: 0.76rem;
+                               margin-top: 3px; }
+  .mt-log    { background: #050505; border: 1px solid #161616;
+               padding: 8px 10px; font: 0.78rem ui-monospace, monospace;
+               color: #aaa; height: 14em; overflow: auto;
+               white-space: pre-wrap; }
+  .mt-log .ok   { color: #cfc; }
+  .mt-log .warn { color: #fc6; }
+  .mt-log .err  { color: #f86; }
+
+  .mt-seed-list { font: 0.78rem ui-monospace, monospace; }
+  .mt-seed-list a { color: #ace; }
+  .mt-saved a { color: #cfa; font: 0.82rem ui-monospace, monospace;
+                margin-right: 0.6em; }
+
+  .mt-chart  { background: #050505; border: 1px solid #1f1f1f; padding: 6px; }
+  .mt-chart canvas { display: block; background: #000; width: 100%;
+                      height: 180px; }
+</style>
+
+<div class="mt-page">
+  <p><a href="{% url 'spoeqi:metapact_list' %}" style="color:#888;">← metapacts</a></p>
+  <h1>🏆 Metapact autotournament</h1>
+  <p class="intro">
+    Existing metapacts ({{ total }}) compete in a multi-round tournament.
+    Each round: score every contestant; the top survivors get
+    GA-refined (warm-started from their own seeds) and breed into the
+    next round; one or two fresh-mutation rivals join for diversity.
+    Each round's <em>champion</em> is saved as a new Metapact with
+    <code>parent_seed</code> pointing back, so the lineage is visible
+    in the DB.
+  </p>
+
+  <form id="mt-form" onsubmit="return false;">
+    <div class="mt-knobs">
+      <label>rounds
+        <input type="number" name="rounds" min="1" max="8" value="4">
+      </label>
+      <label>contestants
+        <input type="number" name="contestants" min="3" max="16" value="6">
+      </label>
+      <label>survivors / round
+        <input type="number" name="survivors" min="1" max="6" value="2">
+      </label>
+      <label>refine gens
+        <input type="number" name="refine_gens" min="1" max="20" value="5">
+      </label>
+      <label>refine pop
+        <input type="number" name="refine_pop" min="3" max="16" value="6">
+      </label>
+      <label>chain depth
+        <input type="number" name="depth" min="2" max="16" value="6">
+      </label>
+      <label>chain ticks
+        <input type="number" name="chain_ticks" min="4" max="48" value="16">
+      </label>
+      <label>seed
+        <input type="number" name="seed" min="1" max="2147483647"
+               value="13434494">
+      </label>
+      <label>run label
+        <input type="text" name="label" placeholder="(timestamp)">
+      </label>
+      <label class="cb">
+        <input type="checkbox" name="include" checked> include existing
+      </label>
+      <label class="cb">
+        <input type="checkbox" name="save" checked> save winners
+      </label>
+      <label class="cb"
+             title="When checked, after each tournament ends another starts immediately, picking up the latest winners as contestants. Click stop to break out.">
+        <input type="checkbox" id="mt-continuous"> continuous
+      </label>
+      <button type="button" id="mt-go" class="mt-go">▶ Run tournament</button>
+      <button type="button" id="mt-stop" class="mt-stop" disabled>■ stop</button>
+      <span id="mt-status" class="mt-status">idle</span>
+    </div>
+  </form>
+
+  <div class="mt-layout">
+    <div class="mt-panel">
+      <h3>Bracket</h3>
+      <div id="mt-bracket" class="mt-bracket">
+        <div class="round" style="color:#666;">
+          <i>(no round started yet)</i>
+        </div>
+      </div>
+
+      <h3 style="margin-top:14px;">Saved winners (this run)</h3>
+      <div id="mt-saved" class="mt-saved">
+        <span style="color:#666;">(none yet)</span>
+      </div>
+
+      <h3 style="margin-top:14px;">Existing contestants</h3>
+      <div class="mt-seed-list">
+        {% for m in metapacts %}
+          <div style="color:#aaa;">
+            <a href="{% url 'spoeqi:metapact_detail' slug=m.slug %}">{{ m.slug }}</a>
+            <span style="color:#666;">
+              fit={{ m.final_leaf_fitness|floatformat:3 }}
+              · d4={{ m.final_class4_depth }}/{{ m.depth }}
+            </span>
+          </div>
+        {% empty %}
+          <span style="color:#666;">
+            (no metapacts yet — tournament will start from random seeds)
+          </span>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div>
+      <div class="mt-chart">
+        <canvas id="mt-chart"></canvas>
+        <div style="color:#888; font-size:0.76rem; padding:4px 4px 0;">
+          per-round champion fitness · green = chain quality
+          · cyan = leaf logprob (sigmoid-normalised)
+        </div>
+      </div>
+      <div id="mt-log" class="mt-log"
+           style="margin-top:12px;">tournament log will appear here…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const form        = document.getElementById('mt-form');
+  const goBtn       = document.getElementById('mt-go');
+  const stopBtn     = document.getElementById('mt-stop');
+  const statusEl    = document.getElementById('mt-status');
+  const logEl       = document.getElementById('mt-log');
+  const bracket     = document.getElementById('mt-bracket');
+  const savedEl     = document.getElementById('mt-saved');
+  const chart       = document.getElementById('mt-chart');
+  const continuousCb = document.getElementById('mt-continuous');
+  const ctx         = chart.getContext('2d');
+  let evtSrc        = null;
+  let roundData     = [];      // {round, champion_fitness, champion_chain_q,
+                                //   champion_leaf_logprob, mean_fitness}
+  let totalRounds   = 0;
+  let stopRequested = false;   // user clicked stop — break out of continuous loop
+  let runIdx        = 0;       // increments per continuous-mode run
+  let baseLabel     = null;    // remembers the user's label for run-1; subsequent
+                                //   runs append -N to it for unique slugs
+
+  function log(msg, cls) {
+    const ts = new Date().toLocaleTimeString();
+    const line = '[' + ts + '] ' + msg + '\n';
+    if (cls) {
+      const span = document.createElement('span');
+      span.className = cls;
+      span.textContent = line;
+      logEl.appendChild(span);
+    } else {
+      logEl.appendChild(document.createTextNode(line));
+    }
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function renderBracket() {
+    bracket.innerHTML = '';
+    for (let i = 0; i < totalRounds; i++) {
+      const r = roundData[i];
+      const div = document.createElement('div');
+      div.className = 'round'
+        + (r && r.done ? ' done' : '')
+        + (r && r.active ? ' active' : '');
+      const tag = ['alpha','beta','gamma','delta','epsilon','zeta','eta','theta']
+                    [i % 8];
+      if (r && r.done) {
+        div.innerHTML =
+          '<span class="tag">round ' + i + ' · ' + tag + '</span> ✓ '
+          + '<span>champion fit = <b>' + r.champion_fitness.toFixed(4)
+          + '</b></span>'
+          + '<div class="stats">chain ' + r.champion_chain_q.toFixed(3)
+          + ' · leaf ' + r.champion_leaf_logprob.toFixed(3)
+          + ' · mean ' + r.mean_fitness.toFixed(4)
+          + '</div>';
+      } else if (r && r.active) {
+        div.innerHTML =
+          '<span class="tag">round ' + i + ' · ' + tag + '</span> '
+          + 'scoring…'
+          + (r.score_count !== undefined
+              ? ' (' + r.score_count + ')' : '');
+      } else {
+        div.innerHTML =
+          '<span class="tag" style="color:#444;">round ' + i + ' · ' + tag
+          + '</span>';
+      }
+      bracket.appendChild(div);
+    }
+  }
+
+  function drawChart() {
+    const W = chart.width  = chart.clientWidth;
+    const H = chart.height = 180;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    if (roundData.length === 0) return;
+    const pad = 24;
+    const xs = roundData.length;
+    const stepX = (W - pad * 2) / Math.max(1, xs - 1);
+    function plot(getY, colour) {
+      ctx.strokeStyle = colour;
+      ctx.fillStyle = colour;
+      ctx.beginPath();
+      for (let i = 0; i < roundData.length; i++) {
+        const y = pad + (H - pad * 2) * (1 - getY(roundData[i]));
+        const x = pad + i * stepX;
+        if (i === 0) ctx.moveTo(x, y);
+        else         ctx.lineTo(x, y);
+        ctx.fillRect(x - 2, y - 2, 4, 4);
+      }
+      ctx.stroke();
+    }
+    plot(r => Math.max(0, Math.min(1, r.champion_fitness || 0)), '#cfa');
+    plot(r => Math.max(0, Math.min(1, r.champion_chain_q || 0)), '#4a8');
+    // sigmoid-normalised leaf logprob (already in roughly [0,1] via cfg)
+    plot(r => {
+      const lp = r.champion_leaf_logprob || -6;
+      return 1 / (1 + Math.exp(-(lp + 6) / 2));
+    }, '#48f');
+    // axis labels
+    ctx.fillStyle = '#666';
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.fillText('0', 4, H - pad + 4);
+    ctx.fillText('1', 4, pad + 4);
+  }
+
+  function startTournament() {
+    runIdx += 1;
+    stopRequested = false;
+    const fd = new FormData(form);
+    const params = new URLSearchParams();
+    for (const [k, v] of fd) {
+      params.append(k, v === 'on' ? '1' : v);
+    }
+    // checkboxes that weren't on come through as missing — flip semantics
+    if (!fd.get('include')) params.set('include', '0');
+    if (!fd.get('save'))    params.set('save',    '0');
+    // Auto-suffix the label per continuous run so saved slugs stay unique.
+    if (baseLabel === null) baseLabel = fd.get('label') || '';
+    if (continuousCb.checked) {
+      const suffixed = (baseLabel || 'cont') + '-r' + runIdx;
+      params.set('label', suffixed);
+    } else if (!fd.get('label')) {
+      params.delete('label');
+    }
+
+    if (evtSrc) evtSrc.close();
+    roundData = [];
+    totalRounds = parseInt(fd.get('rounds')) || 4;
+    renderBracket();
+    drawChart();
+    savedEl.innerHTML = '<span style="color:#666;">(running…)</span>';
+    logEl.textContent = '';
+    const runTag = continuousCb.checked ? ' (run ' + runIdx + ')' : '';
+    log('starting tournament' + runTag
+        + ' with ' + totalRounds + ' rounds…', 'ok');
+    goBtn.disabled = true; stopBtn.disabled = false;
+    statusEl.textContent = 'connecting…';
+
+    const url = "{% url 'spoeqi:metapact_tournament_stream' %}?" + params;
+    evtSrc = new EventSource(url);
+
+    evtSrc.addEventListener('meta', e => {
+      const d = JSON.parse(e.data);
+      log('config: ' + JSON.stringify(d.cfg), 'ok');
+      if (d.seed_slugs && d.seed_slugs.length)
+        log('seeded from existing metapacts: ' + d.seed_slugs.join(', '));
+      statusEl.textContent = 'running…';
+    });
+    evtSrc.addEventListener('tournament_begin', e => {
+      const d = JSON.parse(e.data);
+      log('tournament begin · ' + JSON.stringify(d));
+    });
+    evtSrc.addEventListener('round_begin', e => {
+      const d = JSON.parse(e.data);
+      roundData[d.round] = roundData[d.round] || {};
+      roundData[d.round].active = true;
+      renderBracket();
+      log('── round ' + d.round + ' (' + d.tag + ') · '
+          + d.contestants + ' contestants');
+    });
+    evtSrc.addEventListener('score', e => {
+      const d = JSON.parse(e.data);
+      roundData[d.round] = roundData[d.round] || {};
+      roundData[d.round].score_count =
+        (roundData[d.round].score_count || 0) + 1;
+      renderBracket();
+      statusEl.textContent = 'round ' + d.round + ' · scoring #' + d.idx
+                              + ' fit=' + d.fitness.toFixed(3);
+    });
+    evtSrc.addEventListener('round_end', e => {
+      const d = JSON.parse(e.data);
+      roundData[d.round] = Object.assign(roundData[d.round] || {}, {
+        active: false, done: true,
+        champion_fitness:       d.champion_fitness,
+        champion_chain_q:       d.champion_chain_q,
+        champion_leaf_logprob:  d.champion_leaf_logprob,
+        mean_fitness:           d.mean_fitness,
+      });
+      renderBracket();
+      drawChart();
+      log('✓ round ' + d.round + ' champion fit='
+          + d.champion_fitness.toFixed(4)
+          + ' (chain ' + d.champion_chain_q.toFixed(3)
+          + ', leaf ' + d.champion_leaf_logprob.toFixed(3) + ')', 'ok');
+    });
+    evtSrc.addEventListener('refine_begin', e => {
+      const d = JSON.parse(e.data);
+      statusEl.textContent = 'round ' + d.round + ' · refining survivor '
+                              + d.survivor;
+    });
+    evtSrc.addEventListener('refine_progress', e => {
+      const d = JSON.parse(e.data);
+      statusEl.textContent = 'round ' + d.round + ' · refine s'
+                              + d.survivor + ' gen ' + d.gen
+                              + ' best=' + d.best.toFixed(3);
+    });
+    evtSrc.addEventListener('refine_end', e => {
+      const d = JSON.parse(e.data);
+      log('  refine done: best=' + d.refined_fitness.toFixed(4));
+    });
+    evtSrc.addEventListener('saved', e => {
+      const d = JSON.parse(e.data);
+      if (savedEl.querySelector('span[style*="color:#666"]'))
+        savedEl.innerHTML = '';
+      const a = document.createElement('a');
+      a.href = '/spoeqi/metapact/' + encodeURIComponent(d.slug) + '/';
+      a.textContent = 'r' + d.round + ': ' + d.slug
+                      + ' (d4=' + d.class4_depth + ')';
+      a.target = '_blank';
+      savedEl.appendChild(a);
+      log('saved → ' + d.slug + '  (class4_depth=' + d.class4_depth + ')',
+          'ok');
+    });
+    evtSrc.addEventListener('error', e => {
+      const d = e.data ? JSON.parse(e.data) : null;
+      if (d) log('ERROR: ' + (d.msg || JSON.stringify(d)), 'err');
+    });
+    evtSrc.addEventListener('end', e => {
+      const d = JSON.parse(e.data);
+      log('★ tournament end · winner fit=' + d.winner_fitness.toFixed(4)
+          + ' · ' + d.elapsed_seconds.toFixed(1) + 's', 'ok');
+      statusEl.textContent = 'done · winner fit='
+                              + d.winner_fitness.toFixed(4)
+                              + (d.saved_slugs.length
+                                  ? ' · ' + d.saved_slugs.length + ' saved'
+                                  : '');
+      evtSrc.close(); evtSrc = null;
+      if (continuousCb.checked && !stopRequested) {
+        log('  ↻ continuous mode: chaining next run '
+            + '(previous winners auto-included as contestants)', 'ok');
+        statusEl.textContent = 'restarting in 1.5s… (continuous run ' + runIdx + ')';
+        setTimeout(startTournament, 1500);
+      } else {
+        goBtn.disabled = false; stopBtn.disabled = true;
+      }
+    });
+    evtSrc.onerror = () => {
+      log('SSE connection error', 'err');
+      goBtn.disabled = false; stopBtn.disabled = true;
+    };
+  }
+
+  function stopTournament() {
+    stopRequested = true;
+    if (evtSrc) { evtSrc.close(); evtSrc = null; }
+    statusEl.textContent = 'stopped' + (continuousCb.checked
+        ? ' (continuous loop broken)' : '');
+    log('stopped by user', 'warn');
+    goBtn.disabled = false; stopBtn.disabled = true;
+  }
+
+  goBtn  .addEventListener('click', startTournament);
+  stopBtn.addEventListener('click', stopTournament);
+  window.addEventListener('resize', drawChart);
+})();
+</script>
+{% endblock %}
