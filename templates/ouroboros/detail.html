@@ -28,7 +28,9 @@
   .panel h3 { margin-top: 0; }
 
   .ruleset-display { text-align: center; }
-  .ruleset-display img { width: 512px; height: 512px;
+  /* Only the primary ruleset image (direct child) is scaled to 512.
+     Nested <img> elements (packed view, etc.) keep their native size. */
+  .ruleset-display > img { width: 512px; height: 512px;
                              image-rendering: pixelated;
                              border: 1px solid #234; }
   .ruleset-display .caption {
