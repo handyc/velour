@@ -93,6 +93,7 @@ def ca_transformer_block_qkv(states: List[np.ndarray], *,
                               mlp_rule:  np.ndarray,
                               norm_rule: Optional[np.ndarray] = None,
                               norm_ticks: int = 2,
+                              mlp_ticks:  int = 2,
                               causal: bool = True,
                               top_k: int = 1,
                               trace: Optional[list] = None,
@@ -135,7 +136,7 @@ def ca_transformer_block_qkv(states: List[np.ndarray], *,
                 for s in states_a]
     if trace is not None:
         trace.append({'name': 'norm-mid', 'grid': normed2[-1]})
-    mlped = [ca_mlp(s, rule_table=mlp_rule, k_ticks=2, expand=True)
+    mlped = [ca_mlp(s, rule_table=mlp_rule, k_ticks=mlp_ticks, expand=True)
               for s in normed2]
     if trace is not None:
         trace.append({'name': 'mlp', 'grid': mlped[-1]})
@@ -311,6 +312,7 @@ def ca_forward_qkv(token_ids: List[int], *,
                     base_seed: int = 0xCAF0FE,
                     output_ticks: int = 2,
                     top_k: int = 1,
+                    tick_rates: Optional[Dict[str, int]] = None,
                     trace: Optional[list] = None,
                     ) -> np.ndarray:
     """End-to-end fully-CA forward pass.  Every step is a CA tick:
@@ -322,7 +324,14 @@ def ca_forward_qkv(token_ids: List[int], *,
         q, k, v, score, mix, merge, mlp
     Each value is a 16,384-byte rule table.  Defaults (when None) are
     auto-generated from `base_seed` so the model is runnable out of the
-    box; the GA picks better ones."""
+    box; the GA picks better ones.
+
+    ``tick_rates`` lets each rule run at its own clock — slow context
+    rules iterate more (richer attractors), fast working rules iterate
+    less (lighter transformation).  Recognised keys: 'norm' (default 2),
+    'mlp' (default 2), 'output' (default = output_ticks).  Setting
+    'norm': 8 with 'mlp': 1 is the canonical "slow norm, fast mlp"
+    multi-clock setup."""
     if not token_ids:
         return np.zeros(vocab_size, dtype=np.float64)
     if embed_rule is None:
@@ -345,6 +354,11 @@ def ca_forward_qkv(token_ids: List[int], *,
         norm_rule = default_norm_rule(base_seed ^ 0x8000)
     if output_rule is None:
         output_rule = default_output_rule(base_seed ^ 0x9000)
+    # Resolve per-rule tick rates.  None or missing key → defaults.
+    tr = tick_rates or {}
+    norm_ticks_eff = int(tr.get('norm', 2))
+    mlp_ticks_eff  = int(tr.get('mlp',  2))
+    output_ticks_eff = int(tr.get('output', output_ticks))
 
     # 1. Embed (CA).
     states = ca_embed_sequence(token_ids, embed_rule=embed_rule, side=side)
@@ -362,6 +376,8 @@ def ca_forward_qkv(token_ids: List[int], *,
                                             merge_rule=r['merge'],
                                             mlp_rule=r['mlp'],
                                             norm_rule=norm_rule,
+                                            norm_ticks=norm_ticks_eff,
+                                            mlp_ticks=mlp_ticks_eff,
                                             top_k=top_k,
                                             trace=block_trace)
         if trace is not None:
@@ -369,7 +385,8 @@ def ca_forward_qkv(token_ids: List[int], *,
                 trace.append({**item,
                                 'name': f'b{bi}-{item["name"]}'})
     # 3. Final layer-norm on the last token (CA).
-    final_last = ca_layer_norm_iterative(states[-1], norm_rule)
+    final_last = ca_layer_norm_iterative(states[-1], norm_rule,
+                                          k_ticks=norm_ticks_eff)
     if trace is not None:
         trace.append({'name': 'norm-final', 'grid': final_last})
     # 4. Output head (CA): diffuse + count cells.
@@ -378,13 +395,13 @@ def ca_forward_qkv(token_ids: List[int], *,
         # gives the user a visual of where logits come from.
         from .primitives import hex_ca_step
         out_work = final_last.copy().astype(np.uint8) & 3
-        for _ in range(output_ticks):
+        for _ in range(output_ticks_eff):
             out_work = hex_ca_step(out_work, output_rule)
         trace.append({'name': 'output', 'grid': out_work})
     return ca_output_head_iterative(final_last,
                                       output_rule=output_rule,
                                       vocab_size=vocab_size,
-                                      k_ticks=output_ticks)
+                                      k_ticks=output_ticks_eff)
 
 
 def nano_gpt(token_ids: List[int], *,

@@ -400,6 +400,54 @@ def hill_climb_origin(origin: bytes, contexts: List[List[int]],
     return bytes(arr), cur_score
 
 
+def collect_origin_fire_mask(origin: bytes, chain_depth: int,
+                              ticks_per_level: int, chain_mode: str
+                              ) -> np.ndarray:
+    """For an origin rule, find which LUT keys fire during chain
+    construction (the CA running on its own probe inits or self-LUT).
+    Returns bool mask of size 16,384.  This is the per-origin analogue
+    of collect_fire_masks — mutation should only flip these entries
+    because non-firing keys have zero effect on the chain levels.
+    """
+    from caformer import primitives as prim
+
+    rule_arr = np.frombuffer(origin, dtype=np.uint8).copy() & 3
+    fire_set: set = set()
+    orig_step = prim.hex_ca_step
+
+    def traced_step(state: np.ndarray, rule_table: np.ndarray) -> np.ndarray:
+        # We only care when the origin rule itself fires
+        if rule_table is rule_arr or (
+                rule_table.shape == rule_arr.shape
+                and np.array_equal(rule_table, rule_arr)):
+            keys = _compute_hex_keys(state.astype(np.uint8))
+            fire_set.update(np.unique(keys).tolist())
+        return orig_step(state, rule_table)
+
+    prim.hex_ca_step = traced_step
+    try:
+        # Recompute chain levels with tracing; reuse chain_levels logic
+        if chain_mode == 'ca_evolution':
+            for i in range(chain_depth):
+                state = _probe_init(origin, i).copy()
+                for _ in range(ticks_per_level):
+                    state = traced_step(state, rule_arr)
+        else:
+            current = rule_arr.copy()
+            for _ in range(chain_depth):
+                state = current.reshape(GRID_SIDE, GRID_SIDE).copy()
+                for _ in range(ticks_per_level):
+                    state = traced_step(state, current)
+                current = state.flatten() & 3
+    finally:
+        prim.hex_ca_step = orig_step
+
+    mask = np.zeros(RULE_SIZE, dtype=bool)
+    if fire_set:
+        mask[np.array(sorted(fire_set), dtype=np.int64)] = True
+    return mask
+
+
 def evolve_origin(start_origin: bytes,
                    contexts: List[List[int]],
                    target_byte: int, n_blocks: int,
@@ -409,6 +457,7 @@ def evolve_origin(start_origin: bytes,
                    chain_mode: str, argmax_bonus: float,
                    mu: int = 4, lam: int = 8, generations: int = 8,
                    mutation_min: int = 8, mutation_max: int = 64,
+                   smart_mutation: bool = False,
                    rng_seed: int = 0,
                    log: Callable[[str], None] = print,
                    ) -> Tuple[bytes, float]:
@@ -422,6 +471,18 @@ def evolve_origin(start_origin: bytes,
     rng = np.random.default_rng(rng_seed)
     base_arr = np.frombuffer(start_origin, dtype=np.uint8).copy() & 3
 
+    # Smart mutation: collect fire mask once for this origin family.
+    # The mask is recomputed per generation off the current best parent
+    # (because mutated origins fire different keys), but as a starting
+    # approximation we use the initial origin's mask and refresh only
+    # when the elite changes — cheap and good enough.
+    fire_mask: Optional[np.ndarray] = None
+    if smart_mutation:
+        fire_mask = collect_origin_fire_mask(
+            start_origin, chain_depth, ticks_per_level, chain_mode)
+        n_fire = int(fire_mask.sum())
+        log(f'    origin fire mask: {n_fire}/{RULE_SIZE} keys ({100*n_fire/RULE_SIZE:.1f}%)')
+
     def score(rule_bytes: bytes) -> float:
         return _score_token_origin(
             rule_bytes, contexts, target_byte, n_blocks, base,
@@ -430,7 +491,14 @@ def evolve_origin(start_origin: bytes,
 
     def mutate(parent: np.ndarray, n_flips: int) -> bytes:
         child = parent.copy()
-        idxs = rng.choice(RULE_SIZE, size=n_flips, replace=False)
+        if smart_mutation and fire_mask is not None and fire_mask.any():
+            # Sample n_flips from fired keys only (with replacement allowed
+            # if mask is small relative to n_flips).
+            fired_idxs = np.where(fire_mask)[0]
+            n = min(n_flips, fired_idxs.size)
+            idxs = rng.choice(fired_idxs, size=n, replace=False)
+        else:
+            idxs = rng.choice(RULE_SIZE, size=n_flips, replace=False)
         for k in idxs:
             old = int(child[k])
             new = old
