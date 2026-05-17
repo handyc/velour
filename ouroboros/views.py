@@ -500,3 +500,206 @@ def seed_bytes(request, pk: int):
     resp['Content-Disposition'] = (
         f'attachment; filename="quine-{pk}-seed.bin"')
     return resp
+
+
+# ─── Search-for-more-like-#122 ────────────────────────────────────────
+#
+# #122 is the canonical Ouroboros: a partial quine (sr ≈ 0.73) whose
+# 16-tick metachain stayed class-4 for 1919 levels with 131 distinct
+# orbit states before settling into a self-mapping fixed point.  Other
+# rules in the catalogue with similar properties — ga_run_length ≥ 500
+# and ga_distinct_levels ≥ 50 — qualify as "ouroboros-class" and
+# deserve the same showcase treatment.
+#
+# This page lets the user launch deep_chain_search (the same GA that
+# discovered #122) in the background and watch progress live.  New
+# champions automatically appear in the index.
+
+OUROBOROS_RUNLEN_THRESHOLD   = 500
+OUROBOROS_DISTINCT_THRESHOLD = 50
+
+
+def is_ouroboros_class(meta: dict) -> bool:
+    """Heuristic: ``ga_run_length`` ≥ 500 indicates the metachain
+    stayed class-4 for many levels; ``ga_distinct_levels`` ≥ 50 means
+    the orbit before convergence is rich (not a trivial short cycle).
+    Either condition alone qualifies — #122 hits both.
+    """
+    rl = int(meta.get('ga_run_length') or 0)
+    dl = int(meta.get('ga_distinct_levels') or 0)
+    return rl >= OUROBOROS_RUNLEN_THRESHOLD or dl >= OUROBOROS_DISTINCT_THRESHOLD
+
+
+def _search_log_dir():
+    """Where deep_chain_search subprocesses write progress logs."""
+    from django.conf import settings
+    p = settings.BASE_DIR / '.artifacts' / 'ouroboros_search'
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _active_search_pid() -> Optional[int]:
+    """Return the PID of a running search subprocess, if any.  Reads
+    the pidfile written by the launcher and verifies the process is
+    still alive via /proc."""
+    import os
+    pidfile = _search_log_dir() / 'current.pid'
+    if not pidfile.exists():
+        return None
+    try:
+        pid = int(pidfile.read_text().strip())
+    except (ValueError, OSError):
+        return None
+    if os.path.exists(f'/proc/{pid}'):
+        return pid
+    # Stale pidfile — clean up
+    try:
+        pidfile.unlink()
+    except OSError:
+        pass
+    return None
+
+
+@login_required
+def search(request):
+    """Form to launch a deep-chain GA search + status of any running one."""
+    import os
+    from django.contrib import messages
+    from django.shortcuts import redirect
+
+    if request.method == 'POST':
+        active = _active_search_pid()
+        if active:
+            messages.warning(request,
+                f'A search is already running (PID {active}).  Wait for it '
+                f'to finish or stop it on the status page.')
+            return redirect('ouroboros:search')
+
+        def _ci(name, d, lo, hi):
+            try: return max(lo, min(hi, int(request.POST.get(name, d))))
+            except (TypeError, ValueError): return d
+        mu      = _ci('mu',      4,   1,  16)
+        lam     = _ci('lam',     6,   1,  32)
+        gens    = _ci('gens',    30,  1, 500)
+        target  = _ci('target',  64,  8, 1024)
+        max_dep = _ci('max',     1024, 32, 16384)
+        save_rl = _ci('save_runlen', OUROBOROS_RUNLEN_THRESHOLD, 50, 8000)
+
+        import subprocess, sys
+        from django.conf import settings
+
+        log_dir = _search_log_dir()
+        ts = time.strftime('%Y-%m-%d-%H%M%S')
+        logfile = log_dir / f'search-{ts}.log'
+        pidfile = log_dir / 'current.pid'
+        latest_link = log_dir / 'latest.log'
+
+        cmd = [sys.executable,
+                str(settings.BASE_DIR / 'manage.py'),
+                'deep_chain_search',
+                '--mu', str(mu), '--lam', str(lam),
+                '--gens', str(gens),
+                '--target', str(target), '--max', str(max_dep),
+                '--metric', 'arbsigma',
+                '--save-runlen', str(save_rl)]
+        with logfile.open('w') as f:
+            f.write(f'# command: {" ".join(cmd)}\n')
+            f.write(f'# started: {time.strftime("%Y-%m-%d %H:%M:%S")}\n')
+            f.flush()
+            # Use PYTHONUNBUFFERED so Django's stdout flushes line-by-line
+            env = dict(os.environ, PYTHONUNBUFFERED='1')
+            proc = subprocess.Popen(
+                cmd, stdout=f, stderr=subprocess.STDOUT,
+                cwd=settings.BASE_DIR, env=env, start_new_session=True)
+        pidfile.write_text(str(proc.pid))
+        # Symlink latest.log → this log so the status tail always finds it.
+        try:
+            if latest_link.exists() or latest_link.is_symlink():
+                latest_link.unlink()
+            latest_link.symlink_to(logfile.name)
+        except OSError:
+            pass
+        messages.success(request,
+            f'Launched deep_chain_search (PID {proc.pid}): '
+            f'μ={mu}+λ={lam}, gens={gens}, target {target}→{max_dep}, '
+            f'save when run_length ≥ {save_rl}.')
+        return redirect('ouroboros:search')
+
+    # GET — render status + form
+    active_pid = _active_search_pid()
+    latest_log = _search_log_dir() / 'latest.log'
+    log_tail = ''
+    if latest_log.exists():
+        try:
+            txt = latest_log.read_text(errors='replace')
+            lines = txt.splitlines()
+            log_tail = '\n'.join(lines[-80:])
+        except OSError:
+            log_tail = ''
+
+    # Count ouroboros-class rules already in the catalogue.
+    from caformer.models import ComponentChampion
+    ouro_rules: list = []
+    for c in (ComponentChampion.objects
+              .filter(component_slug=QUINE_SLUG)
+              .only('pk', 'fitness', 'notes', 'rules_blob')
+              .order_by('-pk')):
+        m = _quine_meta(c)
+        if is_ouroboros_class(m):
+            ouro_rules.append({
+                'pk':              c.pk,
+                'sha':             _short_sha(bytes(c.rules_blob))
+                                       if c.rules_blob else '',
+                'fitness':         c.fitness or 0.0,
+                'ga_run_length':   m.get('ga_run_length') or 0,
+                'ga_distinct_levels': m.get('ga_distinct_levels') or 0,
+                'arbsigma':        float(m.get('arbsigma') or 0.0),
+                'display_name':    m.get('display_name') or '',
+            })
+    ouro_rules.sort(key=lambda r: -r['ga_run_length'])
+
+    return render(request, 'ouroboros/search.html', {
+        'active_pid':  active_pid,
+        'log_tail':    log_tail,
+        'ouro_rules':  ouro_rules,
+        'thresholds': {
+            'run_length':       OUROBOROS_RUNLEN_THRESHOLD,
+            'distinct_levels':  OUROBOROS_DISTINCT_THRESHOLD,
+        },
+    })
+
+
+@login_required
+def search_stop(request):
+    """Send SIGTERM to the running search subprocess."""
+    import os, signal
+    from django.contrib import messages
+    from django.shortcuts import redirect
+
+    pid = _active_search_pid()
+    if pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            messages.success(request, f'sent SIGTERM to PID {pid}')
+        except OSError as e:
+            messages.warning(request, f'failed to signal PID {pid}: {e}')
+    else:
+        messages.warning(request, 'no active search to stop')
+    return redirect('ouroboros:search')
+
+
+@login_required
+def search_tail(request):
+    """JSON endpoint for the status page to poll the latest log tail."""
+    latest_log = _search_log_dir() / 'latest.log'
+    txt = ''
+    if latest_log.exists():
+        try:
+            data = latest_log.read_text(errors='replace')
+            txt = '\n'.join(data.splitlines()[-120:])
+        except OSError:
+            txt = ''
+    return JsonResponse({
+        'active_pid': _active_search_pid(),
+        'log_tail':   txt,
+    })

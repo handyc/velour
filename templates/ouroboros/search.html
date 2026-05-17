@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block title %}ouroboros — search{% endblock %}
+{% block content %}
+<style>
+  .o-page { max-width: 70em; }
+  .o-page h1 { margin: 0 0 0.4rem 0; }
+  .o-page p.lede { color: #aaa; font-size: 0.9rem; max-width: 56em; }
+  .o-card { padding: 0.9rem 1rem; background: #0d1117; border: 1px solid #234;
+              margin: 0.8rem 0; }
+  .o-card h2 { font-size: 1rem; margin: 0 0 0.6rem 0; color: #c9d1d9; }
+  .o-form { display: flex; gap: 0.7rem; align-items: center; flex-wrap: wrap; }
+  .o-form label { color: #8b949e; font-size: 0.85rem; }
+  .o-form input[type=number] { width: 5rem; background: #0d1117; color: #c9d1d9;
+                                   border: 1px solid #30363d; padding: 0.2rem 0.4rem;
+                                   font-family: ui-monospace, monospace; }
+  .o-form button { background: #238636; color: #fff; border: 0;
+                     padding: 0.35rem 0.9rem; cursor: pointer;
+                     font-family: inherit; }
+  .o-form button.danger { background: #a82a2a; }
+  .o-status { font-family: ui-monospace, monospace; font-size: 0.78rem;
+                background: #010409; color: #c9d1d9;
+                border: 1px solid #21262d; padding: 0.7rem 0.9rem;
+                white-space: pre-wrap; max-height: 32em; overflow-y: auto; }
+  .o-status .empty { color: #6e7681; font-style: italic; }
+  .o-active { color: #d29922; font-weight: 600; }
+  .o-idle   { color: #6e7681; font-style: italic; }
+  .o-msg { color: #cfa; font-size: 0.85rem;
+              padding: 0.5rem 0.8rem; background: #112; border: 1px solid #234;
+              margin: 0.6rem 0; }
+  .o-msg.warn { color: #f9c; background: #211; border-color: #432; }
+  .o-rules { width: 100%; border-collapse: collapse; font-size: 0.85rem;
+              font-family: ui-monospace, monospace; margin-top: 0.4rem; }
+  .o-rules th, .o-rules td { padding: 0.3rem 0.6rem;
+                                 border-bottom: 1px solid #21262d;
+                                 text-align: right; vertical-align: middle; }
+  .o-rules th { color: #8b949e; text-transform: uppercase;
+                   font-size: 0.7rem; letter-spacing: 0.05em; }
+  .o-rules td.l { text-align: left; }
+  .o-rules td.thumb { padding: 0.2rem; text-align: center; }
+  .o-rules a { color: #79c0ff; text-decoration: none; }
+  .o-thumb { display: inline-block; width: 32px; height: 32px;
+              image-rendering: pixelated; image-rendering: crisp-edges;
+              border: 1px solid #30363d; background: #000; }
+  .o-rules .sha { color: #6e7681; font-size: 0.78em; }
+  .o-rules .dn  { color: #d29922; font-style: italic; }
+</style>
+
+<div class="o-page">
+  <h1>ouroboros — search for more like #122</h1>
+  <p class="lede">
+    <strong>#122</strong> is the canonical Ouroboros: a partial quine
+    (SR≈0.73) whose 16-tick metachain stayed class-4 for 1919 levels
+    with 131 distinct orbit states before settling into a self-mapping
+    fixed point.  This page launches the same GA that discovered it
+    (<code>spoeqi.deep_chain_search</code>) to hunt for more rules
+    with comparable depth and orbit richness — anything with
+    <code>ga_run_length ≥ {{ thresholds.run_length }}</code> or
+    <code>ga_distinct_levels ≥ {{ thresholds.distinct_levels }}</code>
+    qualifies as ouroboros-class.
+  </p>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="o-msg {% if m.level_tag == 'warning' %}warn{% endif %}">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <div class="o-card">
+    <h2>search status</h2>
+    {% if active_pid %}
+      <p class="o-active">▶ search running — PID {{ active_pid }}</p>
+      <form method="post" action="{% url 'ouroboros:search_stop' %}"
+              style="margin-bottom:0.6rem;">
+        {% csrf_token %}
+        <button type="submit" class="danger" style="background:#a82a2a; color:#fff; border:0;
+                                                       padding:0.3rem 0.9rem; cursor:pointer;
+                                                       font-family:inherit;">■ stop (SIGTERM)</button>
+      </form>
+    {% else %}
+      <p class="o-idle">no active search</p>
+    {% endif %}
+
+    <div id="o-tail" class="o-status">{% if log_tail %}{{ log_tail }}{% else %}<span class="empty">(no log yet)</span>{% endif %}</div>
+  </div>
+
+  <div class="o-card">
+    <h2>launch new search</h2>
+    <form class="o-form" method="post" action="">
+      {% csrf_token %}
+      <label title="Parents kept per generation (μ).">
+        μ <input type="number" name="mu" value="4" min="1" max="16">
+      </label>
+      <label title="Children per generation (λ).">
+        λ <input type="number" name="lam" value="6" min="1" max="32">
+      </label>
+      <label title="Generations of (μ+λ) ES.  ~30s per gen at depth 64.">
+        gens <input type="number" name="gens" value="30" min="1" max="500">
+      </label>
+      <label title="Starting chain-depth target.  Auto-promotes as fitness saturates.">
+        start depth <input type="number" name="target" value="64" min="8" max="1024">
+      </label>
+      <label title="Maximum chain-depth target.  GA stops promoting at this.">
+        max depth <input type="number" name="max" value="2048" min="32" max="16384">
+      </label>
+      <label title="Persist candidates whose chain run length reaches this.
+500 ≈ #122-class. Lower to save more (and noisier) candidates.">
+        save when run ≥
+        <input type="number" name="save_runlen" value="{{ thresholds.run_length }}"
+                 min="50" max="8000">
+      </label>
+      <button type="submit"{% if active_pid %} disabled
+                title="A search is already running"{% endif %}>▶ launch</button>
+    </form>
+    <p style="color:#888; font-size:0.8rem; margin-top:0.6rem;">
+      Runs <code>manage.py deep_chain_search</code> as a background
+      subprocess.  New champions persist to the
+      <code>ComponentChampion(class4_quine)</code> table as they're
+      found and immediately show up in the ouroboros index.  Runtime
+      scales with <em>gens × λ × target_depth</em>; default config
+      ≈ 15 min on this host.  The status panel above auto-polls every 3s.
+    </p>
+  </div>
+
+  <div class="o-card">
+    <h2>ouroboros-class candidates ({{ ouro_rules|length }})</h2>
+    {% if ouro_rules %}
+      <table class="o-rules">
+        <thead>
+          <tr>
+            <th></th><th>#</th><th>SR</th><th>SRarbσ</th>
+            <th>chain run</th><th>distinct</th>
+            <th class="l">display name</th><th class="l">sha</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for r in ouro_rules %}
+          <tr>
+            <td class="thumb">
+              <a href="{% url 'ouroboros:detail' pk=r.pk %}">
+                <img class="o-thumb"
+                       src="{% url 'ouroboros:ruleset_png' pk=r.pk %}?scale=1"
+                       alt="LUT {{ r.pk }}" loading="lazy">
+              </a>
+            </td>
+            <td><a href="{% url 'ouroboros:detail' pk=r.pk %}">{{ r.pk }}</a></td>
+            <td style="color:#7ee787;">{{ r.fitness|floatformat:4 }}</td>
+            <td>{{ r.arbsigma|floatformat:4 }}</td>
+            <td style="color:#d29922;">{{ r.ga_run_length }}</td>
+            <td>{{ r.ga_distinct_levels }}</td>
+            <td class="l dn">{{ r.display_name|default:"—" }}</td>
+            <td class="l sha">{{ r.sha }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p style="color:#8b949e; font-style:italic;">
+        No ouroboros-class rules in the catalogue yet (besides #122,
+        which is what you're looking for more of).  Launch a search above.
+      </p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+// Poll search status every 3 s while a job is active.
+(function () {
+  var tailEl = document.getElementById('o-tail');
+  var active = {% if active_pid %}true{% else %}false{% endif %};
+  if (!active) return;
+  function poll() {
+    fetch('{% url "ouroboros:search_tail" %}', {credentials: 'same-origin'})
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.log_tail) {
+          tailEl.textContent = d.log_tail;
+          // Scroll to bottom for live tail effect.
+          tailEl.scrollTop = tailEl.scrollHeight;
+        }
+        if (d.active_pid) {
+          setTimeout(poll, 3000);
+        } else {
+          // Job ended — reload to refresh stats + button states.
+          setTimeout(function () { window.location.reload(); }, 1500);
+        }
+      })
+      .catch(function () { setTimeout(poll, 5000); });
+  }
+  setTimeout(poll, 3000);
+})();
+</script>
+{% endblock %}

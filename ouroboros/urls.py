@@ -7,6 +7,9 @@ app_name = 'ouroboros'
 
 urlpatterns = [
     path('',                    views.index,         name='index'),
+    path('search/',             views.search,        name='search'),
+    path('search/stop/',        views.search_stop,   name='search_stop'),
+    path('search/tail/',        views.search_tail,   name='search_tail'),
     path('<int:pk>/',           views.detail,        name='detail'),
     path('<int:pk>/annotate/',  views.annotate,      name='annotate'),
     path('<int:pk>/seed.bin',   views.seed_bytes,    name='seed_bytes'),

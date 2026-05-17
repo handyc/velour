@@ -40,7 +40,14 @@
 </style>
 
 <div class="ouro-page">
-  <h1>Ouroboros</h1>
+  <h1>Ouroboros
+    <a href="{% url 'ouroboros:search' %}"
+        style="float:right; font-size:0.6em; font-weight:400;
+                background:#238636; color:#fff; padding:0.3em 0.8em;
+                text-decoration:none; border-radius:3px;">
+      ▶ search for more
+    </a>
+  </h1>
   <p class="lede">
     The class-4 metachain quines.  Each entry below is a 16,384-byte
     K=4 hex CA rule whose LUT, reshaped as a 128×128 grid, becomes its
