@@ -135,8 +135,10 @@
 {# ─── Flower pages ─────────────────────────────────────────── #}
 {% for i in flower_page_indices %}
   <div class="pj-page pj-flower-page">
-    {# Fetch each flower page as a standalone SVG.  <object> lets the
-       browser pick up the SVG's own dimensions for clean scaling. #}
+    {% comment %}
+      Fetch each flower page as a standalone SVG.  <object> lets the
+      browser pick up the SVG's own dimensions for clean scaling.
+    {% endcomment %}
     <object data="{{ flower_base }}&amp;fpage={{ i }}"
               type="image/svg+xml" width="100%" height="100%"></object>
   </div>
