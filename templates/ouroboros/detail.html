@@ -173,6 +173,76 @@
     })();
   </script>
 
+  <script>
+    /* ── Palette pickers ───────────────────────────────────────────
+     * Four <input type="color"> elements drive the K=4 palette.
+     * On change we rewrite the src of every <img data-base-url=…> on
+     * the page, appending c0/c1/c2/c3 query params.  The choice is
+     * persisted to localStorage so it survives navigation between
+     * ouroboros pages within the same browser. */
+    (function () {
+      const DEFAULTS = ['#dc5028', '#3c78d2', '#50b45a', '#e6c83c'];
+      const STORAGE_KEY = 'ouroboros:palette';
+      const pickers = Array.from(document.querySelectorAll('input.oud-color'));
+      const resetBtn = document.getElementById('oud-palette-reset');
+      const rngBtn   = document.getElementById('oud-palette-random');
+      if (pickers.length !== 4) return;
+
+      function readSaved () {
+        try {
+          const j = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+          if (Array.isArray(j) && j.length === 4
+                && j.every(s => /^#[0-9a-f]{6}$/i.test(s))) return j;
+        } catch (e) {}
+        return DEFAULTS.slice();
+      }
+      function savePal (p) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); }
+        catch (e) {}
+      }
+      function applyToImages (p) {
+        const qs = 'c0=' + p[0].slice(1) + '&c1=' + p[1].slice(1)
+                + '&c2=' + p[2].slice(1) + '&c3=' + p[3].slice(1);
+        document.querySelectorAll('img[data-base-url]').forEach(img => {
+          const base = img.getAttribute('data-base-url') || '';
+          const sep = base.includes('?') ? '&' : '?';
+          img.src = base + sep + qs;
+        });
+      }
+      function currentPal () {
+        return pickers.map(p => p.value.toLowerCase());
+      }
+      function setPal (p) {
+        pickers.forEach((pk, i) => { pk.value = p[i]; });
+        savePal(p);
+        applyToImages(p);
+      }
+
+      // Initialise from localStorage (or defaults) on load.
+      const startPal = readSaved();
+      pickers.forEach((pk, i) => { pk.value = startPal[i]; });
+      if (startPal.some((c, i) => c.toLowerCase() !== DEFAULTS[i].toLowerCase())) {
+        applyToImages(startPal);   // only swap URLs if user has a custom palette
+      }
+
+      pickers.forEach(pk => {
+        pk.addEventListener('input', () => {
+          const p = currentPal();
+          savePal(p);
+          applyToImages(p);
+        });
+      });
+      if (resetBtn) resetBtn.addEventListener('click', () => setPal(DEFAULTS.slice()));
+      if (rngBtn) rngBtn.addEventListener('click', () => {
+        function rnd () {
+          return '#' + Math.floor(Math.random() * 0xffffff)
+                            .toString(16).padStart(6, '0');
+        }
+        setPal([rnd(), rnd(), rnd(), rnd()]);
+      });
+    })();
+  </script>
+
   {% if is_featured %}
   <div class="featured-banner">
     <b>★ This is the canonical Ouroboros seed.</b>
@@ -202,12 +272,54 @@
     <div>
       <div class="panel ruleset-display">
         <h3>The ruleset as its own initial condition</h3>
-        <img src="{% url 'ouroboros:ruleset_png' pk=pk %}?scale=4"
+        <img id="oud-ruleset-img"
+              src="{% url 'ouroboros:ruleset_png' pk=pk %}?scale=4"
+              data-base-url="{% url 'ouroboros:ruleset_png' pk=pk %}?scale=4"
               alt="Quine #{{ pk }} LUT as 128×128 image">
         <div class="caption">
           16,384 bytes (= 128²) painted with the 4-colour palette.
           This image, fed back into the rule's own dynamics, produces
           the next level of the chain.
+        </div>
+        {# ── Palette pickers — drive every chained-img on the page ── #}
+        <div class="oud-palette" style="margin-top:0.6rem; display:flex;
+                      gap:0.6rem; align-items:center; justify-content:center;
+                      flex-wrap:wrap; font-family:ui-monospace,monospace;
+                      font-size:0.8rem; color:#8b949e;">
+          <span>palette:</span>
+          {% for css in '#dc5028,#3c78d2,#50b45a,#e6c83c'|cut:' '|stringformat:'s' %}{% endfor %}
+          <label style="display:flex; align-items:center; gap:0.25rem;">
+            0
+            <input type="color" class="oud-color" data-idx="0" value="#dc5028"
+                    style="width:32px; height:24px; border:1px solid #30363d;
+                            background:#0d1117; padding:0; cursor:pointer;">
+          </label>
+          <label style="display:flex; align-items:center; gap:0.25rem;">
+            1
+            <input type="color" class="oud-color" data-idx="1" value="#3c78d2"
+                    style="width:32px; height:24px; border:1px solid #30363d;
+                            background:#0d1117; padding:0; cursor:pointer;">
+          </label>
+          <label style="display:flex; align-items:center; gap:0.25rem;">
+            2
+            <input type="color" class="oud-color" data-idx="2" value="#50b45a"
+                    style="width:32px; height:24px; border:1px solid #30363d;
+                            background:#0d1117; padding:0; cursor:pointer;">
+          </label>
+          <label style="display:flex; align-items:center; gap:0.25rem;">
+            3
+            <input type="color" class="oud-color" data-idx="3" value="#e6c83c"
+                    style="width:32px; height:24px; border:1px solid #30363d;
+                            background:#0d1117; padding:0; cursor:pointer;">
+          </label>
+          <button type="button" id="oud-palette-reset"
+                    style="background:#21262d; color:#c9d1d9; border:1px solid #30363d;
+                            padding:0.15rem 0.5rem; cursor:pointer; font-family:inherit;
+                            font-size:0.75rem;">reset</button>
+          <button type="button" id="oud-palette-random"
+                    style="background:#1f6feb; color:#fff; border:none;
+                            padding:0.15rem 0.55rem; cursor:pointer; font-family:inherit;
+                            font-size:0.75rem;">🎲 random</button>
         </div>
         <div style="margin-top:0.9rem; display:flex; gap:0.9rem;
                       align-items:flex-start; flex-wrap:wrap;">
@@ -387,6 +499,7 @@
     {% for l in levels|slice:":40" %}
       <div class="cell{% if l.ok %} ok{% endif %}{% if l.note %} fp{% endif %}">
         <img src="{% url 'ouroboros:chain_level_png' pk=pk level=l.level %}?scale=1"
+              data-base-url="{% url 'ouroboros:chain_level_png' pk=pk level=l.level %}?scale=1"
               alt="L{{ l.level }}"
               title="L{{ l.level }}{% if l.class %} · cls={{ l.class }}{% endif %}">
         L{{ l.level }}{% if l.note %} ★{% endif %}

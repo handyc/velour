@@ -31,6 +31,36 @@ _PALETTE_RGB = [
 ]
 
 
+def _parse_palette_from_request(request) -> list[tuple[int, int, int]]:
+    """Allow per-request palette override via query params.
+
+    Accepts either four ?c0= ?c1= ?c2= ?c3= hex strings (with or
+    without leading '#') or a single ?pal=RRGGBB,RRGGBB,RRGGBB,RRGGBB.
+    Falls back to the default _PALETTE_RGB for any colour we can't
+    parse.
+    """
+    out = list(_PALETTE_RGB)
+    pal = (request.GET.get('pal') or '').strip()
+    if pal:
+        parts = [p.strip().lstrip('#') for p in pal.split(',')]
+        for i, p in enumerate(parts[:4]):
+            try:
+                if len(p) == 6:
+                    out[i] = (int(p[0:2], 16), int(p[2:4], 16),
+                                  int(p[4:6], 16))
+            except (ValueError, IndexError):
+                pass
+    for i in range(4):
+        v = (request.GET.get(f'c{i}') or '').strip().lstrip('#')
+        if len(v) == 6:
+            try:
+                out[i] = (int(v[0:2], 16), int(v[2:4], 16),
+                              int(v[4:6], 16))
+            except ValueError:
+                pass
+    return out
+
+
 def _quine_qs():
     from caformer.models import ComponentChampion
     return ComponentChampion.objects.filter(component_slug=QUINE_SLUG)
@@ -413,10 +443,11 @@ def ruleset_png(request, pk: int):
     c = get_object_or_404(_quine_qs(), pk=pk)
     seed = bytes(c.rules_blob)
     arr = bytes(b & 3 for b in seed)
+    palette = _parse_palette_from_request(request)
     img = Image.new('RGB', (128, 128))
     px = img.load()
     for i, v in enumerate(arr):
-        r, g, b = _PALETTE_RGB[v]
+        r, g, b = palette[v]
         px[i % 128, i // 128] = (r, g, b)
 
     # Optional upscale
@@ -518,10 +549,11 @@ def chain_level_png(request, pk: int, level: int):
             state = hex_ca_step(state, current)
         current = state.flatten() & 3
     arr = bytes(current.tolist())
+    palette = _parse_palette_from_request(request)
     img = Image.new('RGB', (128, 128))
     px = img.load()
     for i, v in enumerate(arr):
-        r, g, b = _PALETTE_RGB[v]
+        r, g, b = palette[v]
         px[i % 128, i // 128] = (r, g, b)
     try:
         scale = max(1, min(8, int(request.GET.get('scale', 4))))

@@ -101,6 +101,7 @@
       <a href="{% url 'ouroboros:detail' pk=seed_pk %}">
         <img class="preview"
               src="{% url 'ouroboros:ruleset_png' pk=seed_pk %}?scale=2"
+              data-base-url="{% url 'ouroboros:ruleset_png' pk=seed_pk %}?scale=2"
               alt="quine #{{ seed_pk }} LUT-as-image">
       </a>
       <div class="stats">
@@ -125,6 +126,7 @@
       <a href="{% url 'ouroboros:detail' pk=fp_pk %}">
         <img class="preview"
               src="{% url 'ouroboros:ruleset_png' pk=fp_pk %}?scale=2"
+              data-base-url="{% url 'ouroboros:ruleset_png' pk=fp_pk %}?scale=2"
               alt="quine #{{ fp_pk }} LUT-as-image">
       </a>
       <div class="stats">
@@ -197,6 +199,7 @@
     {% for s in snapshots %}
       <div class="disc-snap {% if s.is_fp %}fp{% endif %}">
         <img src="{% url 'ouroboros:chain_level_png' pk=seed_pk level=s.L %}?scale=1"
+              data-base-url="{% url 'ouroboros:chain_level_png' pk=seed_pk level=s.L %}?scale=1"
               alt="L{{ s.L }} of #{{ seed_pk }}">
         <div class="lab">L{{ s.L }}{% if s.is_fp %} · R★{% endif %}</div>
         <div>sha {{ s.sha8 }}</div>
@@ -284,4 +287,26 @@
   </p>
 
 </div>
+
+<script>
+  /* Apply any palette the user picked on /ouroboros/<pk>/ to the
+     images on this page too — no pickers here, just consume the
+     saved palette from localStorage. */
+  (function () {
+    var raw;
+    try { raw = localStorage.getItem('ouroboros:palette'); } catch (e) { return; }
+    if (!raw) return;
+    var p;
+    try { p = JSON.parse(raw); } catch (e) { return; }
+    if (!Array.isArray(p) || p.length !== 4) return;
+    if (!p.every(function (s) { return /^#[0-9a-f]{6}$/i.test(s); })) return;
+    var qs = 'c0=' + p[0].slice(1) + '&c1=' + p[1].slice(1)
+            + '&c2=' + p[2].slice(1) + '&c3=' + p[3].slice(1);
+    document.querySelectorAll('img[data-base-url]').forEach(function (img) {
+      var base = img.getAttribute('data-base-url') || '';
+      var sep = base.includes('?') ? '&' : '?';
+      img.src = base + sep + qs;
+    });
+  })();
+</script>
 {% endblock %}
