@@ -464,6 +464,7 @@
       <div class="gen{% if a.pk == pk %} this-row{% endif %}">
         <a href="{% url 'ouroboros:detail' pk=a.pk %}">
           <img class="thumb" src="{% url 'ouroboros:ruleset_png' pk=a.pk %}?scale=1"
+                data-base-url="{% url 'ouroboros:ruleset_png' pk=a.pk %}?scale=1"
                 alt="">
           #{{ a.pk }}
         </a>
