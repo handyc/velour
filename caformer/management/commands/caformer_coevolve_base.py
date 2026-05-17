@@ -41,9 +41,13 @@ class Command(BaseCommand):
         parser.add_argument('--mu', type=int, default=3)
         parser.add_argument('--mut-rate', type=float, default=0.003)
         parser.add_argument('--seed', type=int, default=0xC0E0_0001)
+        parser.add_argument('--fitness', choices=['lp', 'matches'], default='lp',
+                              help='fitness mode: lp (smooth, default) or matches (legacy step)')
+        parser.add_argument('--no-smart-mutation', action='store_true',
+                              help='disable smart mutation (use untargeted random flips)')
 
     def handle(self, *args, pairs, depth, ticks, select_n, pop, gens, mu,
-                 mut_rate, seed, alt_rounds, **opts):
+                 mut_rate, seed, alt_rounds, fitness, no_smart_mutation, **opts):
         try:
             pair_ids = [int(x) for x in pairs.split(',')]
         except ValueError:
@@ -57,7 +61,8 @@ class Command(BaseCommand):
             pair_ids=pair_ids, chain_depth=depth, ticks_per_level=ticks,
             select_n=select_n, pop_size=pop, generations=gens, mu=mu,
             mutation_rate=mut_rate, rng_seed=seed,
-            alt_rounds=alt_rounds, log=_log,
+            alt_rounds=alt_rounds, fitness_mode=fitness,
+            smart_mutation=not no_smart_mutation, log=_log,
         )
         result = coevolve_base(cfg)
 

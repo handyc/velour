@@ -617,16 +617,117 @@ def _pretty(b: int) -> str:
 # the byte range we actually need.  Storage of base rules is 36,864 B
 # packed, shared across ALL pairs forever.
 
+def _compute_hex_keys(state: np.ndarray) -> np.ndarray:
+    """Reconstruct the 14-bit LUT keys hex_ca_step accesses for a given
+    state.  Same indexing scheme — see caformer.primitives.hex_ca_step
+    for the full derivation.  Returns uint16 array of same shape."""
+    H, W = state.shape
+    n_up   = np.roll(state, 1, axis=0)
+    n_dn   = np.roll(state, -1, axis=0)
+    n_l    = np.roll(state, 1, axis=1)
+    n_r    = np.roll(state, -1, axis=1)
+    n_up_l = np.roll(n_up, 1, axis=1)
+    n_up_r = np.roll(n_up, -1, axis=1)
+    n_dn_l = np.roll(n_dn, 1, axis=1)
+    n_dn_r = np.roll(n_dn, -1, axis=1)
+    rows = np.arange(H)[:, None]
+    even = (rows & 1) == 0
+    n_nw = np.where(even, n_up_l, n_up)
+    n_ne = np.where(even, n_up,   n_up_r)
+    n_sw = np.where(even, n_dn_l, n_dn)
+    n_se = np.where(even, n_dn,   n_dn_r)
+    return ((state.astype(np.uint16) << 12)
+             | (n_nw.astype(np.uint16) << 10)
+             | (n_ne.astype(np.uint16) << 8)
+             | (n_r.astype(np.uint16) << 6)
+             | (n_se.astype(np.uint16) << 4)
+             | (n_sw.astype(np.uint16) << 2)
+             | n_l.astype(np.uint16))
+
+
+def collect_fire_masks(base: Dict[str, np.ndarray],
+                        chains: Dict[int, List[np.ndarray]],
+                        contexts_by_token: Dict[int, List[Tuple[List[int], int]]],
+                        n_blocks_by_pair: Dict[int, int],
+                        ) -> Dict[str, np.ndarray]:
+    """For each base rule, find which 14-bit LUT entries actually get
+    accessed during forward passes on the corpus.  Returns
+    ``{rule_name: bool_mask}`` where bool_mask[k] = True iff key k
+    fires somewhere in the trace.
+
+    Monkey-patches ``caformer.primitives.hex_ca_step`` for the duration
+    of the trace pass; restores on exit even if the body raises.  Uses
+    object identity (``id()``) to map rule_table arrays back to their
+    name in the base dict.
+    """
+    from caformer import primitives as prim
+
+    name_by_id = {id(v): k for k, v in base.items()}
+    fire_sets: Dict[str, set] = {k: set() for k in base}
+    orig_step = prim.hex_ca_step
+
+    def traced_step(state: np.ndarray, rule_table: np.ndarray) -> np.ndarray:
+        name = name_by_id.get(id(rule_table))
+        if name is not None:
+            keys = _compute_hex_keys(state.astype(np.uint8))
+            fire_sets[name].update(np.unique(keys).tolist())
+        return orig_step(state, rule_table)
+
+    # Both prim.hex_ca_step (used inside primitives.py) AND
+    # xfm.hex_ca_step (imported into transformer.py) must be patched
+    # for the trace to capture all firings.  Restore both in finally.
+    import caformer.transformer as xfm
+    orig_step_xfm = xfm.hex_ca_step
+    prim.hex_ca_step = traced_step
+    xfm.hex_ca_step = traced_step
+    try:
+        block_tmpls: Dict[int, list] = {}
+        for nb in set(n_blocks_by_pair.values()):
+            block_tmpls[nb] = [{k: base[k] for k in
+                                  ('q', 'k', 'v', 'score', 'mix', 'merge', 'mlp')}
+                                  ] * nb
+        for tb, items in contexts_by_token.items():
+            chain = chains[tb]
+            for ctx, pair_id in items:
+                nb = n_blocks_by_pair[pair_id]
+                for rule in chain:
+                    ca_forward_qkv(
+                        ctx, n_blocks=nb,
+                        embed_rule=base['embed'],
+                        block_rules=block_tmpls[nb],
+                        norm_rule=base['norm'],
+                        output_rule=rule, vocab_size=256)
+    finally:
+        prim.hex_ca_step = orig_step
+        xfm.hex_ca_step = orig_step_xfm
+
+    masks: Dict[str, np.ndarray] = {}
+    for k, s in fire_sets.items():
+        mask = np.zeros(RULE_SIZE, dtype=bool)
+        if s:
+            mask[np.array(sorted(s), dtype=np.int64)] = True
+        masks[k] = mask
+    return masks
+
+
 def corpus_argmax_matches(base: Dict[str, np.ndarray],
                            chains: Dict[int, List[np.ndarray]],
                            contexts_by_token: Dict[int, List[Tuple[List[int], int]]],
                            n_blocks_by_pair: Dict[int, int],
                            argmax_bonus: float = 0.0,
+                           fitness_mode: str = 'matches',
                            ) -> Tuple[int, float]:
-    """Score a candidate base across a corpus.  For each (ctx, n_blocks,
-    target_byte) we scan that token's chain, pick the level whose
-    logits argmax closest to target_byte (best argmax-match wins; on
-    tie, highest log_p), and accumulate (#matches, sum_log_p).
+    """Score a candidate base across a corpus.  Two modes:
+
+    - ``matches`` (legacy): pick chain level that argmax-matches the
+      target (with lp as tie-breaker).  Returns (matches, sum_lp);
+      sort GA pop by this tuple.  Creates a step function at the
+      match boundary — what stalls vanilla GA.
+
+    - ``lp`` (smooth): pick chain level with highest pure lp.  Returns
+      (matches, sum_lp) where matches is still measured but NOT the
+      primary objective; sort GA pop by sum_lp only.  Smooth landscape
+      everywhere — any cell-distribution change propagates to lp.
 
     ``contexts_by_token[tb]`` = list of (ctx_bytes, pair_id) tuples;
     we use pair_id to look up the right n_blocks.  Chains were
@@ -634,7 +735,6 @@ def corpus_argmax_matches(base: Dict[str, np.ndarray],
     """
     matches = 0
     total_lp = 0.0
-    # Pre-build block templates per n_blocks value (cheap).
     block_tmpls: Dict[int, list] = {}
     for nb in set(n_blocks_by_pair.values()):
         block_tmpls[nb] = [{k: base[k] for k in
@@ -661,10 +761,16 @@ def corpus_argmax_matches(base: Dict[str, np.ndarray],
                 lp = float(np.log(max(p_true, 1e-30)))
                 argmax = int(np.argmax(logits))
                 match = 1 if argmax == tb else 0
-                # Prefer matches; among matches/non-matches pick highest lp.
-                if (match, lp) > (best_match, best_lp):
-                    best_match = match
-                    best_lp = lp
+                if fitness_mode == 'lp':
+                    # Pure lp selection: take highest-lp level regardless of match
+                    if lp > best_lp:
+                        best_lp = lp
+                        best_match = match
+                else:
+                    # Legacy: match-first tuple sort
+                    if (match, lp) > (best_match, best_lp):
+                        best_match = match
+                        best_lp = lp
             matches += best_match
             total_lp += best_lp
     return matches, total_lp
@@ -682,7 +788,9 @@ class CoevolveConfig:
     generations:   int = 8                # base-GA generations per alt-round
     alt_rounds:    int = 1                # full select+GA alternations
     mu:            int = 3                # elite carried over
-    mutation_rate: float = 0.003          # per-byte flip prob
+    mutation_rate: float = 0.003          # per-byte flip prob (over fired keys if smart_mutation)
+    fitness_mode:  str = 'lp'             # 'lp' (smooth) or 'matches' (legacy)
+    smart_mutation: bool = True           # restrict flips to keys that actually fire on corpus
     rng_seed:      int = 0xC0E0_0001
     log:           Callable[[str], None] = print
 
@@ -776,12 +884,32 @@ def coevolve_base(cfg: CoevolveConfig) -> CoevolveResult:
 
     initial_base = {k: v.copy() for k, v in current_base.items()}
     rng = np.random.default_rng(cfg.rng_seed)
+    # Fire masks computed once per alt round (after base/chains settle).
+    fire_masks: Dict[str, np.ndarray] = {}
 
     def mutate(parent: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+        """Mutate parent.  When smart_mutation, only flip bytes at keys
+        that actually fire during the corpus forward pass — fired-only
+        ratio is typically <5% of the 16,384-entry LUT, so this
+        concentrates the mutation budget ~20× onto entries that matter
+        instead of random no-ops on unused keys."""
         out = {}
         for k, v in parent.items():
             arr = v.copy()
-            flips = rng.random(arr.size) < cfg.mutation_rate
+            if cfg.smart_mutation and fire_masks:
+                mask = fire_masks[k]
+                # Effective per-eligible-byte rate = mutation_rate * (n/n_fired)
+                # so the EXPECTED flip count matches what untargeted
+                # mutation would give: mutation_rate * arr.size flips.
+                n_fired = int(mask.sum())
+                if n_fired > 0:
+                    eff_rate = min(1.0, cfg.mutation_rate * arr.size / n_fired)
+                    candidates = rng.random(arr.size) < eff_rate
+                    flips = candidates & mask
+                else:
+                    flips = np.zeros(arr.size, dtype=bool)
+            else:
+                flips = rng.random(arr.size) < cfg.mutation_rate
             new_vals = rng.integers(0, 4, size=arr.size, dtype=np.uint8)
             arr = np.where(flips, new_vals, arr).astype(np.uint8) & 3
             out[k] = arr
@@ -809,8 +937,19 @@ def coevolve_base(cfg: CoevolveConfig) -> CoevolveResult:
                                      mode=cfg.chain_mode)
                   for tb, (_, orig) in token_origins.items()}
 
+        if cfg.smart_mutation:
+            log(f'tracing fire-keys across corpus...')
+            fire_masks = collect_fire_masks(
+                current_base, chains, contexts_by_token, n_blocks_by_pair)
+            for k in ('embed', 'q', 'k', 'v', 'score', 'mix',
+                        'merge', 'mlp', 'norm'):
+                n = int(fire_masks[k].sum())
+                pct = 100.0 * n / RULE_SIZE
+                log(f'  rule {k:>6}: {n:>5}/{RULE_SIZE} keys fire ({pct:.1f}%)')
+
         pre_ga_m, pre_ga_lp = corpus_argmax_matches(
-            current_base, chains, contexts_by_token, n_blocks_by_pair)
+            current_base, chains, contexts_by_token, n_blocks_by_pair,
+            fitness_mode=cfg.fitness_mode)
         log(f'after selection: matches {pre_ga_m}/{total_positions}  '
             f'lp {pre_ga_lp:+.2f}')
         if not init_recorded:
@@ -819,16 +958,19 @@ def coevolve_base(cfg: CoevolveConfig) -> CoevolveResult:
 
         # (b) Evolve base against the freshly-selected chains.
         log(f'evolving base: pop={cfg.pop_size}, gens={cfg.generations}, '
-            f'μ={cfg.mu}, mut_rate={cfg.mutation_rate}')
+            f'μ={cfg.mu}, mut_rate={cfg.mutation_rate}, fitness={cfg.fitness_mode}')
+        # Sort key: lp-only when smooth-fitness mode, else (matches, lp) tuple.
+        sort_key = ((lambda t: -t[1]) if cfg.fitness_mode == 'lp'
+                     else (lambda t: (-t[0], -t[1])))
         pop: List[Tuple[int, float, Dict[str, np.ndarray]]] = []
-        # Seed: current_base + (pop-1) small mutations of it.
         pop.append((pre_ga_m, pre_ga_lp, {k: v.copy() for k, v in current_base.items()}))
         for _ in range(cfg.pop_size - 1):
             child = mutate(current_base)
             m, lp = corpus_argmax_matches(
-                child, chains, contexts_by_token, n_blocks_by_pair)
+                child, chains, contexts_by_token, n_blocks_by_pair,
+                fitness_mode=cfg.fitness_mode)
             pop.append((m, lp, child))
-        pop.sort(key=lambda t: (-t[0], -t[1]))
+        pop.sort(key=sort_key)
         log(f'  gen  0: best matches={pop[0][0]}/{total_positions} '
             f'lp={pop[0][1]:+.2f}')
         gen_offset = len(history)
@@ -842,10 +984,11 @@ def coevolve_base(cfg: CoevolveConfig) -> CoevolveResult:
                 for _ in range(per_parent):
                     child = mutate(p)
                     m, lp = corpus_argmax_matches(
-                        child, chains, contexts_by_token, n_blocks_by_pair)
+                        child, chains, contexts_by_token, n_blocks_by_pair,
+                        fitness_mode=cfg.fitness_mode)
                     children.append((m, lp, child))
             combined = elites + children
-            combined.sort(key=lambda t: (-t[0], -t[1]))
+            combined.sort(key=sort_key)
             pop = combined[:cfg.pop_size]
             log(f'  gen {gen:>2}: best matches={pop[0][0]}/{total_positions} '
                 f'lp={pop[0][1]:+.2f}')
