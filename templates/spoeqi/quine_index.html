@@ -2,7 +2,7 @@
 {% block title %}spoeqi — class-4 quine search{% endblock %}
 {% block content %}
 <style>
-  .q-page { max-width: 64em; }
+  .q-page { max-width: 84em; }
   .q-page h1 { margin: 0 0 0.5rem 0; }
   .q-page p.lede { color: #aaa; font-size: 0.9rem; max-width: 50em; }
   .q-search { display: flex; gap: 0.6rem; align-items: center;
@@ -20,17 +20,67 @@
   .q-search button { background: #238636; color: #fff; border: 0;
                        padding: 0.3rem 0.9rem; cursor: pointer;
                        font-family: inherit; }
+
+  .q-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(11em, 1fr));
+              gap: 0.5rem; margin: 0.8rem 0;
+              padding: 0.7rem 0.9rem;
+              background: #0d1117; border: 1px solid #234; }
+  .q-stat { font-family: ui-monospace, monospace; }
+  .q-stat .lab { color: #8b949e; font-size: 0.7rem;
+                  text-transform: uppercase; letter-spacing: 0.05em; }
+  .q-stat .val { color: #c9d1d9; font-size: 1.15rem; }
+  .q-stat .val .unit { color: #6b727a; font-size: 0.7rem; margin-left: 0.3em; }
+
+  .q-filters { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;
+                 margin: 0.5rem 0;
+                 padding: 0.6rem 0.9rem;
+                 background: #0a0e14; border: 1px solid #1a2333; }
+  .q-filters label { color: #8b949e; font-size: 0.82rem; }
+  .q-filters input { background: #0d1117; color: #c9d1d9;
+                       border: 1px solid #30363d; padding: 0.18rem 0.35rem;
+                       font-family: ui-monospace, monospace; }
+  .q-filters input[type=number] { width: 4.5em; }
+  .q-filters input[type=text] { width: 7em; }
+  .q-filters button { background: #1f6feb; color: #fff; border: 0;
+                        padding: 0.25rem 0.7rem; cursor: pointer;
+                        font-family: inherit; font-size: 0.8rem; }
+  .q-filters .reset { background: #30363d; }
+
   .q-table { width: 100%; border-collapse: collapse;
-                font-size: 0.88rem; margin-top: 0.6rem; }
-  .q-table th, .q-table td { padding: 0.35rem 0.6rem;
+                font-size: 0.85rem; margin-top: 0.6rem; }
+  .q-table th, .q-table td { padding: 0.3rem 0.5rem;
                                  border-bottom: 1px solid #21262d;
                                  text-align: right;
-                                 font-family: ui-monospace, monospace; }
+                                 font-family: ui-monospace, monospace;
+                                 vertical-align: middle; }
   .q-table th { color: #8b949e; text-transform: uppercase;
-                   font-size: 0.7rem; letter-spacing: 0.05em; }
+                   font-size: 0.7rem; letter-spacing: 0.05em;
+                   white-space: nowrap; }
+  .q-table th a { color: inherit; text-decoration: none; }
+  .q-table th a:hover { color: #c9d1d9; }
+  .q-table th .sort-mark { color: #79c0ff; margin-left: 0.2em; }
   .q-table td.label { text-align: left; }
+  .q-table td.thumb { text-align: center; padding: 0.2rem; }
   .q-table tr:hover td { background: #161b22; }
   .q-table a { color: #79c0ff; text-decoration: none; }
+  .q-table .sha { color: #6e7681; font-size: 0.75em; }
+  .q-table .refined { color: #d29922; font-size: 0.7em;
+                        background: #2d2410; padding: 0 0.3em;
+                        border-radius: 3px; margin-left: 0.3em; }
+  .q-thumb { display: inline-block; width: 36px; height: 36px;
+              image-rendering: pixelated; image-rendering: crisp-edges;
+              border: 1px solid #30363d; background: #000; }
+
+  .q-paginator { display: flex; gap: 0.5rem; align-items: center;
+                  margin: 1rem 0; font-size: 0.85rem;
+                  font-family: ui-monospace, monospace; }
+  .q-paginator a, .q-paginator span { color: #79c0ff; text-decoration: none;
+                                          padding: 0.2rem 0.6rem;
+                                          border: 1px solid #21262d; }
+  .q-paginator span.current { color: #c9d1d9; background: #1a2333; }
+  .q-paginator span.disabled { color: #4a5562; border-color: #1a2333; cursor: not-allowed; }
+  .q-paginator .stats { border: 0; color: #8b949e; }
+
   .q-msg { color: #cfa; font-size: 0.85rem;
               padding: 0.5rem 0.8rem; background: #112; border: 1px solid #234;
               margin: 0.6rem 0; }
@@ -38,6 +88,14 @@
   .q-empty { color: #8b949e; font-style: italic; padding: 1rem 0; }
   .q-help { color: #888; font-size: 0.82rem; max-width: 50em;
               padding-top: 0.6rem; }
+
+  .q-origins { color: #8b949e; font-size: 0.75rem; }
+  .q-origins .origin-tag { display: inline-block;
+                              padding: 0 0.4em; margin-right: 0.3em;
+                              background: #161b22; border: 1px solid #21262d;
+                              border-radius: 3px;
+                              color: #c9d1d9; cursor: pointer; }
+  .q-origins .origin-tag .count { color: #79c0ff; margin-left: 0.4em; }
 </style>
 
 <div class="q-page">
@@ -79,58 +137,152 @@
     </label>
     <button type="submit">▶ search</button>
   </form>
-  <p class="q-help">
-    Recipe: block-flip-from-identity sweep (~1.4 s for 200 trials) →
-    keep candidates with SR&gt;0.30 and activity ∈ [0.05, 0.5] → optional
-    single-byte hill-climb (~30 s per candidate per pass).  Best so far:
-    SR≈0.42, c4≈0.85, probe-activity 0.35, class-4 chain run of ~5
-    levels.  Bigger budgets find better candidates.
-  </p>
 
-  <h2 style="margin-top:1.8rem; font-size:1.05rem;">
-    saved candidates <span style="color:#8b949e; font-weight:400;">({{ n_total }} total)</span>
+  {% if stats %}
+  <div class="q-stats">
+    <div class="q-stat">
+      <div class="lab">candidates</div>
+      <div class="val">{{ stats.n }}{% if n_filtered != n_total %}
+        <span class="unit">of {{ n_total }}</span>{% endif %}</div>
+    </div>
+    <div class="q-stat">
+      <div class="lab">SR mean</div>
+      <div class="val">{{ stats.sr_mean|floatformat:4 }}
+        <span class="unit">max {{ stats.sr_max|floatformat:4 }}</span></div>
+    </div>
+    <div class="q-stat">
+      <div class="lab">c4 mean</div>
+      <div class="val">{{ stats.c4_mean|floatformat:3 }}
+        <span class="unit">max {{ stats.c4_max|floatformat:3 }}</span></div>
+    </div>
+    <div class="q-stat">
+      <div class="lab">chain run mean</div>
+      <div class="val">{{ stats.run_mean|floatformat:1 }}
+        <span class="unit">max {{ stats.run_max }}</span></div>
+    </div>
+    <div class="q-stat" style="grid-column: span 2;">
+      <div class="lab">origins (top {{ stats.origins|length }})</div>
+      <div class="q-origins">
+        {% for origin, n in stats.origins %}
+          <a class="origin-tag" href="?origin={{ origin|urlencode }}"
+              title="filter to '{{ origin }}'">{{ origin|truncatechars:24 }}<span class="count">×{{ n }}</span></a>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <form class="q-filters" method="get" action="">
+    <label>min SR <input type="number" name="min_sr" value="{{ filters.min_sr }}"
+                            step="0.01" min="0" max="1"></label>
+    <label>min c4 <input type="number" name="min_c4" value="{{ filters.min_c4 }}"
+                            step="0.01" min="0" max="1"></label>
+    <label>min chain <input type="number" name="min_run" value="{{ filters.min_run }}"
+                              min="0" max="200"></label>
+    <label>origin <input type="text" name="origin" value="{{ filters.origin }}"
+                            placeholder="substring"></label>
+    <label>label <input type="text" name="label" value="{{ filters.label }}"
+                            placeholder="substring"></label>
+    <label>sha <input type="text" name="sha" value="{{ filters.sha }}"
+                           placeholder="prefix" maxlength="8"></label>
+    <label>per page
+      <select name="per_page" style="background:#0d1117; color:#c9d1d9;
+                                       border:1px solid #30363d; padding:0.18rem 0.35rem;">
+        {% for n in '25,50,100,200'|cut:' '|stringformat:'s'|slice:'0' %}{% endfor %}
+        <option value="25"  {% if per_page == 25 %}selected{% endif %}>25</option>
+        <option value="50"  {% if per_page == 50 %}selected{% endif %}>50</option>
+        <option value="100" {% if per_page == 100 %}selected{% endif %}>100</option>
+        <option value="200" {% if per_page == 200 %}selected{% endif %}>200</option>
+      </select>
+    </label>
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <input type="hidden" name="dir"  value="{{ direction }}">
+    <button type="submit">apply</button>
+    <a href="?" class="reset" style="padding:0.25rem 0.7rem; text-decoration:none; color:#fff;
+                                       background:#30363d;">reset</a>
+  </form>
+
+  <h2 style="margin-top:1rem; font-size:1rem;">
+    saved candidates
+    <span style="color:#8b949e; font-weight:400; font-size:0.85rem;">
+      ({{ n_filtered }}{% if n_filtered != n_total %} of {{ n_total }}{% endif %} match)
+    </span>
   </h2>
+
   {% if rows %}
     <table class="q-table">
       <thead>
         <tr>
-          <th style="text-align:right;">#</th>
-          <th style="text-align:right;">SR</th>
-          <th style="text-align:right;">SR<sub>arbσ</sub></th>
-          <th style="text-align:right;">c4</th>
-          <th style="text-align:right;">act</th>
-          <th style="text-align:right;">chain run</th>
+          <th></th>
+          {% for col, label, href in sortable_headers %}
+            <th style="text-align:right;">
+              <a href="{{ href }}">{{ label }}{% if col == sort %}<span class="sort-mark">{% if direction == 'desc' %}↓{% else %}↑{% endif %}</span>{% endif %}</a>
+            </th>
+          {% endfor %}
           <th style="text-align:left;">origin</th>
-          <th style="text-align:left;">label</th>
-          <th style="text-align:left;">created</th>
+          <th style="text-align:left;">sha</th>
         </tr>
       </thead>
       <tbody>
       {% for r in rows %}
         <tr>
-          <td><a href="{% url 'spoeqi:quine_detail' pk=r.pk %}">{{ r.pk }}</a></td>
+          <td class="thumb">
+            <a href="{% url 'spoeqi:quine_detail' pk=r.pk %}"
+                title="open #{{ r.pk }}">
+              <img class="q-thumb"
+                     src="{% url 'ouroboros:ruleset_png' pk=r.pk %}?scale=1"
+                     alt="LUT {{ r.pk }}" loading="lazy">
+            </a>
+          </td>
+          <td><a href="{% url 'spoeqi:quine_detail' pk=r.pk %}">{{ r.pk }}</a>{% if r.refined %}<span class="refined" title="hill-climb-refined">refined</span>{% endif %}</td>
           <td style="color:#7ee787;">{{ r.fitness|floatformat:4 }}</td>
           <td>{{ r.arbsigma|floatformat:4 }}</td>
           <td>{{ r.c4|floatformat:4 }}</td>
           <td>{{ r.act|floatformat:4 }}</td>
           <td>{{ r.run_len }}</td>
-          <td class="label" style="color:#aaa;">{{ r.origin }}</td>
           <td class="label" style="color:#aaa;">{{ r.run_label|default:"—" }}</td>
           <td class="label" style="color:#888;">{{ r.created|date:"D d M H:i" }}</td>
+          <td class="label" style="color:#aaa;">{{ r.origin|truncatechars:32 }}</td>
+          <td class="label sha"><a href="?sha={{ r.sha }}"
+                                    title="filter to this sha"
+                                    style="color:#6e7681;">{{ r.sha }}</a></td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
-    {% if n_total > 100 %}
-    <p style="color:#888; font-size:0.8rem;">
-      Showing top 100 by fitness; {{ n_total|add:"-100" }} more in the database.
-    </p>
-    {% endif %}
+
+    <div class="q-paginator">
+      {% if page_obj.has_previous %}
+        <a href="?{{ base_qs }}&amp;page={{ page_obj.previous_page_number }}">‹ prev</a>
+      {% else %}
+        <span class="disabled">‹ prev</span>
+      {% endif %}
+      <span class="current">page {{ page_obj.number }} / {{ paginator.num_pages }}</span>
+      {% if page_obj.has_next %}
+        <a href="?{{ base_qs }}&amp;page={{ page_obj.next_page_number }}">next ›</a>
+      {% else %}
+        <span class="disabled">next ›</span>
+      {% endif %}
+      <span class="stats">{{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ n_filtered }}</span>
+    </div>
   {% else %}
     <p class="q-empty">
-      No saved candidates yet — run the search above.  Default settings
-      should produce 3 candidates in ~30 seconds.
+      {% if n_total %}
+        No candidates match the current filters.  <a href="?">clear filters</a>.
+      {% else %}
+        No saved candidates yet — run the search above.  Default settings
+        should produce 3 candidates in ~30 seconds.
+      {% endif %}
     </p>
   {% endif %}
+
+  <p class="q-help">
+    Recipe: block-flip-from-identity sweep (~1.4 s for 200 trials) →
+    keep candidates with SR&gt;0.30 and activity ∈ [0.05, 0.5] → optional
+    single-byte hill-climb (~30 s per candidate per pass).  Best so far:
+    SR≈1.0 (L0 fixed-point class-4 quines) with chain runs of 10-30
+    levels.  Thumbnails render the 16,384-byte LUT as a 128×128
+    image — each colour = next-state for one 7-cell neighbourhood key.
+  </p>
 </div>
 {% endblock %}

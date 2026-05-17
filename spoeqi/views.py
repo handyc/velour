@@ -2092,32 +2092,202 @@ def _quine_meta(champion):
         return {}
 
 
+_QUINE_SORT_FIELDS = {
+    'pk':       'pk',
+    'fitness':  'fitness',
+    'created':  'created_at',
+    'label':    'run_label',
+}
+
+
 @login_required
 def quine_index(request):
-    """List saved class-4 quine candidates + offer the search form."""
+    """List saved class-4 quine candidates with pagination, filters,
+    sortable columns, inline LUT thumbnails, and summary stats.
+
+    Query params (all optional):
+        page       integer (1-based)
+        per_page   25 | 50 | 100 | 200  (default 50)
+        sort       pk | fitness | created | label | c4 | act |
+                   arbsigma | run_len  (default fitness)
+        dir        asc | desc          (default desc)
+        min_sr     float, min strict SR
+        min_c4     float, min c4 score
+        min_run    int,   min class-4 chain run length
+        origin     substring of meta.origin
+        label      substring of run_label
+        sha        hex prefix of sha1(rules_blob)[:8]
+    """
     from caformer.models import ComponentChampion
-    candidates = list(ComponentChampion.objects.filter(
-        component_slug=_QUINE_SLUG).order_by('-fitness', '-created_at')[:100])
-    rows = []
-    for c in candidates:
+    from django.core.paginator import Paginator, EmptyPage
+
+    qs = ComponentChampion.objects.filter(component_slug=_QUINE_SLUG)
+
+    # Server-side filters that hit the DB columns.
+    label_q = (request.GET.get('label') or '').strip()
+    if label_q:
+        qs = qs.filter(run_label__icontains=label_q)
+
+    # Sort field: only fitness/pk/created/label can be DB-sorted; the
+    # meta-derived fields require post-filter Python sort.
+    sort = (request.GET.get('sort') or 'fitness').lower()
+    direction = (request.GET.get('dir') or 'desc').lower()
+    sign = '-' if direction == 'desc' else ''
+    if sort in _QUINE_SORT_FIELDS:
+        qs = qs.order_by(f'{sign}{_QUINE_SORT_FIELDS[sort]}', '-pk')
+        post_sort = False
+    else:
+        qs = qs.order_by('-fitness', '-pk')
+        post_sort = sort in ('c4', 'act', 'arbsigma', 'run_len')
+
+    # Materialise (with meta-filters applied) so we know total after filters.
+    def _ci(name, default, lo, hi):
+        try:
+            return max(lo, min(hi, int(request.GET.get(name, default))))
+        except (TypeError, ValueError):
+            return default
+    def _cf(name, default):
+        try:
+            return float(request.GET.get(name, default))
+        except (TypeError, ValueError):
+            return default
+    min_sr  = _cf('min_sr', 0.0)
+    min_c4  = _cf('min_c4', 0.0)
+    min_run = _ci('min_run', 0, 0, 200)
+    origin_q = (request.GET.get('origin') or '').strip().lower()
+    sha_q    = (request.GET.get('sha') or '').strip().lower()
+
+    rows: list = []
+    n_total_unfiltered = qs.count()
+    # Iterate in chunks to avoid loading 1700+ champions all at once;
+    # we still need to compute meta-fields client-side to filter on them.
+    for c in qs.iterator(chunk_size=200):
+        if min_sr and (c.fitness or 0.0) < min_sr:
+            continue
         m = _quine_meta(c)
+        c4_v   = float(m.get('c4', 0.0))
+        run_v  = int(m.get('class4_run_length', 0))
+        origin_v = str(m.get('origin', '?'))
+        if min_c4 and c4_v < min_c4:
+            continue
+        if min_run and run_v < min_run:
+            continue
+        if origin_q and origin_q not in origin_v.lower():
+            continue
+        sha = hashlib.sha1(bytes(c.rules_blob)).hexdigest()[:8] \
+                if c.rules_blob else ''
+        if sha_q and not sha.startswith(sha_q):
+            continue
         rows.append({
             'pk':        c.pk,
-            'fitness':   c.fitness,
-            'c4':        m.get('c4', 0.0),
-            'act':       m.get('act', 0.0),
-            'arbsigma':  m.get('arbsigma', 0.0),
-            'run_len':   m.get('class4_run_length', 0),
-            'origin':    m.get('origin', '?'),
+            'fitness':   c.fitness or 0.0,
+            'c4':        c4_v,
+            'act':       float(m.get('act', 0.0)),
+            'arbsigma':  float(m.get('arbsigma', 0.0)),
+            'run_len':   run_v,
+            'origin':    origin_v,
+            'sha':       sha,
             'created':   c.created_at,
             'run_label': c.run_label,
+            'refined':   bool(m.get('refined', False)),
         })
-    n_total = ComponentChampion.objects.filter(
-        component_slug=_QUINE_SLUG).count()
+
+    # Post-filter sort on derived columns when needed.
+    if post_sort:
+        key_map = {
+            'c4': lambda r: r['c4'],
+            'act': lambda r: r['act'],
+            'arbsigma': lambda r: r['arbsigma'],
+            'run_len': lambda r: r['run_len'],
+        }
+        rows.sort(key=key_map[sort], reverse=(direction == 'desc'))
+
+    n_filtered = len(rows)
+
+    # Summary stats on the filtered set.
+    if rows:
+        srs = [r['fitness'] for r in rows]
+        c4s = [r['c4']      for r in rows]
+        runs = [r['run_len'] for r in rows]
+        origins_seen: dict = {}
+        for r in rows:
+            origins_seen[r['origin']] = origins_seen.get(r['origin'], 0) + 1
+        stats = {
+            'n':         n_filtered,
+            'sr_mean':   sum(srs) / len(srs),
+            'sr_max':    max(srs),
+            'c4_mean':   sum(c4s) / len(c4s),
+            'c4_max':    max(c4s),
+            'run_max':   max(runs),
+            'run_mean':  sum(runs) / len(runs),
+            'origins':   sorted(origins_seen.items(),
+                                  key=lambda kv: -kv[1])[:5],
+        }
+    else:
+        stats = None
+
+    per_page = _ci('per_page', 50, 10, 200)
+    paginator = Paginator(rows, per_page)
+    try:
+        page_obj = paginator.page(_ci('page', 1, 1, paginator.num_pages or 1))
+    except EmptyPage:
+        page_obj = paginator.page(1)
+
+    # Headers that toggle direction when clicked.
+    def _header_url(col):
+        cur = sort
+        nxt_dir = ('asc' if (cur == col and direction == 'desc') else 'desc')
+        return _qs_with(request, sort=col, dir=nxt_dir, page=1)
+    sortable_headers = [
+        ('pk',       '#',         _header_url('pk')),
+        ('fitness',  'SR',        _header_url('fitness')),
+        ('arbsigma', 'SRarbσ',    _header_url('arbsigma')),
+        ('c4',       'c4',        _header_url('c4')),
+        ('act',      'act',       _header_url('act')),
+        ('run_len',  'chain',     _header_url('run_len')),
+        ('label',    'label',     _header_url('label')),
+        ('created',  'created',   _header_url('created')),
+    ]
     return render(request, 'spoeqi/quine_index.html', {
-        'rows':    rows,
-        'n_total': n_total,
+        'page_obj':         page_obj,
+        'rows':             page_obj.object_list,
+        'paginator':        paginator,
+        'sortable_headers': sortable_headers,
+        'sort':             sort,
+        'direction':        direction,
+        'n_total':          n_total_unfiltered,
+        'n_filtered':       n_filtered,
+        'per_page':         per_page,
+        'filters': {
+            'min_sr':  request.GET.get('min_sr', ''),
+            'min_c4':  request.GET.get('min_c4', ''),
+            'min_run': request.GET.get('min_run', ''),
+            'origin':  request.GET.get('origin', ''),
+            'label':   label_q,
+            'sha':     sha_q,
+        },
+        'stats':            stats,
+        'base_qs':          _qs_without(request, 'page'),
     })
+
+
+def _qs_with(request, **overrides) -> str:
+    """Render the current query string with one or more params overridden."""
+    from django.http import QueryDict
+    qd = request.GET.copy()
+    for k, v in overrides.items():
+        if v in (None, '', 0) and k not in ('page',):
+            qd.pop(k, None)
+        else:
+            qd[k] = str(v)
+    return '?' + qd.urlencode() if qd else ''
+
+
+def _qs_without(request, *drop) -> str:
+    qd = request.GET.copy()
+    for k in drop:
+        qd.pop(k, None)
+    return qd.urlencode()
 
 
 @login_required
