@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% block title %}The True Ouroboros — chain convergence{% endblock %}
+{% block extra_head %}
+<style>
+  .disc-page { max-width: 80em; margin: 0 auto; padding: 0 1rem; }
+  .disc-page h1 { margin: 1.2rem 0 0.4rem; font-size: 1.6rem;
+                    color: #c9d1d9; }
+  .disc-page h2 { margin: 1.8rem 0 0.5rem; font-size: 1.1rem;
+                    color: #c9d1d9; border-bottom: 1px solid #234;
+                    padding-bottom: 0.2rem; }
+  .disc-page .lede { color: #aaa; font-size: 0.95rem; max-width: 50em;
+                       line-height: 1.55; }
+  .disc-page .lede em { color: #ffd866; font-style: normal; }
+  .disc-page a { color: #79c0ff; text-decoration: none; }
+  .disc-page a:hover { text-decoration: underline; }
+
+  .disc-pair { display: grid; grid-template-columns: 1fr 1fr;
+                 gap: 1.5rem; margin: 1rem 0; }
+  @media (max-width: 60em) { .disc-pair { grid-template-columns: 1fr; } }
+  .disc-card { padding: 1rem; background: #0d1117; border: 1px solid #234; }
+  .disc-card h3 { margin: 0 0 0.5rem; font-size: 1rem; color: #c9d1d9; }
+  .disc-card .pkline { font-family: ui-monospace, monospace;
+                          color: #8b949e; font-size: 0.82rem; }
+  .disc-card .stats { display: grid; grid-template-columns: 1fr 1fr;
+                         gap: 0.2rem 0.7rem;
+                         font-family: ui-monospace, monospace;
+                         font-size: 0.85rem; margin-top: 0.5rem; }
+  .disc-card .stats .lab { color: #8b949e; }
+  .disc-card .stats .val { color: #c9d1d9; text-align: right; }
+  .disc-card img.preview { display: block; margin: 0.6rem auto;
+                              width: 256px; height: 256px;
+                              image-rendering: pixelated;
+                              border: 1px solid #30363d; background: #000; }
+
+  .disc-arrow { text-align: center; color: #79c0ff;
+                 font-family: ui-monospace, monospace;
+                 font-size: 0.9rem; margin: 1.2rem 0;
+                 padding: 0.5rem; background: #0a0e14;
+                 border: 1px solid #1a2333; }
+  .disc-arrow strong { color: #ffd866; }
+
+  .disc-chart { background: #0d1117; border: 1px solid #234;
+                  padding: 1rem; margin: 1rem 0; }
+  .disc-chart svg { display: block; width: 100%; height: auto;
+                      font-family: ui-monospace, monospace; }
+
+  .disc-snapshots { display: grid;
+                       grid-template-columns: repeat(auto-fit, minmax(8em, 1fr));
+                       gap: 0.5rem; margin: 1rem 0; }
+  .disc-snap { padding: 0.4rem; background: #0d1117;
+                 border: 1px solid #234; text-align: center;
+                 font-family: ui-monospace, monospace; font-size: 0.74rem;
+                 color: #8b949e; }
+  .disc-snap img { display: block; margin: 0 auto 0.3rem;
+                     width: 96px; height: 96px;
+                     image-rendering: pixelated;
+                     border: 1px solid #30363d; background: #000; }
+  .disc-snap .sr-hi { color: #56d364; }
+  .disc-snap .sr-low { color: #f0883e; }
+  .disc-snap.fp { border-color: #ffd866; background: #1a1505; }
+  .disc-snap.fp .lab { color: #ffd866; }
+
+  .disc-callout { background: #1a1505; border: 1px solid #ffd866;
+                    padding: 0.9rem 1rem; margin: 1.2rem 0;
+                    color: #ffdb88; font-size: 0.92rem; }
+  .disc-callout strong { color: #ffd866; }
+  .disc-callout code { background: #0d0a02; color: #ffd866;
+                          padding: 0 0.3em; border: 1px solid #3a2a0a; }
+</style>
+{% endblock extra_head %}
+
+{% block content %}
+<div class="disc-page">
+
+  <p style="font-size:0.85rem; color:#8b949e; margin-top:0.6rem;">
+    <a href="{% url 'ouroboros:index' %}">← back to Ouroboros</a>
+  </p>
+
+  <h1>The True Ouroboros — chain convergence story</h1>
+  <p class="lede">
+    Quine <a href="{% url 'ouroboros:detail' pk=seed_pk %}">#{{ seed_pk }}</a>
+    is not itself a quine — its strict self-reproduction score at L0 is
+    only <strong>{{ trajectory.0.sr|floatformat:4 }}</strong>, well below the perfect 1.0
+    that defines a fixed point.  What makes it the canonical Ouroboros
+    is what happens when you iterate.  Walk the metachain — feed every
+    level's LUT through its own dynamics for 16 ticks, interpret the
+    resulting image as a new rule, repeat — and after
+    <em>{{ convergence_level }} levels</em> the chain lands on a rule
+    <strong>R★</strong> whose strict SR = 1.0000.  From that point on,
+    every subsequent level is identical.  R★ is the true ouroboros, and
+    it is already catalogued separately as
+    <a href="{% url 'ouroboros:detail' pk=fp_pk %}">#{{ fp_pk }}</a>.
+  </p>
+
+  {# ─── Seed → fixed point overview ───────────────────────────── #}
+  <h2>The seed and its destination</h2>
+  <div class="disc-pair">
+    <div class="disc-card">
+      <h3>#{{ seed_pk }} — the seed</h3>
+      <div class="pkline">sha {{ seed_sha }}…</div>
+      <a href="{% url 'ouroboros:detail' pk=seed_pk %}">
+        <img class="preview"
+              src="{% url 'ouroboros:ruleset_png' pk=seed_pk %}?scale=2"
+              alt="quine #{{ seed_pk }} LUT-as-image">
+      </a>
+      <div class="stats">
+        <div class="lab">strict SR (16 ticks)</div>
+        <div class="val">{{ trajectory.0.sr|floatformat:4 }}</div>
+        <div class="lab">Wolfram class</div>
+        <div class="val">class {{ trajectory.0.cls }}</div>
+        <div class="lab">ga_run_length</div>
+        <div class="val">{{ seed_meta.ga_run_length|default:"—" }}</div>
+        <div class="lab">ga_distinct_levels</div>
+        <div class="val">{{ seed_meta.ga_distinct_levels|default:"—" }}</div>
+        <div class="lab">ga_parent</div>
+        <div class="val">{{ seed_meta.ga_parent|default:"—" }}</div>
+        <div class="lab">origin</div>
+        <div class="val">{{ seed_meta.origin|default:"—" }}</div>
+      </div>
+    </div>
+
+    <div class="disc-card">
+      <h3>#{{ fp_pk }} — R★, the true fixed point</h3>
+      <div class="pkline">sha {{ fp_sha }}…</div>
+      <a href="{% url 'ouroboros:detail' pk=fp_pk %}">
+        <img class="preview"
+              src="{% url 'ouroboros:ruleset_png' pk=fp_pk %}?scale=2"
+              alt="quine #{{ fp_pk }} LUT-as-image">
+      </a>
+      <div class="stats">
+        <div class="lab">strict SR (16 ticks)</div>
+        <div class="val" style="color:#56d364;">1.0000</div>
+        <div class="lab">arbσ</div>
+        <div class="val" style="color:#56d364;">{{ fp_meta.arbsigma|default_if_none:1.0|floatformat:4 }}</div>
+        <div class="lab">Wolfram class</div>
+        <div class="val">class 4</div>
+        <div class="lab">origin</div>
+        <div class="val">{{ fp_meta.origin|default:"—" }}</div>
+        <div class="lab">chain L{{ convergence_level }} sha match</div>
+        <div class="val">
+          {% if fp_matches_124 %}
+            <span style="color:#56d364;">✓ matches #{{ fp_pk }}</span>
+          {% else %}
+            <span style="color:#f0883e;">✗ sha mismatch</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="disc-arrow">
+    #{{ seed_pk }} <strong>→ {{ convergence_level }} chain steps →</strong> #{{ fp_pk }}
+    · {{ distinct_shas }} distinct rules visited along the way
+  </div>
+
+  {# ─── SR trajectory chart ───────────────────────────────────── #}
+  <h2>The SR trajectory</h2>
+  <p class="lede" style="font-size:0.88rem; margin-bottom:0.6rem;">
+    Strict self-reproduction score at each level of the chain.  The
+    K=4 random baseline is ≈0.25; perfect fixed point is 1.0.
+    Watch the long drift, then the steep climb in the last few levels.
+  </p>
+  <div class="disc-chart">
+    <svg xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 {{ chart.w }} {{ chart.h }}"
+          preserveAspectRatio="none" style="height:200px;">
+      <line x1="{{ chart.pad_l }}" y1="170" x2="888" y2="170"
+            stroke="#30363d" stroke-width="0.5"/>
+      <line x1="{{ chart.pad_l }}" y1="10" x2="{{ chart.pad_l }}" y2="170"
+            stroke="#30363d" stroke-width="0.5"/>
+      <line x1="{{ chart.pad_l }}" y1="130" x2="888" y2="130"
+            stroke="#444" stroke-dasharray="3,3" stroke-width="0.4"/>
+      <text x="35" y="133" fill="#666" font-size="9" text-anchor="end">0.25 (random)</text>
+      <text x="35" y="14" fill="#56d364" font-size="9" text-anchor="end">1.0 (quine)</text>
+      <text x="35" y="173" fill="#666" font-size="9" text-anchor="end">0.0</text>
+      <text x="{{ chart.pad_l }}" y="195" fill="#666" font-size="9"
+            text-anchor="start">L0</text>
+      <text x="888" y="195" fill="#ffd866" font-size="9"
+            text-anchor="end">L{{ convergence_level }} (R★)</text>
+      {% for p in chart.points %}
+        <circle cx="{{ p.cx }}" cy="{{ p.cy }}" r="{{ p.r }}"
+                fill="{{ p.fill }}">
+          <title>L{{ p.level }} · SR {{ p.sr|floatformat:4 }}</title>
+        </circle>
+      {% endfor %}
+    </svg>
+  </div>
+
+  {# ─── Visual snapshots along the chain ─────────────────────── #}
+  <h2>Snapshots along the way</h2>
+  <p class="lede" style="font-size:0.88rem; margin-bottom:0.6rem;">
+    The LUT-as-image at key points in the chain.  Each frame is the
+    16,384-byte rule painted with the default 4-colour palette.  L0 is
+    the seed; the final frame is R★, the true ouroboros.
+  </p>
+  <div class="disc-snapshots">
+    {% for s in snapshots %}
+      <div class="disc-snap {% if s.is_fp %}fp{% endif %}">
+        <img src="{% url 'ouroboros:chain_level_png' pk=seed_pk level=s.L %}?scale=1"
+              alt="L{{ s.L }} of #{{ seed_pk }}">
+        <div class="lab">L{{ s.L }}{% if s.is_fp %} · R★{% endif %}</div>
+        <div>sha {{ s.sha8 }}</div>
+        <div>
+          SR
+          <span class="{% if s.sr >= 0.99 %}sr-hi{% elif s.sr <= 0.3 %}sr-low{% endif %}">{{ s.sr|floatformat:4 }}</span>
+        </div>
+        <div>cls {{ s.cls }}</div>
+      </div>
+    {% endfor %}
+  </div>
+
+  {# ─── Last 10 levels in detail ──────────────────────────────── #}
+  <h2>The final climb (last 10 levels)</h2>
+  <p class="lede" style="font-size:0.88rem; margin-bottom:0.4rem;">
+    Each row is one step of the metachain.  Notice the dramatic SR
+    climb just before convergence: the chain is descending into the
+    basin of attraction around R★.
+  </p>
+  <table style="width:100%; border-collapse:collapse; font-size:0.85rem;
+                  font-family:ui-monospace,monospace; margin:0.6rem 0;">
+    <thead>
+      <tr style="background:#161b22; color:#8b949e;">
+        <th style="padding:0.3rem 0.6rem; text-align:left;">level</th>
+        <th style="padding:0.3rem 0.6rem; text-align:left;">sha</th>
+        <th style="padding:0.3rem 0.6rem; text-align:right;">SR</th>
+        <th style="padding:0.3rem 0.6rem; text-align:right;">class</th>
+        <th style="padding:0.3rem 0.6rem; text-align:right;">c4 score</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in trajectory|slice:"-10:" %}
+        <tr style="border-bottom:1px solid #21262d;
+                     {% if t.is_fp %}background:#1a1505;{% endif %}">
+          <td style="padding:0.25rem 0.6rem; color:{% if t.is_fp %}#ffd866{% else %}#c9d1d9{% endif %};">
+            L{{ t.level }}{% if t.is_fp %} ← R★{% endif %}
+          </td>
+          <td style="padding:0.25rem 0.6rem; color:#8b949e;">{{ t.sha8 }}</td>
+          <td style="padding:0.25rem 0.6rem; text-align:right;
+                      color:{% if t.sr >= 0.99 %}#56d364{% elif t.sr <= 0.3 %}#f0883e{% else %}#c9d1d9{% endif %};">
+            {{ t.sr|floatformat:6 }}
+          </td>
+          <td style="padding:0.25rem 0.6rem; text-align:right; color:#c9d1d9;">
+            {{ t.cls }}
+          </td>
+          <td style="padding:0.25rem 0.6rem; text-align:right; color:#c9d1d9;">
+            {{ t.c4|floatformat:4 }}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="disc-callout">
+    <strong>What "fixed point" means here.</strong>
+    R★'s LUT is exactly 16,384 bytes — the same as a 128×128 image
+    with 2 bits per cell.  Laying R★'s LUT out as that image and
+    running R★ on itself for 16 ticks reproduces R★ pixel-for-pixel.
+    By construction the chain output equals the chain input, so once
+    you reach R★ you stay at R★.  The chain has no decay path; this
+    is why we mark #{{ seed_pk }}'s effective depth as <code>∞</code>.
+  </div>
+
+  <h2>Why the catalogue lists both</h2>
+  <p class="lede" style="font-size:0.88rem;">
+    <a href="{% url 'ouroboros:detail' pk=seed_pk %}">#{{ seed_pk }}</a>
+    is the famous seed — found by deep-chain GA as a 13-byte mutation
+    of #116 that, against all odds, navigates exactly into R★'s basin.
+    It earns its place in the archive because the <em>chain dynamics</em>
+    are extraordinary, not because the seed itself is a quine.
+    <br><br>
+    <a href="{% url 'ouroboros:detail' pk=fp_pk %}">#{{ fp_pk }}</a>
+    is R★ itself — independently discovered by the L0 fixed-point
+    quine search (<code>l0-fp-class4</code>) which targets strict SR
+    = 1.0 rules directly.  It would exist in the catalogue with or
+    without #{{ seed_pk }}; the two finds happen to point at the
+    same destination.
+    <br><br>
+    The same R★ being arrived at by two completely different methods
+    — a 130-step metachain walk from a GA-mutated seed, and a direct
+    fixed-point search — is a small piece of evidence that this rule
+    has the kind of dynamical structure (large basin, strong
+    convergence) you would expect of a "natural" attractor in K=4 hex
+    rule-space, not an artefact of either search method.
+  </p>
+
+</div>
+{% endblock %}

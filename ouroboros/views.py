@@ -569,6 +569,158 @@ def seed_bytes(request, pk: int):
     return resp
 
 
+SEED_PK         = 122          # the canonical Ouroboros seed
+FIXED_POINT_PK  = 124          # the strict-SR=1.0 destination rule
+
+
+def _walk_to_convergence(seed: bytes, max_levels: int = 200):
+    """Walk the metachain, recording per-level SR + class + sha until
+    the chain converges to a fixed point (or max_levels is hit).
+
+    Returns: list of dicts [{level, sha8, sr, cls, c4, is_fp}]
+    where the last entry has is_fp=True (rule maps to itself).
+    """
+    from spoeqi.metachain import (hex_ca_step, self_reproduce_score,
+                                       classify_rule)
+    import numpy as np
+    trajectory: list[dict] = []
+    cur = seed
+    for L in range(max_levels):
+        sr_strict = self_reproduce_score(cur, ticks=16)
+        cls, c4 = classify_rule(cur, probe_ticks=24)
+        # Compute the chain's next level: CA^16(LUT-as-image)
+        arr = np.frombuffer(cur, dtype=np.uint8) & 3
+        state = arr.reshape(128, 128).copy()
+        for _ in range(16):
+            state = hex_ca_step(state, arr)
+        nxt = bytes(state.flatten().tolist())
+        is_fp = (cur == nxt)
+        trajectory.append({
+            'level':    L,
+            'sha8':     hashlib.sha1(cur).hexdigest()[:8],
+            'sr':       float(sr_strict),
+            'cls':      int(cls),
+            'c4':       float(c4),
+            'is_fp':    is_fp,
+        })
+        if is_fp:
+            break
+        cur = nxt
+    return trajectory
+
+
+@login_required
+def discovery(request):
+    """Tell the story of the true Ouroboros: how seed #122's metachain
+    navigates 130 levels of rule-space and converges to the strict-SR=1
+    fixed point R* (which is independently catalogued as #124).
+    """
+    from django.core.cache import cache
+
+    seed_obj = _quine_qs().filter(pk=SEED_PK).first()
+    fp_obj   = _quine_qs().filter(pk=FIXED_POINT_PK).first()
+    if seed_obj is None:
+        raise Http404(f'seed quine #{SEED_PK} not in catalogue')
+    if fp_obj is None:
+        raise Http404(f'fixed-point quine #{FIXED_POINT_PK} not in catalogue')
+
+    seed = bytes(seed_obj.rules_blob)
+
+    # Walking 130 levels of 16-tick CA on a 128×128 grid is ~3-10 s in
+    # Python+numpy.  Cache the result by seed sha so revisits are instant.
+    seed_sha = hashlib.sha1(seed).hexdigest()
+    cache_key = f'ouroboros:discovery:{seed_sha}'
+    trajectory = cache.get(cache_key)
+    if trajectory is None:
+        trajectory = _walk_to_convergence(seed, max_levels=200)
+        cache.set(cache_key, trajectory, 60 * 60 * 24)   # 24 h
+
+    convergence_level = trajectory[-1]['level'] if trajectory else None
+
+    # Pick a small set of visual snapshots: L0, L1, key transitions,
+    # last 5 before fp + the fp itself.  Return as a list of (level, t)
+    # dicts so the template can access trajectory data without slicing.
+    snapshots: list[dict] = []
+    if convergence_level is not None and convergence_level >= 6:
+        wanted = [0, 1,
+                     convergence_level // 4,
+                     convergence_level // 2,
+                     max(0, convergence_level - 5),
+                     max(0, convergence_level - 3),
+                     max(0, convergence_level - 1),
+                     convergence_level]
+        seen = set()
+        for L in wanted:
+            if L in seen or L >= len(trajectory):
+                continue
+            seen.add(L)
+            t = trajectory[L]
+            snapshots.append({
+                'L':     L,
+                'sha8':  t['sha8'],
+                'sr':    t['sr'],
+                'cls':   t['cls'],
+                'is_fp': t['is_fp'],
+            })
+
+    # Per-trajectory summary.
+    sr_series  = [round(t['sr'],  4) for t in trajectory]
+    cls_series = [t['cls'] for t in trajectory]
+    distinct_shas = len({t['sha8'] for t in trajectory})
+
+    # Pre-compute SVG circle coordinates for the SR trajectory chart.
+    # Django templates can't do arithmetic on subtracted constants, so
+    # building the chart server-side is the path of least resistance.
+    chart_w, chart_h = 900, 200
+    pad_l, pad_r = 40, 12
+    inner_w  = chart_w - pad_l - pad_r
+    n_pts = max(1, len(trajectory) - 1)
+    chart_points: list[dict] = []
+    for i, t in enumerate(trajectory):
+        cx = pad_l + (i * inner_w) / n_pts
+        cy = 170 - 160 * t['sr']     # y=170 → SR 0; y=10 → SR 1
+        if t['is_fp']:
+            color, r = '#ffd866', 4.0
+        elif t['sr'] >= 0.99:
+            color, r = '#56d364', 2.5
+        elif t['cls'] == 4:
+            color, r = '#79c0ff', 1.5
+        else:
+            color, r = '#888888', 1.5
+        chart_points.append({
+            'cx': round(cx, 2), 'cy': round(cy, 2),
+            'r': r, 'fill': color, 'level': t['level'],
+            'sr': t['sr'],
+        })
+
+    # Verify the fixed point is the catalogued #124.
+    fp_obj_sha = hashlib.sha1(bytes(fp_obj.rules_blob)).hexdigest()[:8]
+    chain_fp_sha = trajectory[-1]['sha8'] if trajectory else ''
+    fp_matches_124 = (fp_obj_sha == chain_fp_sha)
+
+    return render(request, 'ouroboros/discovery.html', {
+        'seed_pk':           seed_obj.pk,
+        'seed_meta':         _quine_meta(seed_obj),
+        'fp_pk':             fp_obj.pk,
+        'fp_meta':           _quine_meta(fp_obj),
+        'trajectory':        trajectory,
+        'convergence_level': convergence_level,
+        'snapshots':         snapshots,
+        'sr_series':         sr_series,
+        'cls_series':        cls_series,
+        'distinct_shas':     distinct_shas,
+        'fp_matches_124':    fp_matches_124,
+        'seed_sha':          seed_sha[:16],
+        'fp_sha':            fp_obj_sha,
+        'chart':             {
+            'w':      chart_w,
+            'h':      chart_h,
+            'pad_l':  pad_l,
+            'points': chart_points,
+        },
+    })
+
+
 @login_required
 def packed_bytes(request, pk: int):
     """Raw 4,096-byte packed LUT — 4 cells per byte (little-endian).

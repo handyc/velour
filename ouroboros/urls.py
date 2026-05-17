@@ -7,6 +7,7 @@ app_name = 'ouroboros'
 
 urlpatterns = [
     path('',                    views.index,         name='index'),
+    path('discovery/',          views.discovery,     name='discovery'),
     path('search/',             views.search,        name='search'),
     path('search/stop/',        views.search_stop,   name='search_stop'),
     path('search/tail/',        views.search_tail,   name='search_tail'),

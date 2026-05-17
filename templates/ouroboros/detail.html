@@ -175,12 +175,26 @@
 
   {% if is_featured %}
   <div class="featured-banner">
-    <b>★ This is the class-4 fixed-point quine.</b>
+    <b>★ This is the canonical Ouroboros seed.</b>
     Its chain converges at <b>level {{ fixed_point_level }}</b> to a
-    rule R* such that <code>CA<sup>16</sup>(R*).LUT = R*.LUT</code> —
-    a true metachain fixed point — and that R* is itself class-4.
+    rule R★ such that <code>CA<sup>16</sup>(R★).LUT = R★.LUT</code> —
+    a true metachain fixed point — and that R★ is itself class-4.
     The chain stays at the edge of chaos forever.  Effective depth is
     unbounded.
+    <br><br>
+    <a href="{% url 'ouroboros:discovery' %}"
+        style="color:#ffd866;">→ read the full convergence story</a>
+  </div>
+  {% endif %}
+
+  {% if pk == 124 %}
+  <div class="featured-banner" style="border-color:#ffd866; background:#1a1505;">
+    <b style="color:#ffd866;">★ R★ — the true strict-SR=1.0 fixed point.</b>
+    This rule's LUT-as-image, fed through its own dynamics for 16
+    ticks, reproduces itself byte-for-byte.  It is also the destination
+    of #122's metachain (see
+    <a href="{% url 'ouroboros:discovery' %}"
+        style="color:#ffd866;">the convergence story</a>).
   </div>
   {% endif %}
 
