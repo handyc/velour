@@ -30,16 +30,22 @@ from django.utils.text import slugify
 # Components in the multi-CA = 64 (the 8×8 seed matrix).
 COMPONENTS = 64
 
-# Per-component hex grid side length.  Default 16×16; the Pact may
-# override per-instance.  Total visible cells = COMPONENTS × side².
-COMPONENT_GRID = 16
+# Per-component hex grid side length.  Default 128×128 — chosen so
+# one component's cell count exactly matches the 16,384-entry rule LUT
+# (4^7 = 16,384 = 128²).  That makes the rule-as-image bijection used
+# everywhere else in spoeqi (quine viewer, metachain renderer, image-
+# quine pipeline) hold on the live runner too: each component IS its
+# rule's own LUT laid out as a square.  The Pact may override per
+# instance.  Total visible cells = COMPONENTS × side².
+COMPONENT_GRID = 128
 COMPONENT_GRID_CHOICES = [
-    ( 8, ' 8 × 8  (tiny, 4,096 cells total)'),
-    (16, '16 × 16 (default, 16,384 cells)'),
-    (24, '24 × 24 (36,864 cells)'),
-    (32, '32 × 32 (65,536 cells)'),
-    (48, '48 × 48 (147,456 cells)'),
-    (64, '64 × 64 (262,144 cells; cells render as pixels)'),
+    (  8, '  8 ×   8  (tiny, 4,096 cells total)'),
+    ( 16, ' 16 ×  16  (16,384 cells total — legacy default)'),
+    ( 24, ' 24 ×  24  (36,864 cells)'),
+    ( 32, ' 32 ×  32  (65,536 cells)'),
+    ( 48, ' 48 ×  48  (147,456 cells)'),
+    ( 64, ' 64 ×  64  (262,144 cells)'),
+    (128, '128 × 128  (default — matches LUT exactly: 1 component = 16,384 cells)'),
 ]
 
 # 4 self-states × 4^6 neighbour configurations = 16,384 entries.
