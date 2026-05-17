@@ -218,7 +218,11 @@
           </div>
         </div>
         <p style="margin-top:0.6rem; font-size:0.85rem;">
-          <a href="{% url 'ouroboros:seed_bytes' pk=pk %}">⬇ download seed.bin</a>
+          <a href="{% url 'ouroboros:seed_bytes' pk=pk %}"
+              title="16,384 bytes — 1 cell per byte (raw LUT)">⬇ seed.bin (16 KB)</a>
+          ·
+          <a href="{% url 'ouroboros:packed_bytes' pk=pk %}"
+              title="4,096 bytes — 4 cells packed per byte (storage form)">⬇ packed.bin (4 KB)</a>
           ·
           <a href="{% url 'ouroboros:walk_json' pk=pk %}?depth=200">walk.json</a>
         </p>

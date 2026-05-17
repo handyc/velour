@@ -569,6 +569,34 @@ def seed_bytes(request, pk: int):
     return resp
 
 
+@login_required
+def packed_bytes(request, pk: int):
+    """Raw 4,096-byte packed LUT — 4 cells per byte (little-endian).
+
+    Exactly the byte stream visualised by packed.png and the natural
+    on-disk format for a K=4 LUT (each cell needs only 2 bits, so
+    16,384 / 4 = 4096 bytes).
+    """
+    c = get_object_or_404(_quine_qs(), pk=pk)
+    seed = bytes(c.rules_blob)
+    if len(seed) != 16384:
+        return HttpResponse(
+            f'expected 16,384-byte LUT; got {len(seed)} B', status=400)
+    packed = bytearray(4096)
+    for i in range(4096):
+        a = seed[i * 4]     & 3
+        b = seed[i * 4 + 1] & 3
+        c_ = seed[i * 4 + 2] & 3
+        d = seed[i * 4 + 3] & 3
+        packed[i] = a | (b << 2) | (c_ << 4) | (d << 6)
+    resp = HttpResponse(bytes(packed),
+                            content_type='application/octet-stream')
+    resp['Content-Disposition'] = (
+        f'attachment; filename="quine-{pk}-packed.bin"')
+    resp['Content-Length'] = '4096'
+    return resp
+
+
 # ─── Search-for-more-like-#122 ────────────────────────────────────────
 #
 # #122 is the canonical Ouroboros: a partial quine (sr ≈ 0.73) whose

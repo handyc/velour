@@ -13,6 +13,7 @@ urlpatterns = [
     path('<int:pk>/',           views.detail,        name='detail'),
     path('<int:pk>/annotate/',  views.annotate,      name='annotate'),
     path('<int:pk>/seed.bin',   views.seed_bytes,    name='seed_bytes'),
+    path('<int:pk>/packed.bin', views.packed_bytes,  name='packed_bytes'),
     path('<int:pk>/ruleset.png', views.ruleset_png,  name='ruleset_png'),
     path('<int:pk>/packed.png',  views.packed_png,   name='packed_png'),
     path('<int:pk>/L<int:level>.png',
