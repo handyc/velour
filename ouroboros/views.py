@@ -435,6 +435,73 @@ def ruleset_png(request, pk: int):
 
 
 @login_required
+def packed_png(request, pk: int):
+    """Render the rule as a 64×64 'packed' image — 4 cells per byte.
+
+    The 16,384 K=4 cells (2 bits each) pack 4-per-byte into 4096 bytes,
+    which lays out exactly as a 64×64 grid of 8-bit values.  That's the
+    same byte-stream you'd write to disk as the .HXC4 payload, just
+    rendered as a 256-colour image instead of a 4-colour one.
+
+    ?palette=gray (default) — monochrome
+    ?palette=heat            — viridis-ish
+    ?palette=hsv             — full hue circle
+    ?scale=N (default 6)     — nearest-neighbour upscale factor
+    """
+    from PIL import Image
+    c = get_object_or_404(_quine_qs(), pk=pk)
+    seed = bytes(c.rules_blob)
+    if len(seed) != 16384:
+        return HttpResponse(
+            f'expected 16,384-byte LUT; got {len(seed)} B', status=400)
+
+    # Pack 4 cells into 1 byte (each cell = 2 bits).  Little-endian
+    # within the byte so byte order matches the natural memory layout
+    # of e.g. a uint8 array reshape((64, 64, 4)).
+    packed = bytearray(4096)
+    for i in range(4096):
+        a = seed[i * 4]     & 3
+        b = seed[i * 4 + 1] & 3
+        c_ = seed[i * 4 + 2] & 3
+        d = seed[i * 4 + 3] & 3
+        packed[i] = a | (b << 2) | (c_ << 4) | (d << 6)
+
+    pal_mode = (request.GET.get('palette') or 'gray').lower()
+    img = Image.new('P', (64, 64))
+    img.putdata(list(packed))
+    palette = []
+    if pal_mode == 'heat':
+        # Cheap viridis-ish ramp: deep purple → green → yellow.
+        for k in range(256):
+            t = k / 255.0
+            r = int(255 * max(0.0, min(1.0, 1.5 * t - 0.4)))
+            g = int(255 * max(0.0, min(1.0, 1.5 - abs(2 * t - 1.0))))
+            b = int(255 * max(0.0, min(1.0, 1.0 - 1.5 * t)))
+            palette.extend((r, g, b))
+    elif pal_mode == 'hsv':
+        import colorsys
+        for k in range(256):
+            r, g, b = colorsys.hsv_to_rgb(k / 256.0, 0.85, 0.95)
+            palette.extend((int(r * 255), int(g * 255), int(b * 255)))
+    else:
+        for k in range(256):
+            palette.extend((k, k, k))
+    img.putpalette(palette)
+
+    try:
+        scale = max(1, min(16, int(request.GET.get('scale', 6))))
+    except (TypeError, ValueError):
+        scale = 6
+    if scale != 1:
+        img = img.resize((64 * scale, 64 * scale), Image.NEAREST)
+    buf = io.BytesIO()
+    img.save(buf, format='PNG', optimize=True)
+    resp = HttpResponse(buf.getvalue(), content_type='image/png')
+    patch_response_headers(resp, cache_timeout=3600)
+    return resp
+
+
+@login_required
 def chain_level_png(request, pk: int, level: int):
     """Render one chain level's LUT-as-image.  Level 0 is the seed
     itself; higher levels are the chain's iterated output."""
