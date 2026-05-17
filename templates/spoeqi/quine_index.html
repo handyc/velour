@@ -221,6 +221,7 @@
           {% endfor %}
           <th style="text-align:left;">origin</th>
           <th style="text-align:left;">sha</th>
+          <th style="text-align:left;">→</th>
         </tr>
       </thead>
       <tbody>
@@ -246,6 +247,12 @@
           <td class="label sha"><a href="?sha={{ r.sha }}"
                                     title="filter to this sha"
                                     style="color:#6e7681;">{{ r.sha }}</a></td>
+          <td class="label">
+            <a href="{% url 'spoeqi:quine_chain_to_taxon' pk=r.pk level=0 %}"
+                title="catalogue #{{ r.pk }} in Taxon and open its rule page"
+                style="color:#7ee787; padding:0.1em 0.5em; border:1px solid #234;
+                        text-decoration:none; font-size:0.78em;">Taxon</a>
+          </td>
         </tr>
       {% endfor %}
       </tbody>

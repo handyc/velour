@@ -83,6 +83,11 @@
     <a class="btn" href="{% url 'spoeqi:quine_seed_bytes' pk=champion.pk %}">
       ⬇ download seed.bin
     </a>
+    <a class="btn" href="{% url 'spoeqi:quine_chain_to_taxon' pk=champion.pk level=0 %}"
+        style="color:#7ee787; border-color:#234;"
+        title="catalogue this quine as a Taxon Rule (kind=hex_k4_lut) and open its rule detail page in Taxon">
+      → Taxon (catalogue)
+    </a>
     <a class="btn" href="{% url 'spoeqi:quine_streams' pk=champion.pk %}"
         style="color:#cfa; border-color:#345;"
         title="64 nested class-4 CAs as deterministic data streams — the 'compressed database in a small numberset' surface">
