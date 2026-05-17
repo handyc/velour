@@ -1043,9 +1043,16 @@ def _load_rule_and_palette(request) -> tuple[bytes, list, dict] | None:
     Sources:
       ?from_spoeqi=<slug>             — pull rule_snapshot + palette from the Pact
       ?from_spoeqi=<slug>&component=K — slice the per-component rule + palette
+      ?from_taxon_lut=<rule_slug>     — pull 16,384-byte LUT + palette from a
+                                          Taxon Rule (kind=hex_k4_lut).  Used
+                                          by the print-job multi-page view to
+                                          keep per-page URLs short (~80 chars)
+                                          instead of embedding the full 32k
+                                          rule_hex in every <object> data URL.
       ?rule_hex=<hex>                 — explicit 32,768-char hex; palette default
     """
     slug = (request.GET.get('from_spoeqi') or '').strip()
+    taxon_lut_slug = (request.GET.get('from_taxon_lut') or '').strip()
     rule_hex = (request.GET.get('rule_hex') or '').strip()
     comp_raw = (request.GET.get('component') or '').strip()
     if slug:
@@ -1084,6 +1091,26 @@ def _load_rule_and_palette(request) -> tuple[bytes, list, dict] | None:
         if component is not None:
             meta['component'] = component
         return rule, palette, meta
+    if taxon_lut_slug:
+        from taxon.models import Rule
+        try:
+            rule_obj = Rule.objects.get(slug=taxon_lut_slug)
+        except Rule.DoesNotExist:
+            raise ValueError(f'taxon rule {taxon_lut_slug!r} not found')
+        if rule_obj.kind != 'hex_k4_lut':
+            raise ValueError(
+                f'taxon rule {taxon_lut_slug!r} has kind '
+                f'{rule_obj.kind!r}; expected hex_k4_lut')
+        rule = bytes(rule_obj.genome)
+        if len(rule) != hex_flowers.RULE_TABLE_SIZE:
+            raise ValueError(
+                f'taxon rule {taxon_lut_slug!r} genome is {len(rule)} bytes; '
+                f'expected exactly {hex_flowers.RULE_TABLE_SIZE}')
+        palette = rule_obj.palette_hex
+        return rule, palette, {
+            'source': 'taxon', 'slug': rule_obj.slug,
+            'name':   rule_obj.name or rule_obj.slug,
+        }
     if rule_hex:
         try:
             rule = bytes.fromhex(rule_hex)
@@ -1575,38 +1602,48 @@ def print_job(request):
             'print_job: provide ?taxon_slug=<slug> (preferred) or '
             '?rule_hex=<32,768-char hex>', status=400)
 
-    # Compute page count by asking hex_flowers what one page can hold
-    # at the chosen scale; rest is total / per-page rounding up.
+    # Render every flower page inline as SVG.  We used to embed each
+    # page via <object data="grid.svg?…fpage=K"> but real browsers
+    # cap URL length and the print engine doesn't reliably wait for
+    # N separate <object>s to load.  Inline SVG means one HTTP
+    # request (this page) and the printer sees everything immediately.
+    # Cost: HTML grows to ~10–30 MB for the full 16,384 flowers, but
+    # that's fine for an on-demand print job.
     size_scale = hex_flowers.SIZE_SCALES[fsize]
-    _body0, summary0 = hex_flowers.render_flowers_svg(
-        rule_lut, palette=palette_css,
-        page_w_mm=page_w_mm, page_h_mm=page_h_mm,
-        margin_mm=10.0, page_index=0,
-        center_filter=centre, size_scale=size_scale,
-        title_text=cover.get('name'))
+    flower_pages: list[str] = []
+    summary0 = None
+    page_index = 0
+    while True:
+        body, summary = hex_flowers.render_flowers_svg(
+            rule_lut, palette=palette_css,
+            page_w_mm=page_w_mm, page_h_mm=page_h_mm,
+            margin_mm=10.0,
+            page_index=page_index,
+            center_filter=centre, size_scale=size_scale,
+            title_text=cover.get('name'))
+        if summary0 is None:
+            summary0 = summary
+        wrapped = hex_flowers.wrap_page(body, page_w_mm, page_h_mm)
+        flower_pages.append(wrapped)
+        page_index += 1
+        # Stop once we've covered the whole rule (last page may be
+        # short).  Capacity comes from summary.flowers_per_page.
+        if page_index * summary.flowers_per_page >= summary.total_flowers:
+            break
+        # Safety cap: shouldn't ever fire (max is ~115 pages at 'large')
+        if page_index > 256:
+            break
     flowers_per_page = summary0.flowers_per_page
     total_flowers = summary0.total_flowers
-    n_flower_pages = (total_flowers + flowers_per_page - 1) // flowers_per_page
-
-    # Build the embed URL for each flower page.  We point at grid.svg
-    # so the browser can fetch each SVG independently and the print
-    # engine can stitch the result into a real multi-page PDF.
-    flower_base = reverse('gridprint:grid_svg') + (
-        f'?mode=flowers&rule_hex={rule_hex_resolved}&fsize={fsize}'
-    )
-    if centre is not None:
-        flower_base += f'&fcentre={centre}'
-    if landscape:
-        flower_base += '&landscape=1'
+    n_flower_pages = len(flower_pages)
 
     return render(request, 'gridprint/print_job.html', {
         'cover':           cover,
         'fsize':           fsize,
         'n_flower_pages':  n_flower_pages,
-        'flower_page_indices': list(range(n_flower_pages)),
+        'flower_pages':    flower_pages,
         'total_flowers':   total_flowers,
         'flowers_per_page': flowers_per_page,
-        'flower_base':     flower_base,
         'page_w_mm':       page_w_mm,
         'page_h_mm':       page_h_mm,
         'landscape':       landscape,
