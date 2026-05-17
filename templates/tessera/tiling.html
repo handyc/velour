@@ -42,12 +42,25 @@
 </p>
 
 <form method="get" class="tess-bar" id="tess-tiling-form">
-  rows <input type="number" name="rows" value="{{ rows }}" min="1" max="24">
-  cols <input type="number" name="cols" value="{{ cols }}" min="1" max="32">
+  rows <input type="number" name="rows" value="{{ rows }}" min="1" max="1024">
+  cols <input type="number" name="cols" value="{{ cols }}" min="1" max="1024">
   seed <input type="number" name="seed" value="{{ seed }}" id="tess-seed">
+  mode
+  <select name="mode" title="auto = per-tile <img> for small grids, single composite PNG for big ones">
+    <option value="">auto</option>
+    <option value="tiles"     {% if mode == 'tiles'     %}selected{% endif %}>tiles</option>
+    <option value="composite" {% if mode == 'composite' %}selected{% endif %}>composite</option>
+  </select>
   <button type="submit">re-roll</button>
   <button type="button" id="tess-random-reroll"
           title="pick a random seed and re-roll in one click">🎲 random</button>
+  <span style="margin-left:0.8rem; color:#888; font-size:0.78rem;">
+    {% if mode == 'composite' %}composite ({{ composite_dims.0 }}×{{ composite_dims.1 }} px){% else %}per-tile{% endif %}
+    · {{ rows }}×{{ cols }} = {{ rows|add:0 }}{% widthratio rows 1 cols %} cells
+  </span>
+  {% if rows == 1024 and cols == 1024 %}
+    <span style="color:#d29922; font-size:0.78rem;">🚀 super-large</span>
+  {% endif %}
 </form>
 <script>
   document.getElementById('tess-random-reroll')
@@ -58,7 +71,21 @@
     });
 </script>
 
-{% if set.topology == 'hex' %}
+{% if mode == 'composite' %}
+<div style="padding:10px; text-align:center; background:#0a0e14;">
+  <img src="{% url 'tessera:tiling' set.slug %}{{ composite_url }}"
+       alt="composite tiling {{ rows }}×{{ cols }}"
+       style="max-width:100%; image-rendering:pixelated; image-rendering:crisp-edges;
+              border:1px solid #234;">
+  <div style="color:#888; font-size:0.78rem; margin-top:0.4rem;">
+    composite PNG ({{ composite_dims.0 }}×{{ composite_dims.1 }} px) —
+    each tile rendered as its mean-of-edge-palette colour.
+    Switch to <a href="?rows={{ rows }}&cols={{ cols }}&seed={{ seed }}&mode=tiles"
+                  style="color:#79c0ff;">per-tile mode</a>
+    for full detail (slow above ~50×50).
+  </div>
+</div>
+{% elif set.topology == 'hex' %}
 <div class="tess-hex-grid"
      style="width:{{ container_w }}px; height:{{ container_h }}px;">
   {% for p in placements %}

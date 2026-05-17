@@ -138,8 +138,8 @@ def tiling_test(request, slug):
     default_cols = 8
     rows = int(request.GET.get('rows', default_rows))
     cols = int(request.GET.get('cols', default_cols))
-    rows = max(1, min(rows, 24))
-    cols = max(1, min(cols, 32))
+    rows = max(1, min(rows, 1024))
+    cols = max(1, min(cols, 1024))
     import random
     rng = random.Random(int(request.GET.get('seed', 0)))
 
@@ -209,13 +209,81 @@ def tiling_test(request, slug):
                 placements.append({'left': x, 'top': y, 'tid': tid})
         container_w = max(p['left'] for p in placements) + TILE_PX
         container_h = max(p['top'] for p in placements) + TILE_PX
+    # Composite mode: when the grid is too large for per-tile <img>
+    # rendering, build one PNG of the whole pattern.  Threshold = 2500
+    # cells (50×50); above that, switch to composite automatically.
+    # Caller can force either mode with ?mode=composite|tiles.
+    COMPOSITE_THRESHOLD = 50 * 50
+    mode = (request.GET.get('mode') or '').strip().lower()
+    if mode not in ('composite', 'tiles'):
+        mode = 'composite' if rows * cols > COMPOSITE_THRESHOLD else 'tiles'
+
+    composite_url = None
+    composite_dims = None
+    if mode == 'composite':
+        try:
+            px = max(1, min(int(request.GET.get('px', 4)), 32))
+        except (TypeError, ValueError):
+            px = 4
+        # Lower px floor for very large grids so the resulting PNG
+        # doesn't push past a few hundred MB.  Cap at 8192×8192 final
+        # image; clamp px if necessary.
+        if rows * px > 8192 or cols * px > 8192:
+            px = max(1, min(px, 8192 // max(rows, cols)))
+        composite_dims = (cols * px, rows * px)
+        composite_url = (f'?rows={rows}&cols={cols}&'
+                          f'seed={request.GET.get("seed", "0")}&'
+                          f'mode=composite&px={px}&render=png')
+        # Build the PNG inline if ?render=png — render path returns PNG;
+        # otherwise we fall through to the HTML view that embeds <img>.
+        if request.GET.get('render') == 'png':
+            from io import BytesIO
+            import numpy as np
+            from PIL import Image
+            pal = []
+            for css in (s.palette or [(220,80,40),(60,120,210),(80,180,90),(230,200,60)]):
+                if isinstance(css, str):
+                    c = css.lstrip('#')
+                    if len(c) == 3:
+                        c = ''.join(ch*2 for ch in c)
+                    pal.append((int(c[0:2],16), int(c[2:4],16), int(c[4:6],16)))
+                else:
+                    pal.append(tuple(int(x) for x in css[:3]))
+            pal_arr = np.array(pal, dtype=np.uint8)
+            # Rep colour = mean of palette entries indexed by tile edges.
+            # Vectorised over the whole grid.
+            n_edges = 6 if s.topology == 'hex' else 4
+            edges_arr = np.zeros((rows, cols, n_edges), dtype=np.uint8)
+            for r_i, row in enumerate(grid):
+                for c_i, t in enumerate(row):
+                    edges_arr[r_i, c_i] = t
+            rgb = pal_arr[edges_arr].mean(axis=2).astype(np.uint8)
+            # Expand by px and shift odd rows by px/2 for hex parity.
+            big = np.repeat(np.repeat(rgb, px, axis=0), px, axis=1)
+            if s.topology == 'hex' and px >= 2:
+                shift = px // 2
+                # roll only odd output rows (every other row-block)
+                for r_out in range(rows):
+                    if r_out & 1:
+                        big[r_out*px:(r_out+1)*px] = np.roll(
+                            big[r_out*px:(r_out+1)*px], shift, axis=1)
+            img = Image.fromarray(big, mode='RGB')
+            buf = BytesIO()
+            img.save(buf, 'PNG', optimize=False)
+            resp = HttpResponse(buf.getvalue(), content_type='image/png')
+            resp['Cache-Control'] = 'private, max-age=300'
+            return resp
+
     return render(request, 'tessera/tiling.html', {
         'set': s,
         'grid_ids': grid_ids,
         'rows': rows, 'cols': cols,
-        'placements': placements,
-        'container_w': container_w,
-        'container_h': container_h,
+        'placements': placements if mode == 'tiles' else None,
+        'composite_url': composite_url,
+        'composite_dims': composite_dims,
+        'mode': mode,
+        'container_w': container_w if mode == 'tiles' else 0,
+        'container_h': container_h if mode == 'tiles' else 0,
         'seed': request.GET.get('seed', '0'),
         'render_version': R.RENDER_VERSION,
     })
