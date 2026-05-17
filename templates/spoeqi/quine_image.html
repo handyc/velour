@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}spoeqi — image → quine test{% endblock %}
+{% block content %}
+<style>
+  .iq-page { max-width: 72em; }
+  .iq-page h1 { margin: 0 0 0.5rem 0; }
+  .iq-page p.lede { color: #aaa; font-size: 0.9rem; max-width: 50em; }
+
+  .iq-form { display: flex; flex-direction: column; gap: 0.6rem;
+              padding: 0.9rem 1rem; margin: 1rem 0;
+              background: #0d1117; border: 1px solid #234; }
+  .iq-form .row { display: flex; gap: 0.8rem; align-items: center;
+                     flex-wrap: wrap; }
+  .iq-form label { color: #8b949e; font-size: 0.85rem; }
+  .iq-form input[type=text],
+  .iq-form select { background: #0d1117; color: #c9d1d9;
+                       border: 1px solid #30363d; padding: 0.25rem 0.5rem;
+                       font-family: ui-monospace, monospace; }
+  .iq-form input[type=file] { color: #c9d1d9; }
+  .iq-form button { background: #238636; color: #fff; border: 0;
+                       padding: 0.35rem 1rem; cursor: pointer;
+                       font-family: inherit; }
+
+  .iq-result { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem;
+                margin: 1rem 0; }
+  @media (max-width: 64em) { .iq-result { grid-template-columns: 1fr; } }
+  .iq-card { padding: 0.9rem 1rem; background: #0d1117; border: 1px solid #234; }
+  .iq-card h2 { margin: 0 0 0.5rem; font-size: 0.95rem; color: #c9d1d9; }
+  .iq-card .src-line { color: #8b949e; font-size: 0.78rem; }
+  .iq-preview { display: block; margin: 0.5rem auto;
+                 image-rendering: pixelated; image-rendering: crisp-edges;
+                 border: 1px solid #30363d; background: #000; max-width: 100%; }
+  .iq-palette { display: flex; gap: 4px; margin: 0.4rem 0;
+                 justify-content: center; }
+  .iq-palette .sw { display: inline-block; width: 32px; height: 32px;
+                       border: 1px solid #30363d; }
+  .iq-palette .lab { color: #8b949e; font-size: 0.7rem; text-align: center;
+                       font-family: ui-monospace, monospace; }
+
+  .iq-scores { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .iq-scores th, .iq-scores td { padding: 0.3rem 0.4rem;
+                                       border-bottom: 1px solid #21262d;
+                                       text-align: left;
+                                       font-family: ui-monospace, monospace; }
+  .iq-scores th { color: #8b949e; font-weight: normal; width: 12em; }
+  .iq-scores .ok    { color: #56d364; }
+  .iq-scores .meh   { color: #d29922; }
+  .iq-scores .nope  { color: #888; }
+
+  .iq-verdict { padding: 0.7rem 0.9rem; margin-top: 0.6rem;
+                 font-family: ui-monospace, monospace; font-size: 0.88rem; }
+  .iq-verdict.official { background: #0a1b0a; border: 1px solid #2ea043;
+                            color: #7ee787; }
+  .iq-verdict.soft     { background: #2d2410; border: 1px solid #d29922;
+                            color: #ffdb6d; }
+  .iq-verdict.fail     { background: #1a0d0d; border: 1px solid #6e2222;
+                            color: #ff9a8b; }
+  .iq-actions { display: flex; gap: 0.6rem; margin-top: 0.5rem;
+                 align-items: center; flex-wrap: wrap; }
+  .iq-actions button { background: #1f6feb; color: #fff; border: 0;
+                          padding: 0.35rem 0.9rem; cursor: pointer;
+                          font-family: inherit; }
+  .iq-actions a { color: #79c0ff; font-size: 0.85rem; }
+  .iq-actions .force { color: #d29922; font-size: 0.8rem; }
+
+  .iq-msg { padding: 0.4rem 0.7rem; background: #161b22; border-left: 3px solid #1f6feb;
+             font-size: 0.85rem; margin: 0.5rem 0; color: #c9d1d9; }
+  .iq-msg.warn { border-left-color: #d29922; color: #ffdb6d; }
+
+  .iq-recent { margin-top: 1.5rem; }
+  .iq-recent h2 { font-size: 1rem; color: #c9d1d9; margin: 0 0 0.4rem; }
+  .iq-recent .grid { display: grid;
+                       grid-template-columns: repeat(auto-fill, minmax(11em, 1fr));
+                       gap: 0.6rem; }
+  .iq-recent .item { padding: 0.5rem; background: #0d1117; border: 1px solid #234;
+                       font-family: ui-monospace, monospace; font-size: 0.78rem; }
+  .iq-recent .item a { color: #79c0ff; }
+  .iq-recent .item .sr { color: #56d364; }
+</style>
+
+<div class="iq-page">
+  <h1>image → quine test</h1>
+  <p class="lede">
+    Upload any image — a painting, a photo, a drawing.  It gets centre-
+    cropped, posterised to 4 colours, resized to 128×128 (=16,384
+    cells), and interpreted as a K=4 hex CA's rule LUT.  The same LUT
+    is then used as the rule's own initial state and stepped 16 ticks;
+    how much survives unchanged is the self-reproduction score (SR).
+    Painting <em>quines</em> are extraordinarily rare — random 4-colour
+    grids score around 0.25 — but every now and then a Klimt or a Miró
+    geometry lines up just right.
+  </p>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="iq-msg {% if m.level_tag == 'warning' %}warn{% endif %}">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  {% if mode == 'form' %}
+    <form class="iq-form" method="post"
+            action="{% url 'spoeqi:quine_image' %}"
+            enctype="multipart/form-data">
+      {% csrf_token %}
+      <div class="row">
+        <label>image <input type="file" name="image" accept="image/*" required></label>
+      </div>
+      <div class="row">
+        <label>label
+          <input type="text" name="label" value=""
+                  placeholder="e.g. Klimt — Kiss"
+                  maxlength="120" size="40">
+        </label>
+        <label>quantize
+          <select name="quantize">
+            <option value="median_cut">median cut (default)</option>
+            <option value="kmeans">k-means refined</option>
+            <option value="fast_octree">fast octree</option>
+          </select>
+        </label>
+        <button type="submit">▶ posterise + score</button>
+      </div>
+    </form>
+
+    <p style="color:#8b949e; font-size:0.8rem;">
+      Anything above SR ≥ {{ 0.50|floatformat:2 }} is interesting (~2× the K=4
+      random baseline).  At SR ≥ 0.99 OR arb-σ ≥ 0.95, the result is
+      saveable as a class-4 quine alongside the regular search archive.
+    </p>
+
+    {% if recent %}
+      <div class="iq-recent">
+        <h2>recent image-quines ({{ n_total }} total)</h2>
+        <div class="grid">
+          {% for r in recent %}
+            <div class="item">
+              <div><a href="{% url 'spoeqi:quine_detail' r.pk %}">#{{ r.pk }}</a>
+                — {{ r.label|default:"(unnamed)"|truncatechars:24 }}</div>
+              <div class="sr">SR {{ r.fitness|floatformat:4 }}
+                · arbσ {{ r.meta.arbsigma|default_if_none:0|floatformat:3 }}</div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
+  {% elif mode == 'result' %}
+    <div class="iq-result">
+      <div class="iq-card">
+        <h2>{{ label }}</h2>
+        <div class="src-line">
+          source {{ src_size.0 }}×{{ src_size.1 }} → posterised 128×128
+          · quantize: {{ quantize }} · sha {{ rule_sha8 }}
+        </div>
+        <img class="iq-preview" src="{{ preview_data_url }}"
+              alt="posterised preview"
+              style="width: 512px; max-width: 100%;">
+        <div class="iq-palette">
+          {% for css in palette_hex %}
+            <div>
+              <div class="sw" style="background:{{ css }};" title="{{ css }}"></div>
+              <div class="lab">{{ css }}</div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="iq-card">
+        <h2>quine scores</h2>
+        <table class="iq-scores">
+          <tr>
+            <th>SR strict (16 ticks)</th>
+            <td class="{% if scores.sr_strict >= thresholds.sr_strict %}ok{% elif scores.sr_strict >= thresholds.interest %}meh{% else %}nope{% endif %}">
+              {{ scores.sr_strict|floatformat:4 }}
+              <span style="color:#6b727a;">/ thr {{ thresholds.sr_strict|floatformat:2 }}</span>
+            </td>
+          </tr>
+          <tr>
+            <th>SR arbitrary σ</th>
+            <td class="{% if scores.sr_arbsigma >= thresholds.sr_arbsigma %}ok{% elif scores.sr_arbsigma >= thresholds.interest %}meh{% else %}nope{% endif %}">
+              {{ scores.sr_arbsigma|floatformat:4 }}
+              <span style="color:#6b727a;">/ thr {{ thresholds.sr_arbsigma|floatformat:2 }}</span>
+            </td>
+          </tr>
+          <tr>
+            <th>Wolfram class</th>
+            <td class="{% if scores.wolfram_class == 4 %}ok{% else %}nope{% endif %}">
+              class {{ scores.wolfram_class }}
+              <span style="color:#6b727a;">(c4 score {{ scores.c4|floatformat:3 }})</span>
+            </td>
+          </tr>
+          <tr>
+            <th>probe activity</th>
+            <td>{{ scores.act|floatformat:3 }}</td>
+          </tr>
+          <tr>
+            <th>chain run (class-4)</th>
+            <td>{{ scores.chain_run_length }} levels
+              <span style="color:#6b727a;">({{ scores.chain_distinct_levels }} distinct)</span>
+            </td>
+          </tr>
+        </table>
+
+        {% if existing %}
+          <div class="iq-verdict soft">
+            ⓘ already in archive as
+            <a href="{% url 'spoeqi:quine_detail' existing.pk %}" style="color:#ffdb6d;">
+              quine #{{ existing.pk }}</a> — identical LUT, no save needed.
+          </div>
+        {% elif is_official %}
+          <div class="iq-verdict official">
+            ✔ This is a quine. SR ≥ {{ thresholds.sr_strict|floatformat:2 }}
+            or arb-σ ≥ {{ thresholds.sr_arbsigma|floatformat:2 }} — save it
+            into the class-4 quine archive?
+          </div>
+          <form method="post" action="{% url 'spoeqi:quine_image_save' %}" class="iq-actions">
+            {% csrf_token %}
+            <button type="submit">💾 save as quine</button>
+            <a href="{% url 'spoeqi:quine_image' %}">try another image</a>
+          </form>
+        {% elif is_interesting %}
+          <div class="iq-verdict soft">
+            ◆ interesting but not a hard quine.  You can still force-save
+            it as an archive entry for future refinement.
+          </div>
+          <form method="post" action="{% url 'spoeqi:quine_image_save' %}" class="iq-actions">
+            {% csrf_token %}
+            <input type="hidden" name="force" value="1">
+            <button type="submit">💾 force-save anyway</button>
+            <a href="{% url 'spoeqi:quine_image' %}">try another image</a>
+          </form>
+        {% else %}
+          <div class="iq-verdict fail">
+            ✗ not a quine.  SR ≈ K=4 random baseline (0.25).
+            Most photographs and paintings sit here; try sharper
+            posterisation, more geometric source images, or upload
+            something with strong large-scale structure.
+          </div>
+          <form method="post" action="{% url 'spoeqi:quine_image_save' %}" class="iq-actions">
+            {% csrf_token %}
+            <input type="hidden" name="force" value="1">
+            <a href="{% url 'spoeqi:quine_image' %}">try another image</a>
+            <button type="submit" class="force"
+                      style="background:#30363d;">force-save anyway</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

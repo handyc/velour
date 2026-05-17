@@ -33,6 +33,9 @@ urlpatterns = [
     # Class-4 quine toolkit (must precede the catch-all <slug:slug>/ below).
     path('quine/',                       views.quine_index,    name='quine_index'),
     path('quine/search/',                views.quine_search,   name='quine_search'),
+    path('quine/image/',                 views.quine_image,    name='quine_image'),
+    path('quine/image/save/',            views.quine_image_save,
+                                                                name='quine_image_save'),
     path('quine/<int:pk>/',              views.quine_detail,   name='quine_detail'),
     path('quine/<int:pk>/refine/',       views.quine_refine,   name='quine_refine'),
     path('quine/<int:pk>/delete/',       views.quine_delete,   name='quine_delete'),

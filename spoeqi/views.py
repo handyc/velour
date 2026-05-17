@@ -2364,6 +2364,171 @@ def quine_search(request):
 
 
 @login_required
+def quine_image(request):
+    """Upload-and-test: image → posterize-to-4 → score as quine LUT.
+
+    GET:  show upload form + (if any) the most recent image-quines.
+    POST: process the uploaded image and render the result inline.
+
+    The 16,384-byte candidate LUT is held in the session so the user
+    can click "save this" without re-uploading.  Session keys expire
+    when the session expires.
+    """
+    from caformer.models import ComponentChampion
+    from . import image_quine as iq
+
+    if request.method != 'POST':
+        # Recent image-quine archive (last 24).
+        recent = []
+        for c in (ComponentChampion.objects
+                       .filter(component_slug=_QUINE_SLUG,
+                                 run_label__startswith='img:')
+                       .order_by('-pk')[:24]):
+            recent.append({
+                'pk':       c.pk,
+                'label':    (c.run_label or '')[4:],   # strip 'img:'
+                'fitness':  c.fitness or 0.0,
+                'meta':     _quine_meta(c),
+            })
+        n_total = (ComponentChampion.objects
+                       .filter(component_slug=_QUINE_SLUG,
+                                 run_label__startswith='img:').count())
+        return render(request, 'spoeqi/quine_image.html', {
+            'mode':    'form',
+            'recent':  recent,
+            'n_total': n_total,
+        })
+
+    # POST: process the upload.
+    f = request.FILES.get('image')
+    if not f:
+        messages.warning(request, 'no image file submitted')
+        return redirect('spoeqi:quine_image')
+    if f.size > 20 * 1024 * 1024:
+        messages.warning(request,
+            f'image too large ({f.size/1024/1024:.1f} MB) — limit 20 MB')
+        return redirect('spoeqi:quine_image')
+
+    label = (request.POST.get('label') or f.name or 'upload').strip()[:120]
+    quantize = request.POST.get('quantize') or 'median_cut'
+    if quantize not in ('median_cut', 'kmeans', 'fast_octree'):
+        quantize = 'median_cut'
+
+    try:
+        file_bytes = f.read()
+        result = iq.image_to_rule(file_bytes, quantize=quantize,
+                                       preview_scale=4)
+    except Exception as e:
+        messages.warning(request, f'failed to read image: {e}')
+        return redirect('spoeqi:quine_image')
+
+    try:
+        scores = iq.score_rule(result.rule_bytes)
+    except Exception as e:
+        messages.warning(request, f'scoring failed: {e}')
+        return redirect('spoeqi:quine_image')
+
+    rule_sha = hashlib.sha1(result.rule_bytes).hexdigest()
+    # Stash the candidate so the save endpoint can pick it up without
+    # re-uploading.  Session-stored bytes go through base64 because the
+    # default JSON serializer can't handle raw bytes.
+    import base64
+    request.session['image_quine_pending'] = {
+        'rule_b64':    base64.b64encode(result.rule_bytes).decode('ascii'),
+        'palette_rgb': [list(rgb) for rgb in result.palette_rgb],
+        'src_size':    [int(result.src_size[0]), int(result.src_size[1])],
+        'quantize':    result.quantize_method,
+        'label':       label,
+        'sha':         rule_sha,
+    }
+    request.session.modified = True
+
+    # Cheap preview PNG inline as data: URL — avoids a second request.
+    import base64
+    preview_b64 = base64.b64encode(result.preview_png).decode('ascii')
+    preview_data_url = f'data:image/png;base64,{preview_b64}'
+
+    existing = (ComponentChampion.objects
+                    .filter(component_slug=_QUINE_SLUG,
+                              rules_blob=result.rule_bytes).first())
+
+    return render(request, 'spoeqi/quine_image.html', {
+        'mode':            'result',
+        'label':           label,
+        'quantize':        result.quantize_method,
+        'src_size':        result.src_size,
+        'preview_data_url': preview_data_url,
+        'scores':          scores,
+        'palette_rgb':     result.palette_rgb,
+        'palette_hex':     ['#%02x%02x%02x' % rgb for rgb in result.palette_rgb],
+        'rule_sha':        rule_sha,
+        'rule_sha8':       rule_sha[:8],
+        'is_official':     iq.is_official_quine(scores),
+        'is_interesting':  iq.is_interesting(scores),
+        'thresholds':      {
+            'sr_strict':   iq.QUINE_SR_STRICT_THRESHOLD,
+            'sr_arbsigma': iq.QUINE_SR_ARBSIGMA_THRESHOLD,
+            'interest':    iq.INTERESTING_SR_THRESHOLD,
+        },
+        'existing':        existing,
+    })
+
+
+@login_required
+@require_POST
+def quine_image_save(request):
+    """Persist the most recently tested image-quine to the archive."""
+    from . import image_quine as iq
+    import base64
+
+    pending = request.session.get('image_quine_pending')
+    if not pending:
+        messages.warning(request,
+            'nothing to save — re-upload the image first')
+        return redirect('spoeqi:quine_image')
+
+    rule_bytes = base64.b64decode(pending['rule_b64'])
+    if len(rule_bytes) != iq.LUT_SIZE:
+        messages.warning(request,
+            f'pending rule wrong length ({len(rule_bytes)} B)')
+        return redirect('spoeqi:quine_image')
+
+    scores = iq.score_rule(rule_bytes)
+
+    # Allow the user to force-save below the threshold via an override.
+    force = bool(request.POST.get('force'))
+    if not (iq.is_official_quine(scores) or force):
+        messages.warning(request,
+            f'SR={scores["sr_strict"]:.3f}, arbσ={scores["sr_arbsigma"]:.3f} — '
+            f'below thresholds; tick "force" to save anyway')
+        return redirect('spoeqi:quine_image')
+
+    palette = [tuple(rgb) for rgb in pending['palette_rgb']]
+    label   = pending.get('label') or 'image-upload'
+    src_size = tuple(pending.get('src_size') or (0, 0))
+    quantize = pending.get('quantize') or 'median_cut'
+
+    obj, created = iq.persist_image_quine(
+        rule_bytes,
+        scores=scores,
+        image_label=label,
+        quantize_method=quantize,
+        src_size=src_size,
+        palette_rgb=palette)
+
+    if created:
+        messages.success(request,
+            f'saved as quine #{obj.pk} (SR={scores["sr_strict"]:.4f}, '
+            f'arbσ={scores["sr_arbsigma"]:.4f})')
+    else:
+        messages.warning(request,
+            f'identical LUT already saved as quine #{obj.pk}')
+    # Clear pending state so a refresh doesn't re-save.
+    request.session.pop('image_quine_pending', None)
+    return redirect('spoeqi:quine_detail', pk=obj.pk)
+
+
+@login_required
 def quine_detail(request, pk):
     """Detail page: chain walk + per-level stats + actions."""
     from caformer.models import ComponentChampion

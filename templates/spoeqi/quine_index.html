@@ -99,7 +99,13 @@
 </style>
 
 <div class="q-page">
-  <h1>class-4 quine search</h1>
+  <h1>class-4 quine search
+    <a href="{% url 'spoeqi:quine_image' %}"
+        style="float:right; font-size:0.7em; color:#79c0ff; text-decoration:none;
+                padding: 0.25rem 0.7rem; border: 1px solid #1f6feb;">
+      🖼 image → quine test
+    </a>
+  </h1>
   <p class="lede">
     Hunt for K=4 hex CA rules whose 16,384-byte LUT, applied to itself
     laid out as a 128×128 grid, reproduces itself (a quine) AND exhibits
