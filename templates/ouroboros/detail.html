@@ -196,7 +196,7 @@
         <div style="margin-top:0.9rem; display:flex; gap:0.9rem;
                       align-items:flex-start; flex-wrap:wrap;">
           <div style="text-align:center;">
-            <img src="{% url 'ouroboros:packed_png' pk=pk %}?scale=4&amp;palette=gray"
+            <img src="{% url 'ouroboros:packed_png' pk=pk %}?scale=2&amp;palette=gray"
                   alt="Quine #{{ pk }} as 64×64 packed 8-bit image"
                   style="image-rendering:pixelated;
                           image-rendering:crisp-edges;
@@ -204,13 +204,13 @@
             <div class="caption" style="margin-top:0.3rem; font-size:0.78rem;">
               packed view — 64×64, 8 bits/px.<br>
               4 cells (2 bits) → 1 byte → 4,096 bytes total.<br>
-              <a href="{% url 'ouroboros:packed_png' pk=pk %}?scale=4&amp;palette=heat"
+              <a href="{% url 'ouroboros:packed_png' pk=pk %}?scale=2&amp;palette=heat"
                   style="color:#79c0ff;">heat</a>
               ·
-              <a href="{% url 'ouroboros:packed_png' pk=pk %}?scale=4&amp;palette=hsv"
+              <a href="{% url 'ouroboros:packed_png' pk=pk %}?scale=2&amp;palette=hsv"
                   style="color:#79c0ff;">hsv</a>
               ·
-              <a href="{% url 'ouroboros:packed_png' pk=pk %}?scale=4&amp;palette=gray"
+              <a href="{% url 'ouroboros:packed_png' pk=pk %}?scale=2&amp;palette=gray"
                   style="color:#79c0ff;">gray</a>
             </div>
           </div>
