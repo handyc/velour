@@ -174,13 +174,12 @@
   </script>
 
   <script>
-    /* ── Palette pickers ───────────────────────────────────────────
-     * Four <input type="color"> elements drive the K=4 palette.
-     * On change we rewrite the src of every <img data-base-url=…> on
-     * the page, appending c0/c1/c2/c3 query params.  The choice is
-     * persisted to localStorage so it survives navigation between
-     * ouroboros pages within the same browser. */
-    (function () {
+    /* Palette pickers — see ouroboros/detail.html notes block above
+     * for what this does.  The comment line was reflowed off this
+     * block because earlier versions had angle brackets inside the
+     * comment that some HTML tooling chokes on; the IIFE itself is
+     * what matters. */
+    function _ouroborosPalette () {
       const DEFAULTS = ['#dc5028', '#3c78d2', '#50b45a', '#e6c83c'];
       const STORAGE_KEY = 'ouroboros:palette';
       const pickers = Array.from(document.querySelectorAll('input.oud-color'));
@@ -240,7 +239,14 @@
         }
         setPal([rnd(), rnd(), rnd(), rnd()]);
       });
-    })();
+    }
+    /* Script lives near the top of <body> but the picker inputs sit
+     * further down the DOM, so wait until DOMContentLoaded fires. */
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', _ouroborosPalette);
+    } else {
+      _ouroborosPalette();
+    }
   </script>
 
   {% if is_featured %}
