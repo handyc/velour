@@ -70,12 +70,23 @@
   .iq-recent { margin-top: 1.5rem; }
   .iq-recent h2 { font-size: 1rem; color: #c9d1d9; margin: 0 0 0.4rem; }
   .iq-recent .grid { display: grid;
-                       grid-template-columns: repeat(auto-fill, minmax(11em, 1fr));
-                       gap: 0.6rem; }
+                       grid-template-columns: repeat(auto-fill, minmax(14em, 1fr));
+                       gap: 0.7rem; }
   .iq-recent .item { padding: 0.5rem; background: #0d1117; border: 1px solid #234;
                        font-family: ui-monospace, monospace; font-size: 0.78rem; }
-  .iq-recent .item a { color: #79c0ff; }
-  .iq-recent .item .sr { color: #56d364; }
+  .iq-recent .item a { color: #79c0ff; text-decoration: none; }
+  .iq-recent .item .sr { color: #56d364; margin-top: 0.3rem; }
+  .iq-recent .item .arbsig-hi { color: #ffd866; }
+  .iq-recent .pair { display: grid; grid-template-columns: 1fr 1fr;
+                      gap: 4px; margin-bottom: 0.4rem; }
+  .iq-recent .pair figure { margin: 0; }
+  .iq-recent .pair img { display: block; width: 100%; height: auto;
+                          aspect-ratio: 1; object-fit: cover;
+                          image-rendering: pixelated;
+                          image-rendering: crisp-edges;
+                          background: #000; border: 1px solid #1a2333; }
+  .iq-recent .pair figcaption { color: #6e7681; font-size: 0.65rem;
+                                  text-align: center; padding-top: 1px; }
 </style>
 
 <div class="iq-page">
@@ -130,14 +141,39 @@
 
     {% if recent %}
       <div class="iq-recent">
-        <h2>recent image-quines ({{ n_total }} total)</h2>
+        <h2>image-quine library ({{ n_total }} total — {{ recent|length }} shown)</h2>
         <div class="grid">
           {% for r in recent %}
             <div class="item">
-              <div><a href="{% url 'spoeqi:quine_detail' r.pk %}">#{{ r.pk }}</a>
-                — {{ r.label|default:"(unnamed)"|truncatechars:24 }}</div>
+              <div class="pair">
+                <figure>
+                  {% if r.source_url %}
+                    <a href="{% url 'spoeqi:quine_detail' r.pk %}">
+                      <img src="{{ r.source_url }}" alt="source"
+                            loading="lazy">
+                    </a>
+                  {% else %}
+                    <img alt="(no source stored)"
+                          style="background:#21262d;">
+                  {% endif %}
+                  <figcaption>source</figcaption>
+                </figure>
+                <figure>
+                  <a href="{% url 'spoeqi:quine_detail' r.pk %}">
+                    <img src="{{ r.posterized_url }}?scale=2"
+                          alt="posterised">
+                  </a>
+                  <figcaption>posterised K=4</figcaption>
+                </figure>
+              </div>
+              <div>
+                <a href="{% url 'spoeqi:quine_detail' r.pk %}">#{{ r.pk }}</a>
+                — {{ r.label|default:"(unnamed)"|truncatechars:30 }}
+              </div>
               <div class="sr">SR {{ r.fitness|floatformat:4 }}
-                · arbσ {{ r.meta.arbsigma|default_if_none:0|floatformat:3 }}</div>
+                · arbσ
+                <span {% if r.meta.arbsigma >= 0.95 %}class="arbsig-hi"{% endif %}>{{ r.meta.arbsigma|default_if_none:0|floatformat:4 }}</span>
+              </div>
             </div>
           {% endfor %}
         </div>
@@ -152,9 +188,30 @@
           source {{ src_size.0 }}×{{ src_size.1 }} → posterised 128×128
           · quantize: {{ quantize }} · sha {{ rule_sha8 }}
         </div>
-        <img class="iq-preview" src="{{ preview_data_url }}"
-              alt="posterised preview"
-              style="width: 512px; max-width: 100%;">
+        {% if source_url %}
+          <div style="display:grid; grid-template-columns: 1fr 1fr;
+                        gap: 0.5rem; margin: 0.6rem 0;">
+            <figure style="margin:0; text-align:center;">
+              <img src="{{ source_url }}" alt="source image"
+                    style="width:100%; max-width:256px; height:auto;
+                            aspect-ratio:1; object-fit:cover;
+                            border:1px solid #30363d; background:#000;">
+              <figcaption style="color:#6e7681; font-size:0.7rem; margin-top:2px;">source (resized)</figcaption>
+            </figure>
+            <figure style="margin:0; text-align:center;">
+              <img src="{{ preview_data_url }}" alt="posterised preview"
+                    style="width:100%; max-width:256px; height:auto;
+                            image-rendering:pixelated;
+                            image-rendering:crisp-edges;
+                            border:1px solid #30363d; background:#000;">
+              <figcaption style="color:#6e7681; font-size:0.7rem; margin-top:2px;">posterised K=4 (128×128 → ×4)</figcaption>
+            </figure>
+          </div>
+        {% else %}
+          <img class="iq-preview" src="{{ preview_data_url }}"
+                alt="posterised preview"
+                style="width: 512px; max-width: 100%;">
+        {% endif %}
         <div class="iq-palette">
           {% for css in palette_hex %}
             <div>

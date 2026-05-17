@@ -2378,17 +2378,24 @@ def quine_image(request):
     from . import image_quine as iq
 
     if request.method != 'POST':
-        # Recent image-quine archive (last 24).
+        # Recent image-quine archive (last 48 — it's a gallery now).
+        from django.conf import settings
         recent = []
         for c in (ComponentChampion.objects
                        .filter(component_slug=_QUINE_SLUG,
                                  run_label__startswith='img:')
-                       .order_by('-pk')[:24]):
+                       .order_by('-pk')[:48]):
+            m = _quine_meta(c)
+            src_rel = (m.get('source_image_rel') or '').strip()
             recent.append({
-                'pk':       c.pk,
-                'label':    (c.run_label or '')[4:],   # strip 'img:'
-                'fitness':  c.fitness or 0.0,
-                'meta':     _quine_meta(c),
+                'pk':         c.pk,
+                'label':      (c.run_label or '')[4:],   # strip 'img:'
+                'fitness':    c.fitness or 0.0,
+                'meta':       m,
+                'source_url': (f'{settings.MEDIA_URL}{src_rel}'
+                                 if src_rel else ''),
+                'posterized_url': reverse('spoeqi:quine_posterized_png',
+                                              args=[c.pk]),
             })
         n_total = (ComponentChampion.objects
                        .filter(component_slug=_QUINE_SLUG,
@@ -2429,17 +2436,28 @@ def quine_image(request):
         return redirect('spoeqi:quine_image')
 
     rule_sha = hashlib.sha1(result.rule_bytes).hexdigest()
+    # Persist a resized copy of the source image immediately — we want
+    # the library page to show originals later even if the user never
+    # explicitly hits "save", and the file goes under MEDIA_ROOT keyed
+    # by sha1 so the same image won't be stored twice.
+    try:
+        source_rel = iq.save_source_image(file_bytes, sha1=rule_sha)
+    except Exception as e:
+        source_rel = ''
+        messages.warning(request, f'note: source image save failed ({e})')
+
     # Stash the candidate so the save endpoint can pick it up without
     # re-uploading.  Session-stored bytes go through base64 because the
     # default JSON serializer can't handle raw bytes.
     import base64
     request.session['image_quine_pending'] = {
-        'rule_b64':    base64.b64encode(result.rule_bytes).decode('ascii'),
-        'palette_rgb': [list(rgb) for rgb in result.palette_rgb],
-        'src_size':    [int(result.src_size[0]), int(result.src_size[1])],
-        'quantize':    result.quantize_method,
-        'label':       label,
-        'sha':         rule_sha,
+        'rule_b64':       base64.b64encode(result.rule_bytes).decode('ascii'),
+        'palette_rgb':    [list(rgb) for rgb in result.palette_rgb],
+        'src_size':       [int(result.src_size[0]), int(result.src_size[1])],
+        'quantize':       result.quantize_method,
+        'label':          label,
+        'sha':            rule_sha,
+        'source_rel':     source_rel,
     }
     request.session.modified = True
 
@@ -2452,11 +2470,16 @@ def quine_image(request):
                     .filter(component_slug=_QUINE_SLUG,
                               rules_blob=result.rule_bytes).first())
 
+    from django.conf import settings
+    source_url = (f'{settings.MEDIA_URL}{source_rel}'
+                    if source_rel else '')
+
     return render(request, 'spoeqi/quine_image.html', {
         'mode':            'result',
         'label':           label,
         'quantize':        result.quantize_method,
         'src_size':        result.src_size,
+        'source_url':      source_url,
         'preview_data_url': preview_data_url,
         'scores':          scores,
         'palette_rgb':     result.palette_rgb,
@@ -2507,6 +2530,7 @@ def quine_image_save(request):
     label   = pending.get('label') or 'image-upload'
     src_size = tuple(pending.get('src_size') or (0, 0))
     quantize = pending.get('quantize') or 'median_cut'
+    source_rel = pending.get('source_rel') or ''
 
     obj, created = iq.persist_image_quine(
         rule_bytes,
@@ -2514,7 +2538,8 @@ def quine_image_save(request):
         image_label=label,
         quantize_method=quantize,
         src_size=src_size,
-        palette_rgb=palette)
+        palette_rgb=palette,
+        source_image_rel=source_rel)
 
     if created:
         messages.success(request,
@@ -2526,6 +2551,36 @@ def quine_image_save(request):
     # Clear pending state so a refresh doesn't re-save.
     request.session.pop('image_quine_pending', None)
     return redirect('spoeqi:quine_detail', pk=obj.pk)
+
+
+@login_required
+def quine_posterized_png(request, pk):
+    """Render the 128×128 posterized image for an image-derived quine.
+
+    Reconstructs from rules_blob + meta['palette_rgb'] — no extra
+    storage needed since the LUT IS the posterized image, bijectively.
+    Works for any class4_quine row; non-image-upload rows get the
+    default 4-colour palette.
+    """
+    from caformer.models import ComponentChampion
+    from . import image_quine as iq
+    from django.views.decorators.http import condition
+
+    c = get_object_or_404(ComponentChampion, pk=pk,
+                            component_slug=_QUINE_SLUG)
+    meta = _quine_meta(c)
+    palette_rgb = meta.get('palette_rgb') or [
+        [220, 80, 40], [60, 120, 210], [80, 180, 90], [230, 200, 60]]
+    palette_rgb = [tuple(rgb) for rgb in palette_rgb]
+    try:
+        scale = max(1, min(8, int(request.GET.get('scale', 2))))
+    except (TypeError, ValueError):
+        scale = 2
+    png = iq.reconstruct_posterized_png(bytes(c.rules_blob),
+                                              palette_rgb, scale=scale)
+    resp = HttpResponse(png, content_type='image/png')
+    resp['Cache-Control'] = 'public, max-age=3600'
+    return resp
 
 
 @login_required

@@ -326,6 +326,7 @@ class Command(BaseCommand):
                 'rule':    rule.rule_bytes,
                 'palette': rule.palette_rgb,
                 'src_size': rule.src_size,
+                'src_bytes': img_bytes,
             })
 
         if not rows:
@@ -382,6 +383,16 @@ class Command(BaseCommand):
             saved = 0
             for r in ranked[:save_best]:
                 s = r['scores']
+                # Save source image first so the gallery can show it.
+                import hashlib as _h
+                rule_sha = _h.sha1(r['rule']).hexdigest()
+                try:
+                    source_rel = iq.save_source_image(r['src_bytes'],
+                                                          sha1=rule_sha)
+                except Exception as e:
+                    source_rel = ''
+                    self.stdout.write(self.style.WARNING(
+                        f"    note: source-image save failed: {e}"))
                 # Reuse persist_image_quine; force is implicit since we
                 # explicitly opted into save-best from the CLI.
                 obj, created = iq.persist_image_quine(
@@ -390,7 +401,8 @@ class Command(BaseCommand):
                     image_label=f"{r['artist']} — {r['title']}",
                     quantize_method=quantize,
                     src_size=r['src_size'],
-                    palette_rgb=r['palette'])
+                    palette_rgb=r['palette'],
+                    source_image_rel=source_rel)
                 tag = 'NEW' if created else 'dup'
                 self.stdout.write(
                     f"  [{tag}] #{obj.pk}: {r['artist']} — {r['title']} "

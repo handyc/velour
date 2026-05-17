@@ -36,6 +36,8 @@ urlpatterns = [
     path('quine/image/',                 views.quine_image,    name='quine_image'),
     path('quine/image/save/',            views.quine_image_save,
                                                                 name='quine_image_save'),
+    path('quine/<int:pk>/posterized.png', views.quine_posterized_png,
+                                                                name='quine_posterized_png'),
     path('quine/<int:pk>/',              views.quine_detail,   name='quine_detail'),
     path('quine/<int:pk>/refine/',       views.quine_refine,   name='quine_refine'),
     path('quine/<int:pk>/delete/',       views.quine_delete,   name='quine_delete'),

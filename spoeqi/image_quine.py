@@ -177,17 +177,69 @@ def is_interesting(scores: dict) -> bool:
               or scores['sr_arbsigma'] >= INTERESTING_SR_THRESHOLD)
 
 
+# ─── Source-image storage ────────────────────────────────────────────
+
+SOURCE_DIR = 'spoeqi_image_quine'   # relative to MEDIA_ROOT
+MAX_SOURCE_DIM = 800                # px — long-edge cap for stored source
+
+
+def _source_dir():
+    from django.conf import settings
+    from pathlib import Path
+    p = Path(settings.MEDIA_ROOT) / SOURCE_DIR
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def save_source_image(file_bytes: bytes, *, sha1: str) -> str:
+    """Resize to MAX_SOURCE_DIM long edge, save as JPEG, return rel path.
+
+    Stored under MEDIA_URL + SOURCE_DIR/<sha1>.jpg.  Idempotent — if a
+    file already exists at that hash, we don't re-write it.
+    """
+    from PIL import Image
+    dir_ = _source_dir()
+    target = dir_ / f'{sha1}.jpg'
+    if target.exists() and target.stat().st_size > 256:
+        return f'{SOURCE_DIR}/{sha1}.jpg'
+    im = _open_rgb(file_bytes)
+    w, h = im.size
+    if max(w, h) > MAX_SOURCE_DIM:
+        scale = MAX_SOURCE_DIM / max(w, h)
+        im = im.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+    im.save(target, format='JPEG', quality=85, optimize=True)
+    return f'{SOURCE_DIR}/{sha1}.jpg'
+
+
+def reconstruct_posterized_png(rule_bytes: bytes,
+                                  palette_rgb: list[tuple[int, int, int]],
+                                  *, scale: int = 1) -> bytes:
+    """Rebuild the 128×128 posterized image from a saved LUT + palette."""
+    if len(rule_bytes) != LUT_SIZE:
+        raise ValueError(f'rule_bytes must be {LUT_SIZE} B; '
+                         f'got {len(rule_bytes)}')
+    idx = np.frombuffer(rule_bytes, dtype=np.uint8).copy() & 3
+    idx = idx.reshape(GRID_SIDE, GRID_SIDE)
+    palette = [tuple(rgb) for rgb in palette_rgb]
+    return _render_preview_png(idx, palette, scale=scale)
+
+
 def persist_image_quine(rule_bytes: bytes, *,
                           scores: dict,
                           image_label: str,
                           quantize_method: str,
                           src_size: tuple[int, int],
-                          palette_rgb: list[tuple[int, int, int]]):
+                          palette_rgb: list[tuple[int, int, int]],
+                          source_image_rel: str = ''):
     """Save an image-derived quine to ComponentChampion(class4_quine).
 
     Returns the new (or existing) ComponentChampion instance.  Idempotent
     on (rule_bytes): a second upload of an identical image just hands
     back the original row.
+
+    ``source_image_rel`` is an optional path under MEDIA_URL pointing
+    at the saved source image — set by the upload flow so the library
+    page can render the original alongside the posterized version.
     """
     import json
     from caformer.models import ComponentChampion
@@ -203,6 +255,7 @@ def persist_image_quine(rule_bytes: bytes, *,
         'src_size':              [int(src_size[0]), int(src_size[1])],
         'palette_rgb':           [list(rgb) for rgb in palette_rgb],
         'palette_hex':           pal_hex,
+        'source_image_rel':      source_image_rel,
         'sr':                    scores['sr_strict'],
         'arbsigma':              scores['sr_arbsigma'],
         'c4':                    scores['c4'],
