@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}gridprint — print job: {{ cover.name }}{% endblock %}
+{% block extrahead %}
+<style>
+  /* Screen styling: surround pages with the dark Velour chrome,
+     center each page on the viewport so the layout is reviewable
+     before printing.  Print rules below strip all chrome. */
+  body { background: #0a0e14; color: #c9d1d9;
+          font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; }
+  .pj-toolbar { position: sticky; top: 0; z-index: 10;
+                  padding: 0.6rem 1rem; background: #161b22;
+                  border-bottom: 1px solid #21262d;
+                  display: flex; gap: 0.8rem; align-items: center; }
+  .pj-toolbar h1 { font-size: 0.95rem; margin: 0; color: #c9d1d9; }
+  .pj-toolbar .stats { color: #8b949e; font-family: ui-monospace, monospace;
+                          font-size: 0.78rem; }
+  .pj-toolbar button { background: #1f6feb; color: #fff; border: 0;
+                        padding: 0.35rem 0.9rem; cursor: pointer;
+                        font-family: inherit; }
+  .pj-page { background: #fff; color: #000;
+              width: {{ page_w_mm }}mm; height: {{ page_h_mm }}mm;
+              margin: 1.2rem auto; box-shadow: 0 6px 16px rgba(0,0,0,0.5);
+              page-break-after: always; box-sizing: border-box;
+              overflow: hidden; position: relative; }
+  .pj-page:last-child { page-break-after: auto; }
+  .pj-cover { padding: 18mm 16mm; font-family: ui-monospace, monospace; }
+  .pj-cover h1 { font-size: 26pt; margin: 0 0 4mm 0; color: #111; }
+  .pj-cover .slug { color: #555; font-size: 11pt; }
+  .pj-cover .sha  { color: #888; font-size: 9pt; word-break: break-all; }
+  .pj-cover .notes { color: #333; font-size: 10pt; margin-top: 6mm;
+                       max-width: 160mm; }
+  .pj-cover .palette { margin: 6mm 0; display: flex; gap: 2mm; align-items: center; }
+  .pj-cover .swatch { display: inline-block; width: 14mm; height: 14mm;
+                        border: 0.4mm solid #222; }
+  .pj-cover .palette .label { color: #555; font-size: 9pt; }
+  .pj-cover .metrics { margin-top: 6mm; border-collapse: collapse;
+                          font-size: 10pt; }
+  .pj-cover .metrics th, .pj-cover .metrics td { padding: 1.5mm 4mm;
+                                                       text-align: left;
+                                                       border-bottom: 0.2mm solid #ddd; }
+  .pj-cover .metrics th { color: #666; font-weight: 600; width: 50mm; }
+  .pj-cover .preview { float: right; margin: 0 0 4mm 6mm; }
+  .pj-cover .preview img { width: 60mm; height: 60mm;
+                              border: 0.4mm solid #222;
+                              image-rendering: pixelated;
+                              image-rendering: crisp-edges; }
+  .pj-cover .preview .lab { text-align: center; color: #888;
+                              font-size: 8pt; margin-top: 1mm; }
+  .pj-cover .footer { position: absolute; left: 16mm; right: 16mm;
+                         bottom: 12mm; color: #888; font-size: 8pt;
+                         display: flex; justify-content: space-between;
+                         border-top: 0.2mm solid #ccc; padding-top: 2mm; }
+  .pj-flower-page { padding: 0; }
+  .pj-flower-page object,
+  .pj-flower-page img { display: block; width: 100%; height: 100%;
+                          object-fit: contain; }
+
+  @media print {
+    @page { size: {{ page_w_mm }}mm {{ page_h_mm }}mm; margin: 0; }
+    body { background: #fff; }
+    .pj-toolbar { display: none; }
+    .pj-page { margin: 0; box-shadow: none; page-break-after: always;
+                width: {{ page_w_mm }}mm; height: {{ page_h_mm }}mm; }
+    .pj-page:last-child { page-break-after: auto; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="pj-toolbar">
+  <h1>print job: <span style="color:#79c0ff;">{{ cover.name }}</span></h1>
+  <span class="stats">
+    1 cover page + {{ n_flower_pages }} flower page{{ n_flower_pages|pluralize }}
+    ({{ total_flowers }} flowers, {{ flowers_per_page }}/page, {{ fsize }} density)
+  </span>
+  <button onclick="window.print();">🖨 Print / Save as PDF</button>
+  {% if cover.detail_url %}
+    <a href="{{ cover.detail_url }}" style="color:#8b949e; font-size:0.85rem;">
+      ← back to Taxon
+    </a>
+  {% endif %}
+</div>
+
+{# ─── Cover page ───────────────────────────────────────────── #}
+<div class="pj-page pj-cover">
+  {% if cover.preview_url %}
+  <div class="preview">
+    <img src="{{ cover.preview_url }}" alt="rule preview">
+    <div class="lab">representative CA after seeded simulation</div>
+  </div>
+  {% endif %}
+  <h1>{{ cover.name }}</h1>
+  {% if cover.slug %}
+    <div class="slug">slug: <strong>{{ cover.slug }}</strong> · kind: {{ cover.kind }} · {{ cover.n_colors }} colours</div>
+  {% else %}
+    <div class="slug">kind: {{ cover.kind }} · {{ cover.n_colors }} colours</div>
+  {% endif %}
+  {% if cover.sha1 %}
+    <div class="sha">sha1: {{ cover.sha1 }}</div>
+  {% endif %}
+
+  <div class="palette">
+    <span class="label">palette →</span>
+    {% for css in cover.palette_css %}
+      <span class="swatch" style="background:{{ css }};" title="{{ css }}"></span>
+    {% endfor %}
+    <span class="label" style="margin-left:4mm;">
+      {% for css in cover.palette_css %}{{ css }}{% if not forloop.last %} · {% endif %}{% endfor %}
+    </span>
+  </div>
+
+  {% if cover.classification %}
+    <table class="metrics">
+      <tr><th>wolfram class</th><td>class {{ cover.classification.wolfram_class }}{% if cover.classification.is_quine %} · <strong>quine</strong>{% endif %}</td></tr>
+      <tr><th>SR (strict, 16 ticks)</th><td>{{ cover.classification.sr_strict|default_if_none:0|floatformat:4 }}</td></tr>
+      <tr><th>SR (arbitrary σ)</th><td>{{ cover.classification.sr_arbsigma|default_if_none:0|floatformat:4 }}</td></tr>
+      <tr><th>nest depth (chain run)</th><td>{{ cover.classification.nest_depth|default:"—" }}</td></tr>
+      {% if cover.classification.quine_origin %}
+        <tr><th>quine origin</th><td>{{ cover.classification.quine_origin }}</td></tr>
+      {% endif %}
+      <tr><th>confidence (c4)</th><td>{{ cover.classification.confidence|default_if_none:0|floatformat:3 }}</td></tr>
+    </table>
+  {% endif %}
+
+  {% if cover.notes %}
+    <div class="notes">{{ cover.notes }}</div>
+  {% endif %}
+
+  <div class="footer">
+    <span>{{ n_flower_pages }} flower-pattern page{{ n_flower_pages|pluralize }} follow ({{ fsize }} density)</span>
+    <span>page 1 of {{ n_flower_pages|add:1 }}</span>
+  </div>
+</div>
+
+{# ─── Flower pages ─────────────────────────────────────────── #}
+{% for i in flower_page_indices %}
+  <div class="pj-page pj-flower-page">
+    {# Fetch each flower page as a standalone SVG.  <object> lets the
+       browser pick up the SVG's own dimensions for clean scaling. #}
+    <object data="{{ flower_base }}&amp;fpage={{ i }}"
+              type="image/svg+xml" width="100%" height="100%"></object>
+  </div>
+{% endfor %}
+{% endblock %}

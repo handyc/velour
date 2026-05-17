@@ -8,4 +8,5 @@ urlpatterns = [
     path('',         views.index,      name='index'),
     path('grid.svg', views.grid_svg,   name='grid_svg'),
     path('print/',   views.print_view, name='print'),
+    path('print-job/', views.print_job, name='print_job'),
 ]

@@ -34,6 +34,7 @@ urlpatterns = [
     path('rules/<slug:slug>/to-automaton/', views.rule_to_automaton, name='rule_to_automaton'),
     path('rules/<slug:slug>/to-s3lab/', views.rule_to_s3lab, name='rule_to_s3lab'),
     path('rules/<slug:slug>/to-device/', views.rule_to_device, name='rule_to_device'),
+    path('rules/<slug:slug>/to-gridprint/', views.rule_to_gridprint, name='rule_to_gridprint'),
 
     # AutoSearch — background hunt for a target Wolfram class.
     path('autosearch/',                      views.autosearch_view,   name='autosearch'),

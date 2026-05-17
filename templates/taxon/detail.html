@@ -156,6 +156,14 @@
               padding:0.4rem 0.8rem; border-radius:4px; text-decoration:none;
               font-family:inherit;" title="Open this rule as the live genome in s3lab Classic">→ S3 Lab</a>
 
+    {% if rule.kind == 'hex_k4_lut' %}
+    <a href="{% url 'taxon:rule_to_gridprint' slug=rule.slug %}"
+       style="background:#21262d; color:#7ee787; border:1px solid #30363d;
+              padding:0.4rem 0.8rem; border-radius:4px; text-decoration:none;
+              font-family:inherit;"
+       title="Print-ready multi-page document: cover (rule name + classification + palette + preview) + flower-pattern of all 16,384 LUT entries across ~29 A4 sheets. Browser Print → Save as PDF for the full PDF.">→ Gridprint</a>
+    {% endif %}
+
     {% include "caframe/_export_button.html" with source="taxon" source_ref=rule.slug label="→ caframe movie" hint="Render this rule as a caframe APNG/MP4 movie (uses the rule's bytes as the CA dynamics)." %}
 
     <button type="button" id="to-device-btn"

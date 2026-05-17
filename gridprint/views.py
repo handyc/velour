@@ -6,11 +6,12 @@ just hit the same SVG URL.
 """
 from __future__ import annotations
 
+import hashlib
 import math
 
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, render
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from . import ca_fill, hanb, hex_flowers, svg
@@ -1463,3 +1464,151 @@ def print_view(request):
 </body></html>
 """
     return HttpResponse(html, content_type='text/html; charset=utf-8')
+
+
+# ─── Multi-page print job: cover + flower-pattern of a Taxon Rule ────
+
+@login_required
+def print_job(request):
+    """Build a print-ready multi-page HTML document for a Taxon Rule.
+
+    Page 1 = cover (rule name, slug, sha1, classification, palette
+    swatches, embedded preview image, quine metrics).
+    Pages 2..N+1 = embedded SVG flower-pattern displays of all 16,384
+    LUT entries.  N is determined by ``?fsize`` (tiny|small|medium|
+    large, default small ≈ 29 pages) and the rule's actual LUT size.
+
+    The CSS uses ``@page A4`` + ``page-break-after: always`` between
+    sections so the browser's Print → Save as PDF preserves the
+    multi-page layout exactly.
+
+    Query params:
+        taxon_slug   slug of a Taxon Rule (required, unless rule_hex)
+        rule_hex     32,768-char hex (alternative to taxon_slug; cover
+                     becomes minimal — no classification metadata)
+        fsize        tiny|small|medium|large (default small)
+        center       0..3 (optional) — restrict flowers to one centre cell
+        landscape    1 for landscape A4
+    """
+    from django.urls import reverse
+    from . import hex_flowers
+
+    fsize = (request.GET.get('fsize') or hex_flowers.DEFAULT_SIZE
+              ).strip().lower()
+    if fsize not in hex_flowers.SIZE_SCALES:
+        fsize = hex_flowers.DEFAULT_SIZE
+    landscape = request.GET.get('landscape') == '1'
+    page_w_mm = svg.A4_H if landscape else svg.A4_W
+    page_h_mm = svg.A4_W if landscape else svg.A4_H
+
+    centre_raw = (request.GET.get('center') or '').strip()
+    centre = None
+    if centre_raw:
+        try:
+            v = int(centre_raw)
+            if 0 <= v <= 3:
+                centre = v
+        except ValueError:
+            pass
+
+    # Resolve the rule source: Taxon slug (rich cover) or raw hex
+    # (minimal cover for ad-hoc rules).
+    taxon_slug = (request.GET.get('taxon_slug') or '').strip()
+    rule_hex = (request.GET.get('rule_hex') or '').strip()
+    cover: dict = {}
+    rule_hex_resolved = ''
+    palette_css: list[str] = []
+    if taxon_slug:
+        from taxon.models import Rule
+        rule_obj = get_object_or_404(Rule, slug=taxon_slug)
+        if rule_obj.kind != 'hex_k4_lut':
+            return HttpResponse(
+                f'print-job: Taxon rule {taxon_slug!r} has kind '
+                f'{rule_obj.kind!r}; this view only supports '
+                f"'hex_k4_lut' (the 16,384-byte full LUT). Use spoeqi "
+                f'or ouroboros to catalogue the rule first.', status=400)
+        rule_lut = bytes(rule_obj.genome)
+        if len(rule_lut) != hex_flowers.RULE_TABLE_SIZE:
+            return HttpResponse(
+                f'print-job: rule.genome is {len(rule_lut)}B, expected '
+                f'{hex_flowers.RULE_TABLE_SIZE}', status=400)
+        rule_hex_resolved = rule_lut.hex()
+        palette_css = rule_obj.palette_hex
+        cls = rule_obj.latest_classification
+        cover = {
+            'mode':        'taxon',
+            'name':        rule_obj.name or rule_obj.slug,
+            'slug':        rule_obj.slug,
+            'sha1':        rule_obj.sha1 or '',
+            'kind':        rule_obj.kind,
+            'n_colors':    rule_obj.n_colors,
+            'palette_css': palette_css,
+            'preview_url': reverse('taxon:rule_preview_png',
+                                      args=[rule_obj.slug]),
+            'detail_url':  reverse('taxon:rule_detail',
+                                      args=[rule_obj.slug]),
+            'notes':       (rule_obj.notes or '').strip(),
+            'class':       (cls.wolfram_class if cls else None),
+            'classification': cls,
+        }
+    elif rule_hex:
+        try:
+            rule_lut = bytes.fromhex(rule_hex)
+        except ValueError as e:
+            return HttpResponse(f'bad rule_hex: {e}', status=400)
+        if len(rule_lut) != hex_flowers.RULE_TABLE_SIZE:
+            return HttpResponse(
+                f'rule_hex decoded to {len(rule_lut)} B; expected '
+                f'{hex_flowers.RULE_TABLE_SIZE}', status=400)
+        rule_hex_resolved = rule_hex
+        palette_css = ['#dc5028', '#3c78d2', '#50b45a', '#e6c83c']
+        cover = {
+            'mode':        'hex',
+            'name':        f'ad-hoc rule {hashlib.sha256(rule_lut).hexdigest()[:8]}',
+            'sha1':        hashlib.sha1(rule_lut).hexdigest(),
+            'kind':        'hex_k4_lut',
+            'n_colors':    4,
+            'palette_css': palette_css,
+        }
+    else:
+        return HttpResponse(
+            'print_job: provide ?taxon_slug=<slug> (preferred) or '
+            '?rule_hex=<32,768-char hex>', status=400)
+
+    # Compute page count by asking hex_flowers what one page can hold
+    # at the chosen scale; rest is total / per-page rounding up.
+    size_scale = hex_flowers.SIZE_SCALES[fsize]
+    _body0, summary0 = hex_flowers.render_flowers_svg(
+        rule_lut, palette=palette_css,
+        page_w_mm=page_w_mm, page_h_mm=page_h_mm,
+        margin_mm=10.0, page_index=0,
+        center_filter=centre, size_scale=size_scale,
+        title_text=cover.get('name'))
+    flowers_per_page = summary0.flowers_per_page
+    total_flowers = summary0.total_flowers
+    n_flower_pages = (total_flowers + flowers_per_page - 1) // flowers_per_page
+
+    # Build the embed URL for each flower page.  We point at grid.svg
+    # so the browser can fetch each SVG independently and the print
+    # engine can stitch the result into a real multi-page PDF.
+    flower_base = reverse('gridprint:grid_svg') + (
+        f'?mode=flowers&rule_hex={rule_hex_resolved}&fsize={fsize}'
+    )
+    if centre is not None:
+        flower_base += f'&fcentre={centre}'
+    if landscape:
+        flower_base += '&landscape=1'
+
+    return render(request, 'gridprint/print_job.html', {
+        'cover':           cover,
+        'fsize':           fsize,
+        'n_flower_pages':  n_flower_pages,
+        'flower_page_indices': list(range(n_flower_pages)),
+        'total_flowers':   total_flowers,
+        'flowers_per_page': flowers_per_page,
+        'flower_base':     flower_base,
+        'page_w_mm':       page_w_mm,
+        'page_h_mm':       page_h_mm,
+        'landscape':       landscape,
+        'centre':          centre,
+    })

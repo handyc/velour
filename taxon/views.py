@@ -708,6 +708,28 @@ def rule_to_s3lab(request, slug: str):
 
 
 @login_required
+def rule_to_gridprint(request, slug: str):
+    """Open this Taxon Rule in Gridprint as a multi-page print job
+    (cover + flower-pattern across all 16,384 LUT entries).
+
+    Bounces to /gridprint/print-job/?taxon_slug=<slug>; the print-job
+    view loads the cover info + palette + preview directly from this
+    Rule and renders a print-ready HTML document with @page A4 CSS.
+    """
+    rule = get_object_or_404(Rule, slug=slug)
+    if rule.kind != 'hex_k4_lut':
+        return HttpResponseBadRequest(
+            f'rule.kind is {rule.kind!r}; gridprint print-job currently '
+            f'only supports hex_k4_lut (16,384-byte full LUT). Catalogue '
+            f'a spoeqi quine into Taxon first.')
+    fsize = (request.GET.get('fsize') or '').strip()
+    qs = f'?taxon_slug={rule.slug}'
+    if fsize:
+        qs += f'&fsize={fsize}'
+    return redirect(f'/gridprint/print-job/{qs}')
+
+
+@login_required
 @require_POST
 def rule_to_device(request, slug: str):
     """Push this rule's HXC4 genome to a hexca supermini's /load-genome.
