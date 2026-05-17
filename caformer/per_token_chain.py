@@ -679,7 +679,8 @@ class CoevolveConfig:
     chain_mode:    str = 'ca_evolution'
     select_n:      int = 8                # per-token candidates from L0 pool
     pop_size:      int = 8
-    generations:   int = 8
+    generations:   int = 8                # base-GA generations per alt-round
+    alt_rounds:    int = 1                # full select+GA alternations
     mu:            int = 3                # elite carried over
     mutation_rate: float = 0.003          # per-byte flip prob
     rng_seed:      int = 0xC0E0_0001
@@ -735,83 +736,46 @@ def coevolve_base(cfg: CoevolveConfig) -> CoevolveResult:
             total_positions += 1
     log(f'total target positions across corpus: {total_positions}')
 
-    # Phase 1: pick origins under the initial random base.
-    initial_base = build_base_rules(cfg.base_seed)
+    # Initial random base + L0 pool.
+    current_base = build_base_rules(cfg.base_seed)
     pool = load_l0_quine_pool()
     log(f'L0 quine pool: {len(pool)}')
 
-    # Build a corpus-wide selection: for each token, score top-N
-    # candidates by *aggregate* score across all its corpus contexts
-    # under the initial base.
-    log(f'selecting per-token origins (top {cfg.select_n} candidates per token, '
-        f'corpus-wide)...')
-    block_tmpls_init: Dict[int, list] = {}
-    for nb in set(n_blocks_by_pair.values()):
-        block_tmpls_init[nb] = [{k: initial_base[k] for k in
+    def select_origins_under(base: Dict[str, np.ndarray]
+                              ) -> Dict[int, Tuple[int, bytes]]:
+        """For each unique token, pick best-of-K origin under `base`."""
+        block_tmpls: Dict[int, list] = {}
+        for nb in set(n_blocks_by_pair.values()):
+            block_tmpls[nb] = [{k: base[k] for k in
                                   ('q', 'k', 'v', 'score', 'mix', 'merge', 'mlp')}
                                   ] * nb
-    token_origins: Dict[int, Tuple[int, bytes]] = {}
-    for tb in all_tokens:
-        items = contexts_by_token[tb]
-        best_score = -np.inf
-        best_pk = -1
-        best_origin = b''
-        for pk_c, origin in pool[:cfg.select_n]:
-            chain = chain_levels(origin, depth=cfg.chain_depth,
-                                  ticks_per_level=cfg.ticks_per_level,
-                                  mode=cfg.chain_mode)
-            agg = 0.0
-            for ctx, pair_id in items:
-                nb = n_blocks_by_pair[pair_id]
-                pos_best = -np.inf
-                for rule in chain:
-                    fit, _ = _position_logprob(
-                        ctx, nb, initial_base, block_tmpls_init[nb],
-                        rule, tb, 0.0)
-                    if fit > pos_best:
-                        pos_best = fit
-                agg += pos_best
-            if agg > best_score:
-                best_score = agg
-                best_pk = pk_c
-                best_origin = origin
-        token_origins[tb] = (best_pk, best_origin)
-        log(f'  token {_pretty(tb)} (×{len(items)}) ← quine #{best_pk}  '
-            f'agg={best_score:+.2f}')
+        origins: Dict[int, Tuple[int, bytes]] = {}
+        for tb in all_tokens:
+            items = contexts_by_token[tb]
+            best_score = -np.inf
+            best_pk, best_origin = -1, b''
+            for pk_c, origin in pool[:cfg.select_n]:
+                chain = chain_levels(origin, depth=cfg.chain_depth,
+                                      ticks_per_level=cfg.ticks_per_level,
+                                      mode=cfg.chain_mode)
+                agg = 0.0
+                for ctx, pair_id in items:
+                    nb = n_blocks_by_pair[pair_id]
+                    pos_best = -np.inf
+                    for rule in chain:
+                        fit, _ = _position_logprob(
+                            ctx, nb, base, block_tmpls[nb], rule, tb, 0.0)
+                        if fit > pos_best:
+                            pos_best = fit
+                    agg += pos_best
+                if agg > best_score:
+                    best_score = agg
+                    best_pk, best_origin = pk_c, origin
+            origins[tb] = (best_pk, best_origin)
+        return origins
 
-    # Pre-build all chains for fitness evaluation.
-    chains: Dict[int, List[np.ndarray]] = {
-        tb: chain_levels(orig, depth=cfg.chain_depth,
-                          ticks_per_level=cfg.ticks_per_level,
-                          mode=cfg.chain_mode)
-        for tb, (_, orig) in token_origins.items()
-    }
-
-    # Initial corpus score.
-    init_m, init_lp = corpus_argmax_matches(
-        initial_base, chains, contexts_by_token, n_blocks_by_pair)
-    log(f'')
-    log(f'INITIAL base: matches {init_m}/{total_positions}  '
-        f'(sum_log_p {init_lp:+.2f})')
-
-    # Phase 2: GA over base rules.
-    log(f'')
-    log(f'evolving base rules: pop={cfg.pop_size}, gens={cfg.generations}, '
-        f'μ={cfg.mu}, mut_rate={cfg.mutation_rate}')
+    initial_base = {k: v.copy() for k, v in current_base.items()}
     rng = np.random.default_rng(cfg.rng_seed)
-
-    def seed_individual(idx: int) -> Dict[str, np.ndarray]:
-        """Seed pop[0] = initial base; others = mutated copies of it."""
-        if idx == 0:
-            return {k: v.copy() for k, v in initial_base.items()}
-        out = {}
-        for k, v in initial_base.items():
-            arr = v.copy()
-            flips = rng.random(arr.size) < cfg.mutation_rate * 4
-            new_vals = rng.integers(0, 4, size=arr.size, dtype=np.uint8)
-            arr = np.where(flips, new_vals, arr).astype(np.uint8) & 3
-            out[k] = arr
-        return out
 
     def mutate(parent: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         out = {}
@@ -823,42 +787,81 @@ def coevolve_base(cfg: CoevolveConfig) -> CoevolveResult:
             out[k] = arr
         return out
 
-    def score_base(b: Dict[str, np.ndarray]) -> Tuple[int, float]:
-        return corpus_argmax_matches(
-            b, chains, contexts_by_token, n_blocks_by_pair)
+    history: List[Tuple[int, int, float]] = []
+    token_origins: Dict[int, Tuple[int, bytes]] = {}
+    chains: Dict[int, List[np.ndarray]] = {}
+    init_m = init_lp = 0
+    init_recorded = False
 
-    pop: List[Tuple[int, float, Dict[str, np.ndarray]]] = []
-    for i in range(cfg.pop_size):
-        ind = seed_individual(i)
-        m, lp = score_base(ind)
-        pop.append((m, lp, ind))
-    pop.sort(key=lambda t: (-t[0], -t[1]))
-    log(f'  gen  0: best matches={pop[0][0]}/{total_positions} lp={pop[0][1]:+.2f}')
+    for round_i in range(cfg.alt_rounds):
+        # (a) Re-select per-token origins under current base.
+        log(f'')
+        log(f'═══ alt round {round_i + 1}/{cfg.alt_rounds} ═══')
+        log(f'selecting origins under current base (top {cfg.select_n} '
+            f'candidates per token)...')
+        token_origins = select_origins_under(current_base)
+        for tb in all_tokens:
+            pk, _ = token_origins[tb]
+            log(f'  token {_pretty(tb)} (×{len(contexts_by_token[tb])}) '
+                f'← quine #{pk}')
+        chains = {tb: chain_levels(orig, depth=cfg.chain_depth,
+                                     ticks_per_level=cfg.ticks_per_level,
+                                     mode=cfg.chain_mode)
+                  for tb, (_, orig) in token_origins.items()}
 
-    history = [(0, pop[0][0], pop[0][1])]
+        pre_ga_m, pre_ga_lp = corpus_argmax_matches(
+            current_base, chains, contexts_by_token, n_blocks_by_pair)
+        log(f'after selection: matches {pre_ga_m}/{total_positions}  '
+            f'lp {pre_ga_lp:+.2f}')
+        if not init_recorded:
+            init_m, init_lp = pre_ga_m, pre_ga_lp
+            init_recorded = True
+
+        # (b) Evolve base against the freshly-selected chains.
+        log(f'evolving base: pop={cfg.pop_size}, gens={cfg.generations}, '
+            f'μ={cfg.mu}, mut_rate={cfg.mutation_rate}')
+        pop: List[Tuple[int, float, Dict[str, np.ndarray]]] = []
+        # Seed: current_base + (pop-1) small mutations of it.
+        pop.append((pre_ga_m, pre_ga_lp, {k: v.copy() for k, v in current_base.items()}))
+        for _ in range(cfg.pop_size - 1):
+            child = mutate(current_base)
+            m, lp = corpus_argmax_matches(
+                child, chains, contexts_by_token, n_blocks_by_pair)
+            pop.append((m, lp, child))
+        pop.sort(key=lambda t: (-t[0], -t[1]))
+        log(f'  gen  0: best matches={pop[0][0]}/{total_positions} '
+            f'lp={pop[0][1]:+.2f}')
+        gen_offset = len(history)
+        history.append((gen_offset, pop[0][0], pop[0][1]))
+
+        for gen in range(1, cfg.generations + 1):
+            elites = pop[:cfg.mu]
+            children = []
+            per_parent = max(1, (cfg.pop_size - cfg.mu) // cfg.mu)
+            for _, _, p in elites:
+                for _ in range(per_parent):
+                    child = mutate(p)
+                    m, lp = corpus_argmax_matches(
+                        child, chains, contexts_by_token, n_blocks_by_pair)
+                    children.append((m, lp, child))
+            combined = elites + children
+            combined.sort(key=lambda t: (-t[0], -t[1]))
+            pop = combined[:cfg.pop_size]
+            log(f'  gen {gen:>2}: best matches={pop[0][0]}/{total_positions} '
+                f'lp={pop[0][1]:+.2f}')
+            history.append((gen_offset + gen, pop[0][0], pop[0][1]))
+
+        # Carry forward the GA winner as next round's base.
+        current_base = pop[0][2]
+        log(f'round {round_i + 1} done: '
+            f'matches {pop[0][0]}/{total_positions}, lp {pop[0][1]:+.2f}')
+
     result = CoevolveResult(
         initial_base_matches=init_m, initial_base_lp=init_lp,
         total_positions=total_positions,
         token_origins={tb: pk for tb, (pk, _) in token_origins.items()},
         history=history,
     )
-
-    for gen in range(1, cfg.generations + 1):
-        elites = pop[:cfg.mu]
-        children = []
-        per_parent = max(1, (cfg.pop_size - cfg.mu) // cfg.mu)
-        for _, _, p in elites:
-            for _ in range(per_parent):
-                child = mutate(p)
-                m, lp = score_base(child)
-                children.append((m, lp, child))
-        combined = elites + children
-        combined.sort(key=lambda t: (-t[0], -t[1]))
-        pop = combined[:cfg.pop_size]
-        log(f'  gen {gen:>2}: best matches={pop[0][0]}/{total_positions} '
-            f'lp={pop[0][1]:+.2f}')
-        history.append((gen, pop[0][0], pop[0][1]))
-
     result.final_base_matches = pop[0][0]
     result.final_base_lp = pop[0][1]
     result.final_base = pop[0][2]

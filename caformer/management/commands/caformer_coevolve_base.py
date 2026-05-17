@@ -34,13 +34,16 @@ class Command(BaseCommand):
         parser.add_argument('--select-n', type=int, default=8,
                               help='per-token L0 candidates considered')
         parser.add_argument('--pop', type=int, default=8)
-        parser.add_argument('--gens', type=int, default=8)
+        parser.add_argument('--gens', type=int, default=8,
+                              help='base-GA generations per alt round')
+        parser.add_argument('--alt-rounds', type=int, default=1,
+                              help='alternations of (re-select origins) + (base GA)')
         parser.add_argument('--mu', type=int, default=3)
         parser.add_argument('--mut-rate', type=float, default=0.003)
         parser.add_argument('--seed', type=int, default=0xC0E0_0001)
 
     def handle(self, *args, pairs, depth, ticks, select_n, pop, gens, mu,
-                 mut_rate, seed, **opts):
+                 mut_rate, seed, alt_rounds, **opts):
         try:
             pair_ids = [int(x) for x in pairs.split(',')]
         except ValueError:
@@ -53,7 +56,8 @@ class Command(BaseCommand):
         cfg = CoevolveConfig(
             pair_ids=pair_ids, chain_depth=depth, ticks_per_level=ticks,
             select_n=select_n, pop_size=pop, generations=gens, mu=mu,
-            mutation_rate=mut_rate, rng_seed=seed, log=_log,
+            mutation_rate=mut_rate, rng_seed=seed,
+            alt_rounds=alt_rounds, log=_log,
         )
         result = coevolve_base(cfg)
 
