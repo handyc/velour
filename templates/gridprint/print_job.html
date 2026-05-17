@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}gridprint — print job: {{ cover.name }}{% endblock %}
-{% block extrahead %}
+{% block extra_head %}
 <style>
   /* Screen styling: surround pages with the dark Velour chrome,
      center each page on the viewport so the layout is reviewable
@@ -51,7 +51,13 @@
                          display: flex; justify-content: space-between;
                          border-top: 0.2mm solid #ccc; padding-top: 2mm; }
   .pj-flower-page { padding: 0; }
-  .pj-flower-page svg,
+  /* Inline SVG carries its own width="…mm" height="…mm" attributes from
+     hex_flowers.wrap_page; trust those.  Setting CSS width/height:100%
+     on inline <svg> is unreliable — height:100% often computes to 0
+     because the percentage has no firm reference, and the SVG falls
+     back to its 300×150 default, bunching all flowers into the corner.
+     object-fit doesn't apply to inline SVG either. */
+  .pj-flower-page svg { display: block; margin: 0 auto; }
   .pj-flower-page object,
   .pj-flower-page img { display: block; width: 100%; height: 100%;
                           object-fit: contain; }
@@ -65,7 +71,7 @@
     .pj-page:last-child { page-break-after: auto; }
   }
 </style>
-{% endblock %}
+{% endblock extra_head %}
 
 {% block content %}
 <div class="pj-toolbar">
