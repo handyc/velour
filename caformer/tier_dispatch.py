@@ -98,6 +98,33 @@ def available_tiers(pair) -> list:
     return out
 
 
+def best_exact_tier(pair) -> tuple:
+    """Pick the smallest tier whose chain produces the pair's expected
+    response byte-exact.  Returns (side, blob) or (None, None) when
+    no tier has an EXACT chain stored.
+
+    Caches per (pair_id, updated_at) in process memory so back-to-
+    back chat requests don't repeat the validation forward pass.
+    """
+    cache = getattr(best_exact_tier, '_cache', {})
+    key = (pair.pk, pair.updated_at.timestamp() if pair.updated_at else 0)
+    if key in cache:
+        return cache[key]
+
+    # Try tiers from smallest to largest (cheapest first).
+    for side, blob in reversed(available_tiers(pair)):
+        r = inference_at_tier(pair.prompt, blob, side,
+                                  expected=pair.expected)
+        if r['byte_match'] == r['n_target'] and r['n_target'] > 0:
+            result = (side, blob)
+            cache[key] = result
+            best_exact_tier._cache = cache
+            return result
+    cache[key] = (None, None)
+    best_exact_tier._cache = cache
+    return (None, None)
+
+
 def compare_all_tiers(pair) -> dict:
     """Run inference at every available tier and return a comparison
     table.  Used by /caformer/tier-compare/ to visualise speed vs

@@ -2815,14 +2815,51 @@ def funnel_chat_reply(request):
 
         # Exact-match QRPair dispatch — if this prompt was trained,
         # serve its byte-exact reply directly.  Priority order:
-        #   (1) board128 rules (validated 2026-05-18, 100% byte-exact
-        #         even on long-prompt-long-response pairs)
-        #   (2) legacy 8×8 positional rules (works for short pairs)
-        #   (3) fall through to word_binder_v2 sub-funnel
+        #   (1) ?tier=auto: pick the smallest EXACT tier per pair
+        #       (validated 2026-05-19: 32× wall speedup on 96 % of corpus)
+        #   (2) board128 rules
+        #   (3) legacy 8×8 positional rules (works for short pairs)
+        #   (4) fall through to word_binder_v2 sub-funnel
         from .models import QRPair
         b128_pair = (QRPair.objects
                        .filter(board128_exact=True, prompt=q)
                        .first())
+        tier_pref = (request.GET.get('tier') or '').strip().lower()
+        if b128_pair is not None and tier_pref == 'auto':
+            from .tier_dispatch import best_exact_tier, inference_at_tier
+            side, blob = best_exact_tier(b128_pair)
+            if side is not None and side < 128:
+                r = inference_at_tier(q, blob, side,
+                                          expected=b128_pair.expected)
+                try:
+                    reply_text = r['produced_bytes'].decode('utf-8')
+                except UnicodeDecodeError:
+                    reply_text = r['produced_bytes'].decode('latin-1',
+                                                                 errors='replace')
+                return _json_response({
+                    'layer':            'router',
+                    'category':         cat,
+                    'category_name':    cat_name,
+                    'category_colour':  colour,
+                    'sub_label':        f'tier-{side} (auto, {r["wall"]*1000:.1f} ms vs ~240 ms board128)',
+                    'reply':            reply_text,
+                    'pure_ca':          True,
+                    'external_used':    False,
+                    'external_provider': '',
+                    'external_model':    '',
+                    'external_warning': '',
+                    'words':            reply_text.split(),
+                    'per_slot':         [],
+                    'unk_count':        0,
+                    'meta_replies':     {},
+                    'sub_dirs_used':    {cat_name: f'qrpair-tier{side}:{b128_pair.pk}'},
+                    'loop_trace':       [],
+                    'qrpair_id':        b128_pair.pk,
+                    'qrpair_expected':  b128_pair.expected,
+                    'tier_used':        side,
+                    'tier_wall_ms':     r['wall'] * 1000.0,
+                })
+
         if b128_pair is not None and b128_pair.is_board128():
             from . import board128 as _b128
             rules = b128_pair.board128_rules()
