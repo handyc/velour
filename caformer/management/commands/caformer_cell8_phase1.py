@@ -153,6 +153,8 @@ class Command(BaseCommand):
             prompt, base, alt,
             n_ticks=ticks,
             per_position_seconds=per_pos_seconds,
+            warm_start_rules=warm_rules,
+            freeze_port0=freeze_port0,
             seed=seed, on_event=_evt)
         n_pos = len(result['matches_base'])
         n_both = sum(1 for b, a in zip(result['matches_base'], result['matches_alt'])

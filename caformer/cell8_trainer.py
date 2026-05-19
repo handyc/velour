@@ -188,6 +188,8 @@ def train_pair_cell8_modulated(prompt: str, expected_base: str,
                                       n_ticks: int = 128,
                                       per_position_seconds: float = 120.0,
                                       seed: int = 0xCE118A1E,
+                                      warm_start_rules: list = None,
+                                      freeze_port0: bool = False,
                                       on_event=None) -> dict:
     """Per-position cell8 training for a whole (prompt, base, alt)
     triple.  Both responses must be the same byte-length; the shorter
@@ -212,10 +214,15 @@ def train_pair_cell8_modulated(prompt: str, expected_base: str,
                                     'target_base': base_bytes[pos],
                                     'target_alt':  alt_bytes[pos],
                                     'elapsed_s': time.time() - t0})
+        wsb = None
+        if warm_start_rules and pos < len(warm_start_rules):
+            wsb = warm_start_rules[pos]
         result = train_position_cell8_modulated(
             prompt, base_bytes[pos], alt_bytes[pos], pos,
             n_ticks=n_ticks,
             max_seconds=per_position_seconds,
+            warm_start_base=wsb,
+            freeze_port0=freeze_port0,
             seed=seed ^ (pos * 4099),
             on_event=lambda k, p: fire(f'pos{pos}_{k}', p))
         rules.append(result['rule_table'])
