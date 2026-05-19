@@ -90,9 +90,9 @@ after one tick.  Strict ouroboros = sr_strict 1.0 at every depth.</p>
 <div class="row">
   <div class="canvases">
     <div class="stat">initial (LUT-as-image):</div>
-    <canvas id="canvasInit" width="512" height="512"></canvas>
+    <canvas id="canvasInit" width="516" height="512"></canvas>
     <div class="stat">current tick:</div>
-    <canvas id="canvasCur"  width="512" height="512"></canvas>
+    <canvas id="canvasCur"  width="516" height="512"></canvas>
   </div>
   <div class="controls">
     <h3>controls</h3>
@@ -101,6 +101,10 @@ after one tick.  Strict ouroboros = sr_strict 1.0 at every depth.</p>
       <button id="btnStep10" disabled>+10</button>
       <button id="btnPlay" disabled>▶ play</button>
       <button id="btnReset" disabled>reset</button>
+    </div>
+    <div style="margin-top:6px;">
+      <button id="btnPalette">🎨 random palette</button>
+      <button id="btnPaletteReset">default palette</button>
     </div>
     <div class="stat" id="statFile">no file loaded</div>
     <div class="stat" id="statTick">tick: —</div>
@@ -134,23 +138,28 @@ class hint   rough heuristic from cells-changed-per-tick over the
 <script>
 const SIDE = 128;
 const CELLS = SIDE * SIDE;
-const PALETTE = [
+const DEFAULT_PALETTE = [
     [0,   0,   0],
     [60,  150, 220],
     [240, 180, 60],
     [250, 245, 240],
 ];
+let PALETTE = DEFAULT_PALETTE.map(c => c.slice());
 
 // Build palette swatches.
 const palDiv = document.getElementById("palette");
-for (let k = 0; k < 4; k++) {
-    const [r,g,b] = PALETTE[k];
-    const s = document.createElement("div");
-    s.className = "swatch";
-    s.style.background = `rgb(${r},${g},${b})`;
-    const t = document.createElement("span"); t.textContent = k;
-    s.appendChild(t); palDiv.appendChild(s);
+function renderPaletteSwatches() {
+    palDiv.innerHTML = "";
+    for (let k = 0; k < 4; k++) {
+        const [r,g,b] = PALETTE[k];
+        const s = document.createElement("div");
+        s.className = "swatch";
+        s.style.background = `rgb(${r},${g},${b})`;
+        const t = document.createElement("span"); t.textContent = k;
+        s.appendChild(t); palDiv.appendChild(s);
+    }
 }
+renderPaletteSwatches();
 
 // ── Hex CA step (matches caformer/primitives.py:hex_ca_step) ───────
 function hexStep(state, rule, side) {
@@ -184,25 +193,35 @@ function hexStep(state, rule, side) {
     return out;
 }
 
-// ── Render a (side, side) K=4 grid into a canvas ────────────────────
+// ── Render a (side, side) K=4 grid into a canvas with hex offset ───
+//
+// Pointy-top hex: every other ROW is shifted right by half a cell so
+// the visual matches the actual CA neighbourhood topology (where odd
+// rows' NW/NE/SW/SE neighbours come from a different column than
+// even rows').  We use canvas.height to derive the cell size so the
+// shift never distorts the vertical proportions; the canvas width
+// is chosen wide enough (side * cellPx + cellPx/2) to hold the
+// rightmost shifted cell.
 function renderGrid(canvas, grid, side) {
-    const cellPx = canvas.width / side;
+    const cellPx = canvas.height / side;
+    const shift  = cellPx / 2;
     const ctx = canvas.getContext("2d");
-    const img = ctx.createImageData(side, side);
-    for (let i = 0; i < side * side; i++) {
-        const [r, g, b] = PALETTE[grid[i] & 3];
-        img.data[i * 4 + 0] = r;
-        img.data[i * 4 + 1] = g;
-        img.data[i * 4 + 2] = b;
-        img.data[i * 4 + 3] = 255;
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Batch by colour to minimise fillStyle changes.
+    for (let color = 0; color < 4; color++) {
+        const [r, g, b] = PALETTE[color];
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        for (let row = 0; row < side; row++) {
+            const yo = row * cellPx;
+            const xo = (row & 1) ? shift : 0;
+            for (let col = 0; col < side; col++) {
+                if ((grid[row * side + col] & 3) === color) {
+                    ctx.fillRect(xo + col * cellPx, yo, cellPx, cellPx);
+                }
+            }
+        }
     }
-    // Tiny offscreen canvas at native size, then scale up.
-    const tmp = document.createElement("canvas");
-    tmp.width = side; tmp.height = side;
-    tmp.getContext("2d").putImageData(img, 0, 0);
-    ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(tmp, 0, 0, canvas.width, canvas.height);
 }
 
 // ── State ──────────────────────────────────────────────────────────
@@ -339,6 +358,40 @@ drop.addEventListener("dragleave", () => drop.classList.remove("hover"));
 drop.addEventListener("drop", e => {
     e.preventDefault(); drop.classList.remove("hover");
     if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+
+// ── Palette controls ───────────────────────────────────────────────
+function rerenderBoth() {
+    if (init) renderGrid(canvasInit, init, SIDE);
+    if (cur)  renderGrid(canvasCur,  cur,  SIDE);
+}
+function randomColour() {
+    // Bias toward saturated, distinguishable colours — avoid all-grey.
+    const h = Math.random() * 360;
+    const s = 60 + Math.random() * 40;       // 60..100% saturation
+    const l = 25 + Math.random() * 60;       // 25..85% lightness
+    // HSL → RGB
+    const c = (1 - Math.abs(2*l/100 - 1)) * s / 100;
+    const x = c * (1 - Math.abs(((h/60) % 2) - 1));
+    const m = l/100 - c/2;
+    let r=0,g=0,b=0;
+    if      (h < 60)  { r=c; g=x; }
+    else if (h < 120) { r=x; g=c; }
+    else if (h < 180) { g=c; b=x; }
+    else if (h < 240) { g=x; b=c; }
+    else if (h < 300) { r=x; b=c; }
+    else              { r=c; b=x; }
+    return [Math.round((r+m)*255), Math.round((g+m)*255), Math.round((b+m)*255)];
+}
+document.getElementById("btnPalette").addEventListener("click", () => {
+    PALETTE = [randomColour(), randomColour(), randomColour(), randomColour()];
+    renderPaletteSwatches();
+    rerenderBoth();
+});
+document.getElementById("btnPaletteReset").addEventListener("click", () => {
+    PALETTE = DEFAULT_PALETTE.map(c => c.slice());
+    renderPaletteSwatches();
+    rerenderBoth();
 });
 </script>
 </body>
