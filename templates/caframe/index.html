@@ -131,11 +131,19 @@
       <label>source
         <select name="source" id="cf-import-source">
           <option value="taxon"           data-ref="class-4">taxon (class-4)</option>
-          <option value="caformer"        data-ref="">caformer (TrainedModel)</option>
-          <option value="loupe"           data-ref="">loupe (Mandelbrot walk)</option>
-          <option value="spoeqi"          data-ref="">spoeqi (Pact component)</option>
-          <option value="escher"          data-ref="">escher (Motif)</option>
-          <option value="mandelhunt"      data-ref="best">mandelhunt (pool .lut)</option>
+          <option value="caformer"        data-ref="latest">caformer · latest TrainedModel</option>
+          <option value="caformer"        data-ref="best">caformer · best fitness</option>
+          <option value="caformer"        data-ref="random">caformer · random</option>
+          <option value="loupe"           data-ref="latest">loupe · latest walk</option>
+          <option value="loupe"           data-ref="random">loupe · random walk</option>
+          <option value="spoeqi"          data-ref="latest">spoeqi · latest Pact</option>
+          <option value="spoeqi"          data-ref="random">spoeqi · random Pact</option>
+          <option value="metapact"        data-ref="latest">metapact · latest</option>
+          <option value="metapact"        data-ref="random">metapact · random</option>
+          <option value="escher"          data-ref="latest">escher · latest motif/comp</option>
+          <option value="escher"          data-ref="random">escher · random</option>
+          <option value="mandelhunt"      data-ref="best">mandelhunt · best LUT in pool</option>
+          <option value="mandelhunt"      data-ref="random">mandelhunt · random LUT in pool</option>
           <option value="fractal"         data-ref="random" selected>🎲 fractal · random walk</option>
           <option value="fractal"         data-ref="mandelbrot">fractal · mandelbrot</option>
           <option value="fractal"         data-ref="julia">fractal · julia</option>

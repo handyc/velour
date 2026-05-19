@@ -61,14 +61,29 @@ def from_caformer(model_slug: str, *, role: str = 'embed',
                     seed_init: int = 0xCAFE) -> Tuple[bytes, int, str]:
     """Use one of a caformer TrainedModel's rule tables (default: the
     embed rule, which is the only one whose CA-on-bytes intuition
-    matches caframe's frame-stepping)."""
+    matches caframe's frame-stepping).
+
+    `model_slug` can be a literal slug, or one of the auto-pick
+    sentinels: 'latest' (most recent), 'best' (highest final_fitness),
+    'random' (any one)."""
     try:
         from caformer.models import TrainedModel
     except ImportError:
         raise SourceUnavailable('caformer app not installed')
-    m = TrainedModel.objects.filter(slug=model_slug).first()
+    s = (model_slug or '').strip().lower()
+    if s in ('', 'latest'):
+        m = TrainedModel.objects.first()        # -created_at ordering
+    elif s == 'best':
+        m = TrainedModel.objects.order_by('-final_fitness', '-created_at').first()
+    elif s == 'random':
+        m = TrainedModel.objects.order_by('?').first()
+    else:
+        m = TrainedModel.objects.filter(slug=model_slug).first()
     if m is None:
-        raise SourceUnavailable(f'no TrainedModel slug={model_slug!r}')
+        raise SourceUnavailable(
+            f'no TrainedModel matches {model_slug!r}'
+            + ('' if s in ('latest','best','random') else
+               ' (try latest|best|random for auto-pick)'))
     field = f'rule_{role}'
     if not hasattr(m, field):
         raise SourceUnavailable(f'unknown rule role {role!r}')
@@ -203,14 +218,26 @@ def from_loupe_walk(walk_slug: str, *,
                       seed_init: int = 0xCAFE) -> Tuple[bytes, int, str]:
     """A loupe Mandelbrot walk's final image hashed into an init seed;
     rule comes from a class-4 sample so the resulting video isn't a
-    re-render of the Mandelbrot but a CA *seeded* by it."""
+    re-render of the Mandelbrot but a CA *seeded* by it.
+
+    `walk_slug` accepts the sentinels 'latest' / 'random' for one-click
+    use."""
     try:
         from loupe.models import Walk
     except ImportError:
         raise SourceUnavailable('loupe app not installed')
-    walk = Walk.objects.filter(slug=walk_slug).first()
+    s = (walk_slug or '').strip().lower()
+    if s in ('', 'latest'):
+        walk = Walk.objects.first()             # -created_at ordering
+    elif s == 'random':
+        walk = Walk.objects.order_by('?').first()
+    else:
+        walk = Walk.objects.filter(slug=walk_slug).first()
     if walk is None:
-        raise SourceUnavailable(f'no loupe walk slug={walk_slug!r}')
+        raise SourceUnavailable(
+            f'no loupe walk matches {walk_slug!r}'
+            + ('' if s in ('latest','random') else
+               ' (try latest|random for auto-pick)'))
     # Hash the walk's genes/steps for a deterministic seed.
     h = hash((walk.slug, walk.id)) & 0xFFFFFFFF
     rule_blob = _class4_rule_from_taxon(h)
@@ -220,14 +247,27 @@ def from_loupe_walk(walk_slug: str, *,
 
 def from_spoeqi(pact_slug: str, *, component: int = 0,
                   seed_init: int = 0xCAFE) -> Tuple[bytes, int, str]:
-    """Use a spoeqi Pact's specific component CA as the rule source."""
+    """Use a spoeqi Pact's specific component CA as the rule source.
+
+    `pact_slug` accepts the sentinels 'latest' / 'random' for one-click
+    use."""
     try:
         from spoeqi.models import Pact
     except ImportError:
         raise SourceUnavailable('spoeqi app not installed')
-    pact = Pact.objects.filter(slug=pact_slug).first()
+    s = (pact_slug or '').strip().lower()
+    if s in ('', 'latest'):
+        pact = Pact.objects.first()             # -created_at ordering
+    elif s == 'random':
+        pact = Pact.objects.order_by('?').first()
+    else:
+        pact = Pact.objects.filter(slug=pact_slug).first()
     if pact is None:
-        raise SourceUnavailable(f'no spoeqi pact slug={pact_slug!r}')
+        raise SourceUnavailable(
+            f'no spoeqi pact matches {pact_slug!r}'
+            + ('' if s in ('latest','random') else
+               ' (try latest|random for auto-pick)'))
+    pact_slug = pact.slug   # bind back to the real slug for the label
     # spoeqi components are stored as packed CA rules.  Derive a
     # deterministic rule seed from (pact_slug, component) and pull a
     # class-4 fallback through taxon — keeps this loose-coupled
@@ -252,9 +292,19 @@ def from_metapact(metapact_slug: str, *, level: int = 0,
         from spoeqi.models import Metapact
     except ImportError:
         raise SourceUnavailable('spoeqi app not installed')
-    m = Metapact.objects.filter(slug=metapact_slug).first()
+    s = (metapact_slug or '').strip().lower()
+    if s in ('', 'latest'):
+        m = Metapact.objects.first()            # -created_at ordering
+    elif s == 'random':
+        m = Metapact.objects.order_by('?').first()
+    else:
+        m = Metapact.objects.filter(slug=metapact_slug).first()
     if m is None:
-        raise SourceUnavailable(f'no metapact slug={metapact_slug!r}')
+        raise SourceUnavailable(
+            f'no metapact matches {metapact_slug!r}'
+            + ('' if s in ('latest','random') else
+               ' (try latest|random for auto-pick)'))
+    metapact_slug = m.slug
     chain = m.expand()
     lvl = max(0, min(chain.depth - 1, int(level)))
     return (chain.states[lvl], int(seed_init) & 0xFFFFFFFF,
@@ -267,22 +317,43 @@ def from_escher(slug: str, *,
     """Hash an escher slug (Composition, UploadedMotif, or group)
     into init seed + class-4 rule. Falls back to deterministic
     hashing when the slug doesn't match a stored object, so any
-    escher-shaped string becomes a valid caframe seed source."""
+    escher-shaped string becomes a valid caframe seed source.
+
+    `slug` accepts the sentinels 'latest' / 'random' for one-click
+    use (picks across Compositions first, then UploadedMotifs)."""
     try:
         from escher.models import Composition, UploadedMotif
     except ImportError:
         raise SourceUnavailable('escher app not installed')
-    obj_id = 0
-    label = f'escher · {slug}'
-    comp = Composition.objects.filter(slug=slug).first()
-    if comp is not None:
-        obj_id = comp.id
-        label = f'escher · composition {slug}'
+    s = (slug or '').strip().lower()
+    if s in ('', 'latest', 'random'):
+        order = '?' if s == 'random' else None    # None → model default
+        qs_c = Composition.objects.all()
+        qs_m = UploadedMotif.objects.all()
+        if order: qs_c = qs_c.order_by(order); qs_m = qs_m.order_by(order)
+        comp = qs_c.first()
+        if comp is not None:
+            slug = comp.slug
+            obj_id, label = comp.id, f'escher · composition {comp.slug}'
+        else:
+            motif = qs_m.first()
+            if motif is None:
+                raise SourceUnavailable(
+                    'no escher Composition or UploadedMotif rows yet')
+            slug = motif.slug
+            obj_id, label = motif.id, f'escher · motif {motif.slug}'
     else:
-        motif = UploadedMotif.objects.filter(slug=slug).first()
-        if motif is not None:
-            obj_id = motif.id
-            label = f'escher · motif {slug}'
+        obj_id = 0
+        label = f'escher · {slug}'
+        comp = Composition.objects.filter(slug=slug).first()
+        if comp is not None:
+            obj_id = comp.id
+            label = f'escher · composition {slug}'
+        else:
+            motif = UploadedMotif.objects.filter(slug=slug).first()
+            if motif is not None:
+                obj_id = motif.id
+                label = f'escher · motif {slug}'
     h = hash((slug, obj_id)) & 0xFFFFFFFF
     rule_blob = _class4_rule_from_taxon(h)
     return (rule_blob, h ^ (int(seed_init) & 0xFFFFFFFF), label)
