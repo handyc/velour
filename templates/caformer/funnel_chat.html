@@ -117,6 +117,17 @@
                      cursor:pointer; font-family:inherit;
                      font-size:0.72rem;">on</button>
     </span>
+    <span style="margin-left:12px; color:#79c0ff;"
+          title="When ON, prefer the smallest tier whose chain produces
+                 the byte-exact response — typically 32× faster than
+                 board128 (validated 2026-05-19, 96% of trained pairs).">
+      ⇣ tier:
+      <button type="button" id="fc-tier-btn"
+              style="background:#0a1a2a; color:#79c0ff;
+                     border:1px solid #1a4a6a; padding:1px 8px;
+                     cursor:pointer; font-family:inherit;
+                     font-size:0.72rem;">auto</button>
+    </span>
     <a href="{% url 'caformer:caformer_about' %}"
        style="color:#79c0ff; text-decoration:none;
               border:1px solid #1a4a6a; padding:2px 8px;
@@ -259,9 +270,11 @@
   async function callOne(q, layer){
     const t0 = performance.now();
     try {
+      const tierParam = _tierOn ? '&tier=auto' : '';
       const r = await fetch('/caformer/funnel-chat/reply/?q='
                             + encodeURIComponent(q)
-                            + '&layer=' + layer);
+                            + '&layer=' + layer
+                            + tierParam);
       const j = await r.json();
       const ms = Math.round(performance.now() - t0);
       if (j.error) {
@@ -531,6 +544,23 @@
     } catch (e) {}
   });
   _updateDMN();
+
+  // Tier-auto toggle (client-side only — passes &tier=auto to the
+  // chat endpoint when ON).  When OFF, dispatch is unchanged
+  // (board128).  Default ON since the speedup is measurable.
+  const tierBtn = document.getElementById('fc-tier-btn');
+  let _tierOn = true;
+  function _renderTier(){
+    tierBtn.textContent = _tierOn ? 'auto' : 'b128';
+    tierBtn.style.background  = _tierOn ? '#0a1a2a' : '#1a1a1a';
+    tierBtn.style.color       = _tierOn ? '#79c0ff' : '#888888';
+    tierBtn.style.borderColor = _tierOn ? '#1a4a6a' : '#444444';
+  }
+  tierBtn.addEventListener('click', () => {
+    _tierOn = !_tierOn;
+    _renderTier();
+  });
+  _renderTier();
 
   document.querySelectorAll('.fc-chips .chip').forEach((c) => {
     c.addEventListener('click', () => {
