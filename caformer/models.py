@@ -348,6 +348,20 @@ class QRPair(models.Model):
     board128_exact      = models.BooleanField(default=False)
     board128_ticks      = models.PositiveSmallIntegerField(default=128)
 
+    # Multi-resolution storage hierarchy: optional smaller-board
+    # copies of the same chain at coarser resolutions.  Each blob is
+    # a concatenation of N per-position rules at the listed side
+    # length.  These coexist with board128 — small chains act as
+    # error-correctors for the big chain (user framing 2026-05-19)
+    # and as cheap fallbacks when the big chain hasn't been trained
+    # yet.  Storage cost of all four together is < 8 % of board128
+    # alone.  See caformer/multires.py for the scaling primitives.
+    b064_rules_blob = models.BinaryField(null=True, blank=True)  # 64×64
+    b032_rules_blob = models.BinaryField(null=True, blank=True)  # 32×32
+    b016_rules_blob = models.BinaryField(null=True, blank=True)  # 16×16
+    b008_rules_blob = models.BinaryField(null=True, blank=True)  # 8×8
+    last_queried_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
