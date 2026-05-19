@@ -146,6 +146,21 @@
               background:#050a0a; font-size:0.72rem;">
       ruleset zoo
     </a>
+    <a href="{% url 'caformer:caformer_lutview' %}"
+       style="color:#79c0ff; text-decoration:none;
+              border:1px solid #1a4a6a; padding:2px 8px;
+              background:#050a0a; font-size:0.72rem;"
+       title="standalone LUT viewer (also downloadable)">
+      lut view
+    </a>
+    <a href="{% url 'caformer:caformer_standalone_download' %}"
+       download="caformer_standalone.html"
+       style="color:#aaffaa; text-decoration:none;
+              border:1px solid #2a6a2a; padding:2px 8px;
+              background:#0a2a0a; font-size:0.72rem;"
+       title="download a single self-contained HTML file with the chat + trained pairs baked in — no server, no network, audit-friendly">
+      ⤓ standalone chat.html
+    </a>
     <span style="color:#305030; margin-left:auto;">
       tip: click a chip to fill, then Enter ·
       <a href="/caformer/funnel-chat/cli/binary" download

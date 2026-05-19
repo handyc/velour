@@ -34,6 +34,84 @@ from django.core.management.base import BaseCommand
 RULE_BYTES = 16_384
 
 
+def build_standalone_html(pair_ids: list = None, tier: int = 16,
+                              max_bytes_mb: float = 8.0) -> str:
+    """Public builder — used by both the management command and the
+    /caformer/funnel-chat/standalone/ download route.  Returns the
+    full HTML string with the trained-pair bundle baked in as a
+    base-64 blob."""
+    from caformer.models import QRPair
+    from caformer.tier_dispatch import inference_at_tier
+
+    if pair_ids:
+        pairs = list(QRPair.objects.filter(pk__in=pair_ids).order_by('pk'))
+    else:
+        pairs = list(QRPair.objects.filter(board128_exact=True).order_by('pk'))
+
+    tier_field = {8: 'b008_rules_blob', 16: 'b016_rules_blob',
+                    32: 'b032_rules_blob', 64: 'b064_rules_blob',
+                    128: 'board128_rules_blob'}
+    bundle = []
+    total_bytes = 0
+    cap_bytes = int(max_bytes_mb * 1024 * 1024)
+    for pair in pairs:
+        picked_side = None
+        picked_blob = None
+        for side in (8, 16, 32, 64, 128):
+            if side > tier and side != 128:
+                continue
+            blob = getattr(pair, tier_field[side], None) or b''
+            if not blob:
+                continue
+            r = inference_at_tier(pair.prompt, bytes(blob), side,
+                                      expected=pair.expected)
+            if r['byte_match'] == r['n_target'] and r['n_target'] > 0:
+                picked_side = side
+                picked_blob = bytes(blob)
+                break
+        if picked_side is None:
+            blob = bytes(pair.board128_rules_blob or b'')
+            if blob and pair.board128_exact:
+                picked_side = 128
+                picked_blob = blob
+        if picked_side is None:
+            continue
+        rule_count = len(picked_blob) // RULE_BYTES
+        entry_bytes = (RULE_BYTES * rule_count
+                          + len(pair.prompt.encode('utf-8'))
+                          + len(pair.expected.encode('utf-8'))
+                          + 32)
+        if total_bytes + entry_bytes > cap_bytes:
+            continue
+        bundle.append({'prompt':   pair.prompt,
+                         'expected': pair.expected,
+                         'side':     picked_side,
+                         'ticks':    picked_side,
+                         'rules':    picked_blob})
+        total_bytes += entry_bytes
+
+    # Pack bundle into the same format as the management command.
+    import base64 as _b64
+    buf = bytearray()
+    buf += b'CAFORMER'
+    buf.append(1)
+    buf += len(bundle).to_bytes(4, 'little')
+    for e in bundle:
+        p = e['prompt'].encode('utf-8')
+        r = e['expected'].encode('utf-8')
+        n_rules = len(e['rules']) // RULE_BYTES
+        buf.append(e['side'])
+        buf.append(e['ticks'])
+        buf += len(p).to_bytes(2, 'little')
+        buf += p
+        buf += len(r).to_bytes(2, 'little')
+        buf += r
+        buf += n_rules.to_bytes(2, 'little')
+        buf += e['rules']
+    b64 = _b64.b64encode(bytes(buf)).decode('ascii')
+    return _build_html(b64, len(bundle))
+
+
 class Command(BaseCommand):
     help = ('Emit a single self-contained HTML+JS demo of the caformer '
             'CA-LLM — inspectable end-to-end, runs locally in any '

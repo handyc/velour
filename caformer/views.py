@@ -3682,13 +3682,52 @@ def caformer_ruleset_zoo_view(request):
 
 
 def caformer_lutview(request):
-    """Serve the standalone LUT viewer HTML.  The exact same self-
-    contained file the caformer_emit_lutview command writes — embedded
-    here so it's discoverable from the chat UI without a download
-    step."""
+    """Serve the standalone LUT viewer HTML.  Same builder the
+    caformer_emit_lutview command uses, so the live page and the
+    downloadable file are always identical.  Bakes a Mandelbrot
+    main-view LUT as the default so the viewer is never empty."""
     from django.http import HttpResponse
-    from .management.commands.caformer_emit_lutview import HTML
-    return HttpResponse(HTML, content_type='text/html; charset=utf-8')
+    from .management.commands.caformer_emit_lutview import (
+        _default_mandelbrot_lut, build_lutview_html)
+    try:
+        default = _default_mandelbrot_lut()
+    except Exception:
+        default = None
+    html = build_lutview_html(default)
+    return HttpResponse(html, content_type='text/html; charset=utf-8')
+
+
+def caformer_lutview_download(request):
+    """Download the LUT viewer as a single self-contained .html file."""
+    from django.http import HttpResponse
+    from .management.commands.caformer_emit_lutview import (
+        _default_mandelbrot_lut, build_lutview_html)
+    try:
+        default = _default_mandelbrot_lut()
+    except Exception:
+        default = None
+    html = build_lutview_html(default)
+    resp = HttpResponse(html, content_type='text/html; charset=utf-8')
+    resp['Content-Disposition'] = 'attachment; filename="lutview.html"'
+    return resp
+
+
+def caformer_standalone_download(request):
+    """Download the chat as a single self-contained .html with the
+    trained pair bundle baked in.  Query params:
+       ?pair_ids=2,3,5,6,7,8,10,13,14,21,24,29,33   (optional subset)
+       ?tier=16                                       (default 16)
+    """
+    from django.http import HttpResponse
+    from .management.commands.caformer_emit_standalone import (
+        build_standalone_html)
+    pair_ids_q = request.GET.get('pair_ids', '').strip()
+    pair_ids = [int(x) for x in pair_ids_q.split(',') if x.strip()] if pair_ids_q else None
+    tier = int(request.GET.get('tier', 16))
+    html = build_standalone_html(pair_ids=pair_ids, tier=tier)
+    resp = HttpResponse(html, content_type='text/html; charset=utf-8')
+    resp['Content-Disposition'] = 'attachment; filename="caformer_standalone.html"'
+    return resp
 
 
 def caformer_tier_compare_view(request):

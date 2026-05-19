@@ -18,10 +18,38 @@ The output file is small (~12 KB) and runs locally with no network.
 """
 from __future__ import annotations
 
+import base64
 import sys
 from pathlib import Path
 
 from django.core.management.base import BaseCommand
+
+
+def _default_mandelbrot_lut() -> bytes:
+    """The iconic main Mandelbrot view at (cx=-0.5, cy=0, span=3.0),
+    posterised to K=4, returned as 16,384 raw bytes (128×128 cells).
+
+    Used as the default "Hello!" rule loaded into the viewer when
+    nobody has dropped a .lut file yet."""
+    from loupe.render import mandelbrot_buckets
+    arr = mandelbrot_buckets(-0.5, 0.0, 3.0, 128, 128, iter_cap=None)
+    import numpy as np
+    return bytes(arr.astype(np.uint8).ravel())
+
+
+def build_lutview_html(default_lut_bytes: bytes = None) -> str:
+    """Build the standalone LUT viewer HTML.  If `default_lut_bytes`
+    is provided (must be 16,384 bytes), it gets embedded as base64
+    and JS loads it automatically on page open so the viewer never
+    sits empty."""
+    if default_lut_bytes is None:
+        b64 = ''
+    else:
+        if len(default_lut_bytes) != 16384:
+            raise ValueError(
+                f'default_lut_bytes must be 16,384 B; got {len(default_lut_bytes)}')
+        b64 = base64.b64encode(default_lut_bytes).decode('ascii')
+    return HTML.replace('__DEFAULT_LUT_B64__', b64)
 
 
 HTML = r'''<!DOCTYPE html>
@@ -105,6 +133,11 @@ after one tick.  Strict ouroboros = sr_strict 1.0 at every depth.</p>
     <div style="margin-top:6px;">
       <button id="btnPalette">🎨 random palette</button>
       <button id="btnPaletteReset">default palette</button>
+    </div>
+    <div style="margin-top:10px; border-top:1px solid #1a3a1a; padding-top:8px;">
+      <button id="btnHunt">▶ mandelhunt search</button>
+      <button id="btnHuntOnce">+1 candidate</button>
+      <div class="stat" id="statHunt">live search: idle</div>
     </div>
     <div class="stat" id="statFile">no file loaded</div>
     <div class="stat" id="statTick">tick: —</div>
@@ -393,6 +426,188 @@ document.getElementById("btnPaletteReset").addEventListener("click", () => {
     renderPaletteSwatches();
     rerenderBoth();
 });
+
+// ── Embedded mandelhunt: live fractal-quine search in the browser ──
+//
+// Generates Mandelbrot regions at random walking coordinates, posterises
+// to K=4 (16,384 bytes = LUT-as-board), scores each for self-reproduction
+// + class-4 + L0 fixed-point match.  When a candidate passes the gate,
+// it gets loaded as the live LUT and the viewer auto-plays it for
+// `huntDisplayMs` ms before searching for the next one.
+
+const huntDisplayMs = 10000;       // display each find for 10 s
+const huntMinSr     = 0.55;         // accept threshold
+const huntMaxIters  = 800;          // Mandelbrot iter cap per pixel
+const SEED_COORDS = [
+    [-0.5,    0.0,   3.0],          // main view
+    [-0.745,  0.113, 0.05],         // spiral
+    [-1.25,   0.0,   0.1],          // left bulb
+    [-0.16,   1.04,  0.04],         // elephant valley
+    [ 0.272,  0.005, 0.01],         // seahorse valley
+];
+let huntState = { running: false, walkCx: -0.5, walkCy: 0.0,
+                    walkSpan: 3.0, stepsInWalk: 0,
+                    nScanned: 0, nAccepted: 0, bestSr: 0,
+                    holdUntil: 0, timer: null };
+
+function mandelEscape(cx, cy, iterCap) {
+    let zx = 0, zy = 0, x2 = 0, y2 = 0, i;
+    for (i = 0; i < iterCap && x2 + y2 < 4.0; i++) {
+        zy = 2 * zx * zy + cy;
+        zx = x2 - y2 + cx;
+        x2 = zx * zx; y2 = zy * zy;
+    }
+    return i;
+}
+function mandelGrid(cx, cy, span, side) {
+    // Auto-tune iterCap as the C tool does.
+    let it = 192, s = span;
+    while (s < 1.0 && it < huntMaxIters) { it += 64; s *= 2; }
+    const escape = new Int32Array(side * side);
+    const px = span / side;
+    const ox = cx - px * side * 0.5;
+    const oy = cy - px * side * 0.5;
+    for (let r = 0; r < side; r++) {
+        const y = oy + r * px;
+        for (let c = 0; c < side; c++) {
+            escape[r * side + c] = mandelEscape(ox + c * px, y, it);
+        }
+    }
+    return { escape, iterCap: it };
+}
+function posterise(escape, iterCap) {
+    // K=4: in-set → 3, finite split into tertile buckets 0/1/2.
+    const finite = [];
+    for (let i = 0; i < escape.length; i++) {
+        if (escape[i] < iterCap) finite.push(escape[i]);
+    }
+    let bin1, bin2;
+    if (finite.length < 3) { bin1 = iterCap/3; bin2 = 2*iterCap/3; }
+    else {
+        finite.sort((a,b) => a-b);
+        bin1 = finite[finite.length / 3 | 0];
+        bin2 = finite[(2*finite.length / 3) | 0];
+        if (bin2 <= bin1) bin2 = bin1 + 1;
+    }
+    const out = new Uint8Array(escape.length);
+    for (let i = 0; i < escape.length; i++) {
+        const e = escape[i];
+        if      (e >= iterCap) out[i] = 3;
+        else if (e <  bin1)    out[i] = 0;
+        else if (e <  bin2)    out[i] = 1;
+        else                   out[i] = 2;
+    }
+    return out;
+}
+function srStrict(lut, ticks) {
+    let cur = new Uint8Array(lut);
+    for (let t = 0; t < ticks; t++) cur = hexStep(cur, lut, SIDE);
+    let match = 0;
+    for (let i = 0; i < CELLS; i++) if (cur[i] === lut[i]) match++;
+    return match / CELLS;
+}
+
+function nextHuntCoord() {
+    // Random walk: small step from previous coord, with reset to a seed
+    // every ~24 steps to avoid getting trapped.
+    if (huntState.stepsInWalk >= 24 || huntState.walkSpan < 1e-9) {
+        const s = SEED_COORDS[Math.floor(Math.random() * SEED_COORDS.length)];
+        huntState.walkCx = s[0]; huntState.walkCy = s[1]; huntState.walkSpan = s[2];
+        huntState.stepsInWalk = 0;
+        return;
+    }
+    huntState.walkCx += (Math.random() * 2 - 1) * 0.4 * huntState.walkSpan;
+    huntState.walkCy += (Math.random() * 2 - 1) * 0.4 * huntState.walkSpan;
+    huntState.walkSpan *= 0.6 + Math.random() * 0.35;
+    huntState.stepsInWalk++;
+}
+
+function huntOnce() {
+    nextHuntCoord();
+    const { escape, iterCap } = mandelGrid(huntState.walkCx, huntState.walkCy,
+                                                  huntState.walkSpan, SIDE);
+    const lut = posterise(escape, iterCap);
+    const sr  = srStrict(lut, 4);   // 4 ticks is enough for the gate
+    huntState.nScanned++;
+    if (sr > huntState.bestSr) huntState.bestSr = sr;
+    updateHuntStat();
+    return { lut, sr, cx: huntState.walkCx, cy: huntState.walkCy,
+             span: huntState.walkSpan };
+}
+
+function updateHuntStat() {
+    const status = document.getElementById("statHunt");
+    if (!huntState.running) {
+        status.innerHTML = `live search: idle · scanned=${huntState.nScanned}` +
+                           ` accepted=${huntState.nAccepted}` +
+                           ` best_sr=${huntState.bestSr.toFixed(3)}`;
+    } else {
+        const left = Math.max(0, (huntState.holdUntil - Date.now()) / 1000);
+        status.innerHTML = `<b>SEARCHING</b> · scanned=${huntState.nScanned}` +
+                           ` accepted=${huntState.nAccepted}` +
+                           ` best_sr=${huntState.bestSr.toFixed(3)}` +
+                           (left > 0 ? ` · displaying for ${left.toFixed(1)}s` : '');
+    }
+}
+
+function huntTick() {
+    if (!huntState.running) return;
+    // While holding a find, just keep stepping the CA forward.
+    if (Date.now() < huntState.holdUntil) {
+        stepOnce();
+        updateHuntStat();
+        huntState.timer = setTimeout(huntTick, 80);
+        return;
+    }
+    // Display time over — search for the next candidate.
+    const found = huntOnce();
+    if (found.sr >= huntMinSr) {
+        huntState.nAccepted++;
+        loadLUT(found.lut);
+        document.getElementById("statFile").innerHTML =
+            `<b>mandelhunt ${huntState.nAccepted}</b> · ` +
+            `cx=${found.cx.toFixed(4)} cy=${found.cy.toFixed(4)} ` +
+            `span=${found.span.toExponential(2)} · sr=${found.sr.toFixed(3)}`;
+        huntState.holdUntil = Date.now() + huntDisplayMs;
+    }
+    updateHuntStat();
+    // Quick re-tick to keep searching.
+    huntState.timer = setTimeout(huntTick, 5);
+}
+
+document.getElementById("btnHunt").addEventListener("click", () => {
+    huntState.running = !huntState.running;
+    document.getElementById("btnHunt").textContent =
+        huntState.running ? "❚❚ stop search" : "▶ mandelhunt search";
+    if (huntState.running) {
+        // Reset walk to a seed.
+        huntState.stepsInWalk = 24;
+        huntState.holdUntil = 0;
+        huntTick();
+    } else if (huntState.timer) {
+        clearTimeout(huntState.timer); huntState.timer = null;
+    }
+    updateHuntStat();
+});
+document.getElementById("btnHuntOnce").addEventListener("click", () => {
+    const found = huntOnce();
+    loadLUT(found.lut);
+    document.getElementById("statFile").innerHTML =
+        `<b>mandelhunt one-shot</b> · cx=${found.cx.toFixed(4)} ` +
+        `cy=${found.cy.toFixed(4)} span=${found.span.toExponential(2)} ` +
+        `· sr=${found.sr.toFixed(3)}`;
+});
+
+// ── Default-LUT auto-load on first open ────────────────────────────
+const DEFAULT_LUT_B64 = "__DEFAULT_LUT_B64__";
+if (DEFAULT_LUT_B64 && DEFAULT_LUT_B64.length > 0) {
+    const bin = atob(DEFAULT_LUT_B64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    loadLUT(bytes);
+    document.getElementById("statFile").innerHTML =
+        "<b>(default)</b> Mandelbrot main view, posterised K=4";
+}
 </script>
 </body>
 </html>
@@ -406,8 +621,20 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--out', type=str, default='lutview.html')
 
+    def add_arguments_extra(self, parser):  # noqa: keep next to add_arguments
+        pass
+
     def handle(self, *, out, **opts):
+        # Bake a Mandelbrot-main-view default LUT into the HTML so the
+        # viewer opens with something rendered (instead of empty canvases).
+        try:
+            default = _default_mandelbrot_lut()
+        except Exception as e:
+            sys.stdout.write(f'note: skipping default LUT ({e})\n')
+            default = None
+        html = build_lutview_html(default)
         out_p = Path(out)
-        out_p.write_text(HTML, encoding='utf-8')
+        out_p.write_text(html, encoding='utf-8')
         sys.stdout.write(f'wrote {out_p} '
-                            f'({out_p.stat().st_size} B)\n')
+                            f'({out_p.stat().st_size} B'
+                            f'{", default LUT embedded" if default else ""})\n')
