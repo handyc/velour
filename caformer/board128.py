@@ -196,6 +196,7 @@ def train_position_board128(prompt: str, target_byte: int,
                               polish_trials: int = 80,
                               mutation_rate: float = 0.005,
                               seed: int = 0xB128A1E,
+                              seed_rule: bytes = None,
                               on_event=None) -> dict:
     """Train one rule for a single (prompt, byte-at-position) target.
     This is the per-position primitive — call N times to train a full
@@ -229,9 +230,33 @@ def train_position_board128(prompt: str, target_byte: int,
         return cf + bonus
 
     # Initial population.
+    # If `seed_rule` is provided, half the population starts as
+    # mutations of it (warm-start prior); the other half stays random
+    # so the search keeps diversity if the seed rule is a poor fit.
     pop = []
+    seed_arr = None
+    if seed_rule is not None:
+        if len(seed_rule) != 16_384:
+            raise ValueError(
+                f'seed_rule must be 16,384 bytes; got {len(seed_rule)}')
+        seed_arr = np.frombuffer(seed_rule, dtype=np.uint8).copy() & 3
     for i in range(pop_size):
-        r = random_rule_table(seed ^ (i * 7919))
+        if seed_arr is not None and i < (pop_size + 1) // 2:
+            # Tiny perturbation of the seed rule so the initial pop has
+            # a few variations to climb from.
+            r = seed_arr.copy()
+            if i > 0:
+                jit_rng = random.Random(seed ^ (i * 31337))
+                n_flips = max(1, int(0.001 * 16_384))    # ~16 entries
+                for _ in range(n_flips):
+                    idx = jit_rng.randrange(16_384)
+                    cur = int(r[idx])
+                    new = jit_rng.randint(0, 3)
+                    while new == cur:
+                        new = jit_rng.randint(0, 3)
+                    r[idx] = new
+        else:
+            r = random_rule_table(seed ^ (i * 7919))
         pop.append((r, _fitness(r)))
     pop.sort(key=lambda rf: -rf[1])
     best_rule, best_fit = pop[0]
