@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Tier compare · caformer{% endblock %}
+{% block content %}
+<style>
+  .tc { max-width: 100ch; margin: 1rem auto; padding: 0 1rem;
+        color: #cfe5cf; font-family: ui-sans-serif, system-ui,
+              -apple-system, sans-serif; line-height: 1.5; }
+  .tc h1 { color: #aaffaa; font-size: 1.3rem;
+           border-bottom: 1px solid #2a6a2a; padding-bottom: 4px; }
+  .tc h2 { color: #aaffaa; font-size: 1rem; margin-top: 2rem; }
+  .tc a  { color: #79c0ff; }
+  .tc code { color: #f0ff80; background: #0a1a0a; padding: 1px 4px;
+             border-radius: 2px; font-family: ui-monospace, monospace; }
+  .nav-back a { color: #7ee787; text-decoration: none;
+                border: 1px solid #2a6a2a; padding: 3px 10px;
+                background: #050a05; font-size: 0.85rem; }
+  table.tier { width: 100%; border-collapse: collapse;
+               margin: 8px 0; font-size: 0.85rem; }
+  table.tier th, table.tier td { padding: 5px 8px;
+                                   border-bottom: 1px solid #1a3a1a;
+                                   text-align: right; }
+  table.tier th { color: #aaffaa; background: #0a1a0a;
+                  font-size: 0.7rem; text-transform: uppercase;
+                  letter-spacing: 0.05em; font-weight: normal; }
+  table.tier td:first-child, table.tier th:first-child { text-align: left; }
+  .pair-row { background: #050a05; padding: 8px 12px;
+              margin: 12px 0; border-left: 3px solid #2a6a2a; }
+  .pair-row .pair-head { color: #aaffaa; font-weight: bold;
+                          margin-bottom: 4px; font-size: 0.9rem; }
+  .pair-row .pair-meta { color: #88aa88; font-size: 0.75rem;
+                          margin-bottom: 6px; }
+  .pair-row.win { border-left-color: #79c0ff; }
+  .pair-row.win .pair-head { color: #79c0ff; }
+  .tag-ok    { color: #aaffaa; font-weight: bold; }
+  .tag-fail  { color: #ff8888; font-weight: bold; }
+  .speedup-strong { color: #79c0ff; font-weight: bold; }
+  .speedup-mild   { color: #cfe5cf; }
+  .callout { background: #0a1a2a; border-left: 3px solid #79c0ff;
+             padding: 10px 14px; margin: 12px 0; color: #cce0ff; }
+</style>
+
+<div class="tc">
+  <div class="nav-back">
+    <a href="{% url 'caformer:caformer_about' %}">← about</a>
+    &nbsp; <a href="{% url 'caformer:caformer_ruleset_zoo' %}">← zoo</a>
+    &nbsp; <a href="{% url 'caformer:caformer_cell8' %}">← cell8</a>
+    &nbsp; <a href="{% url 'caformer:funnel_chat' %}">← chat</a>
+  </div>
+
+  <h1>Tier compare — multi-resolution inference benchmark</h1>
+
+  <p>For every pair that has rules at more than one board size, we
+     run inference at each tier and compare wall, cell updates, and
+     byte-match against the trained target.  Same LUT, different
+     board: smaller boards mean fewer cell updates per tick AND fewer
+     ticks for signal to propagate across the board.</p>
+
+  <div class="callout">
+    <b>Why this matters:</b> the K=4 7→1 LUT is <code>16,384 bytes</code>
+    regardless of board size — only the FORWARD-PASS cell count
+    shrinks at smaller tiers.  So a smaller-tier chain is strictly
+    better when it can EXACT: same storage, same fidelity, much
+    faster inference.  When a small tier can't EXACT a position,
+    that's where the corrector concept earns its keep — use the
+    board128 rule for the rebellious position and the small tier
+    for the rest.
+  </div>
+
+  <p>Showing {{ n_rows }} pairs with multi-tier coverage,
+     small-tier-EXACT winners first.</p>
+
+  {% for r in rows %}
+  <div class="pair-row {% for t in r.tiers %}{% if t.side != 128 and t.exact %}win{% endif %}{% endfor %}">
+    <div class="pair-head">pair #{{ r.pair_id }} — {{ r.prompt }} → {{ r.expected }}</div>
+    <div class="pair-meta">{{ r.expected|length }} bytes target</div>
+    <table class="tier">
+      <tr>
+        <th>tier</th>
+        <th>byte match</th>
+        <th>EXACT?</th>
+        <th>wall (ms)</th>
+        <th>cell updates</th>
+        <th>vs board128</th>
+      </tr>
+      {% for t in r.tiers %}
+      <tr>
+        <td><code>side={{ t.side }}</code></td>
+        <td>{{ t.byte_match }}/{{ t.n_target }}</td>
+        <td>{% if t.exact %}<span class="tag-ok">✓</span>{% else %}<span class="tag-fail">✗</span>{% endif %}</td>
+        <td>{{ t.wall_ms|floatformat:2 }} ms</td>
+        <td>{{ t.cell_updates }}</td>
+        <td>{% if t.side == 128 %}—{% else %}<span class="{% if t.speedup_wall > 10 %}speedup-strong{% else %}speedup-mild{% endif %}">{{ t.speedup_wall|floatformat:1 }}×</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endfor %}
+
+  <div class="nav-back" style="margin-top: 2rem;">
+    <a href="{% url 'caformer:caformer_about' %}">← about</a>
+    &nbsp; <a href="{% url 'caformer:caformer_ruleset_zoo' %}">← zoo</a>
+    &nbsp; <a href="{% url 'caformer:caformer_cell8' %}">← cell8</a>
+    &nbsp; <a href="{% url 'caformer:funnel_chat' %}">← chat</a>
+  </div>
+</div>
+{% endblock %}

@@ -3644,6 +3644,38 @@ def caformer_ruleset_zoo_view(request):
     })
 
 
+def caformer_tier_compare_view(request):
+    """Visualise the multires speed-vs-fidelity trade-off across all
+    pairs that have multiple tiers populated.  Sorts by board128 wall
+    descending so the dramatic speedups float to the top."""
+    from .models import QRPair
+    from .tier_dispatch import compare_all_tiers
+    rows = []
+    for pair in QRPair.objects.all().order_by('pk'):
+        cmp = compare_all_tiers(pair)
+        if len(cmp['tiers']) < 2:
+            continue
+        # Format wall in milliseconds for display (avoids Django template
+        # math).  Keep raw 'wall' in case anything else reads it.
+        for t in cmp['tiers']:
+            t['wall_ms'] = t['wall'] * 1000.0
+        rows.append(cmp)
+    # Sort: pairs where small tier is BOTH faster AND EXACT first.
+    def _priority(c):
+        b128 = next((t for t in c['tiers'] if t['side'] == 128), None)
+        small = next((t for t in c['tiers'] if t['side'] != 128), None)
+        if not (b128 and small):
+            return 0
+        if not small['exact']:
+            return -1
+        return small.get('speedup_wall', 0)
+    rows.sort(key=_priority, reverse=True)
+    return render(request, 'caformer/tier_compare.html', {
+        'rows': rows,
+        'n_rows': len(rows),
+    })
+
+
 def caformer_cell8_view(request):
     """The cell8 subpage: introduces the 8→1 hex CA primitive and
     demos the input-port wiring that makes chain composition
