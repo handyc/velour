@@ -27,7 +27,8 @@ import numpy as np
 from django.core.management.base import BaseCommand
 
 
-GENERATOR_NAMES = ('random', 'mandelbrot', 'banded', 'sparse', 'ltree')
+GENERATOR_NAMES = ('random', 'mandelbrot', 'julia', 'burning_ship',
+                       'tricorn', 'banded', 'sparse', 'ltree')
 
 
 class Command(BaseCommand):
@@ -43,18 +44,23 @@ class Command(BaseCommand):
                               help='per-generator: save top-K by sr_strict')
 
     def handle(self, *, n, out, seed, top_save, **opts):
-        from caformer.lut_generators import (gen_banded, gen_ltree,
+        from caformer.lut_generators import (gen_banded, gen_burning_ship,
+                                                    gen_julia, gen_ltree,
                                                     gen_mandelbrot, gen_random,
-                                                    gen_sparse_on_black)
+                                                    gen_sparse_on_black,
+                                                    gen_tricorn)
         from spoeqi.metachain import classify_rule, self_reproduce_score
         from caformer.primitives import hex_ca_step
 
         gens = {
-            'random':     lambda r: gen_random(r),
-            'mandelbrot': lambda r: gen_mandelbrot(r),
-            'banded':     lambda r: gen_banded(r),
-            'sparse':     lambda r: gen_sparse_on_black(r),
-            'ltree':      lambda r: gen_ltree(r),
+            'random':       lambda r: gen_random(r),
+            'mandelbrot':   lambda r: gen_mandelbrot(r),
+            'julia':        lambda r: gen_julia(r),
+            'burning_ship': lambda r: gen_burning_ship(r),
+            'tricorn':      lambda r: gen_tricorn(r),
+            'banded':       lambda r: gen_banded(r),
+            'sparse':       lambda r: gen_sparse_on_black(r),
+            'ltree':        lambda r: gen_ltree(r),
         }
 
         out_p = Path(out)

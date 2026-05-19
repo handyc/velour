@@ -34,6 +34,142 @@ def gen_random(rng: np.random.RandomState) -> np.ndarray:
 
 # ── 1. Mandelbrot (wrapper around loupe.render) ───────────────────
 
+def _posterise_escape(escape: np.ndarray, iter_cap: int) -> np.ndarray:
+    """Tertile-bucket an escape-time grid into K=4 cells the same way
+    mandelhunt / loupe.render does (in-set → 3, finite → 0/1/2 by
+    tertile of finite escape values).  Shared between mandelbrot,
+    julia, burning ship, phoenix — anything escape-time based."""
+    flat = escape.ravel()
+    finite = flat[flat < iter_cap]
+    if finite.size < 3:
+        bin1, bin2 = iter_cap // 3, (2 * iter_cap) // 3
+    else:
+        finite_sorted = np.sort(finite)
+        bin1 = int(finite_sorted[finite_sorted.size // 3])
+        bin2 = int(finite_sorted[(2 * finite_sorted.size) // 3])
+        if bin2 <= bin1:
+            bin2 = bin1 + 1
+    out = np.where(flat >= iter_cap, 3,
+            np.where(flat < bin1, 0,
+              np.where(flat < bin2, 1, 2))).astype(np.uint8)
+    return out
+
+
+def _escape_iter(zx_init, zy_init, cx, cy, iter_cap, mode='mandelbrot'):
+    """Vectorised escape-time iteration for several quadratic fractals.
+    `zx_init/zy_init` are SIDE×SIDE float64 arrays of initial z values;
+    `cx/cy` are either arrays (Julia: constant per pixel) or scalars
+    (Mandelbrot: c = pixel coord, so cx/cy are the pixel grids).
+    Returns an int array of escape iteration counts."""
+    zx = zx_init.copy().astype(np.float64)
+    zy = zy_init.copy().astype(np.float64)
+    if np.isscalar(cx):
+        cx = np.full_like(zx, cx)
+        cy = np.full_like(zy, cy)
+    escape = np.full(zx.shape, iter_cap, dtype=np.int32)
+    mask = np.ones(zx.shape, dtype=bool)
+    for i in range(iter_cap):
+        if mode == 'mandelbrot' or mode == 'julia':
+            # z = z² + c
+            new_zx = zx * zx - zy * zy + cx
+            new_zy = 2.0 * zx * zy + cy
+        elif mode == 'burning_ship':
+            # z = (|x| + i|y|)² + c
+            ax = np.abs(zx); ay = np.abs(zy)
+            new_zx = ax * ax - ay * ay + cx
+            new_zy = 2.0 * ax * ay + cy
+        elif mode == 'tricorn':
+            # z = conj(z)² + c
+            new_zx = zx * zx - zy * zy + cx
+            new_zy = -2.0 * zx * zy + cy
+        else:
+            raise ValueError(f'unknown escape-iter mode {mode!r}')
+        zx[mask] = new_zx[mask]
+        zy[mask] = new_zy[mask]
+        diverged = (zx * zx + zy * zy) > 4.0
+        new_escape = mask & diverged
+        escape[new_escape] = i
+        mask &= ~diverged
+        if not mask.any():
+            break
+    return escape
+
+
+def gen_julia(rng: np.random.RandomState, *, cx=None, cy=None,
+                  zoom=None, center_x=0.0, center_y=0.0) -> np.ndarray:
+    """Julia set posterised to K=4.  Picks a c value near the boundary
+    of the Mandelbrot set (where Julia sets are most fractal-rich)
+    and renders the Julia set of that c over a viewport zoomed to
+    fit the structure."""
+    if cx is None or cy is None:
+        # Bias c toward known-interesting Julia regions.
+        choices = [
+            (-0.4,    0.6),       # rabbit
+            ( 0.285,  0.01),      # near tip of cardioid
+            (-0.835, -0.2321),    # spiral
+            ( 0.45,   0.1428),    # douady rabbit-ish
+            (-0.70176, -0.3842),  # dragon
+            ( 0.0,    1.0),       # dendrite-like
+            ( -1.476, 0.0),       # period-3 along real axis
+            ( -0.12,  0.74),      # Newton-like spirals
+            (-0.75,   0.11),      # near main bulb
+        ]
+        cx_, cy_ = choices[rng.randint(0, len(choices))]
+        cx = cx_ + (rng.uniform() - 0.5) * 0.05
+        cy = cy_ + (rng.uniform() - 0.5) * 0.05
+    if zoom is None:
+        log_zoom = rng.uniform(0.4, 1.6)    # 1.5 to ~5 viewport
+        zoom = 10.0 ** log_zoom * 0.3
+    # Pixel grid: viewport from (center - zoom/2, center + zoom/2).
+    side = SIDE
+    half = zoom / 2.0
+    xs = np.linspace(center_x - half, center_x + half, side)
+    ys = np.linspace(center_y - half, center_y + half, side)
+    zx0, zy0 = np.meshgrid(xs, ys)
+    iter_cap = 192 + int(64 * max(0, 1.6 - np.log10(zoom + 1e-9)))
+    escape = _escape_iter(zx0, zy0, cx, cy, iter_cap, mode='julia')
+    return _posterise_escape(escape, iter_cap)
+
+
+def gen_burning_ship(rng: np.random.RandomState) -> np.ndarray:
+    """Burning Ship fractal posterised to K=4.  Mandelbrot-like
+    iteration with |z| in place of z each step → produces the
+    iconic ship silhouette and similar bulbous detail."""
+    # Burning Ship's interesting region is centred near (-1.7, -0.03).
+    cx_c = -1.75 + (rng.uniform() - 0.5) * 0.3
+    cy_c = -0.03 + (rng.uniform() - 0.5) * 0.3
+    span = 10.0 ** rng.uniform(-3, 0.3)   # 0.001 to 2.0
+    side = SIDE
+    half = span / 2.0
+    xs = np.linspace(cx_c - half, cx_c + half, side)
+    ys = np.linspace(cy_c - half, cy_c + half, side)
+    cx_grid, cy_grid = np.meshgrid(xs, ys)
+    zx0 = np.zeros_like(cx_grid)
+    zy0 = np.zeros_like(cy_grid)
+    iter_cap = 192 + int(64 * max(0, -np.log10(span + 1e-9)))
+    escape = _escape_iter(zx0, zy0, cx_grid, cy_grid, iter_cap,
+                              mode='burning_ship')
+    return _posterise_escape(escape, iter_cap)
+
+
+def gen_tricorn(rng: np.random.RandomState) -> np.ndarray:
+    """Tricorn (Mandelbar) fractal — z = conj(z)² + c.  Three-fold
+    symmetry; bulb-on-bulb structure like Mandelbrot but rougher."""
+    cx_c = 0.0 + (rng.uniform() - 0.5) * 2.0
+    cy_c = 0.0 + (rng.uniform() - 0.5) * 2.0
+    span = 10.0 ** rng.uniform(-2, 0.5)
+    side = SIDE
+    half = span / 2.0
+    xs = np.linspace(cx_c - half, cx_c + half, side)
+    ys = np.linspace(cy_c - half, cy_c + half, side)
+    cx_grid, cy_grid = np.meshgrid(xs, ys)
+    zx0 = np.zeros_like(cx_grid)
+    zy0 = np.zeros_like(cy_grid)
+    iter_cap = 192
+    escape = _escape_iter(zx0, zy0, cx_grid, cy_grid, iter_cap, mode='tricorn')
+    return _posterise_escape(escape, iter_cap)
+
+
 def gen_mandelbrot(rng: np.random.RandomState, *, cx=None, cy=None,
                        span=None) -> np.ndarray:
     """Random Mandelbrot region (cx, cy in the famous box, span in

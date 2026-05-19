@@ -58,8 +58,13 @@ class Command(BaseCommand):
                                      'PNGs (default 4 → 512×512)')
         parser.add_argument('--all',      action='store_true',
                               help='render every .lut, not just --top')
+        parser.add_argument('--sort-by',  type=str, default='sr',
+                              choices=['sr', 'c4', 'combined'],
+                              help='sort key for ranking (combined = sr × (0.3 + c4) '
+                                     'so high-class-4 candidates rank above trivial '
+                                     'sr=1.0 fixed points)')
 
-    def handle(self, *, pool, out, top, upscale, all, **opts):
+    def handle(self, *, pool, out, top, upscale, all, sort_by, **opts):
         from PIL import Image
 
         pool_p = Path(pool)
@@ -79,7 +84,12 @@ class Command(BaseCommand):
             sr   = float(sr_m.group(1)) if sr_m else 0.0
             c4   = float(c4_m.group(1)) if c4_m else 0.0
             records.append((sr, c4, p))
-        records.sort(key=lambda r: -r[0])
+        if sort_by == 'sr':
+            records.sort(key=lambda r: -r[0])
+        elif sort_by == 'c4':
+            records.sort(key=lambda r: -r[1])
+        else:  # combined
+            records.sort(key=lambda r: -(r[0] * (0.3 + r[1])))
         log(f'pool: {pool_p}  ({len(records)} .lut files)')
         log(f'out:  {out_p}')
 

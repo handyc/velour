@@ -135,7 +135,16 @@ after one tick.  Strict ouroboros = sr_strict 1.0 at every depth.</p>
       <button id="btnPaletteReset">default palette</button>
     </div>
     <div style="margin-top:10px; border-top:1px solid #1a3a1a; padding-top:8px;">
-      <button id="btnHunt">▶ mandelhunt search</button>
+      <div class="stat" style="margin-bottom:4px;">hunt mode:
+        <select id="huntMode" style="background:#0a1a2a; color:#79c0ff;
+                border:1px solid #1a4a6a; padding:1px 4px; font:inherit;">
+          <option value="mandelbrot">Mandelbrot (18% c4)</option>
+          <option value="julia">Julia (73% c4)</option>
+          <option value="burning_ship">Burning Ship (37% c4)</option>
+          <option value="tricorn">Tricorn (47% c4)</option>
+        </select>
+      </div>
+      <button id="btnHunt">▶ fractal search</button>
       <button id="btnHuntOnce">+1 candidate</button>
       <div class="stat" id="statHunt">live search: idle</div>
     </div>
@@ -437,40 +446,80 @@ document.getElementById("btnPaletteReset").addEventListener("click", () => {
 
 const huntDisplayMs = 10000;       // display each find for 10 s
 const huntMinSr     = 0.55;         // accept threshold
-const huntMaxIters  = 800;          // Mandelbrot iter cap per pixel
-const SEED_COORDS = [
+const huntMaxIters  = 800;          // iter cap per pixel
+const MANDEL_SEEDS = [
     [-0.5,    0.0,   3.0],          // main view
     [-0.745,  0.113, 0.05],         // spiral
     [-1.25,   0.0,   0.1],          // left bulb
     [-0.16,   1.04,  0.04],         // elephant valley
     [ 0.272,  0.005, 0.01],         // seahorse valley
 ];
+const JULIA_CS = [
+    [-0.4,    0.6],       // rabbit
+    [ 0.285,  0.01],      // near tip of cardioid
+    [-0.835, -0.2321],    // spiral
+    [ 0.45,   0.1428],    // douady rabbit-ish
+    [-0.70176,-0.3842],   // dragon
+    [ 0.0,    1.0],       // dendrite
+    [-1.476,  0.0],       // period-3 along real axis
+    [-0.12,   0.74],      // Newton-like spirals
+    [-0.75,   0.11],      // near main bulb
+];
+const BSHIP_CENTER = [-1.75, -0.03];
 let huntState = { running: false, walkCx: -0.5, walkCy: 0.0,
                     walkSpan: 3.0, stepsInWalk: 0,
                     nScanned: 0, nAccepted: 0, bestSr: 0,
-                    holdUntil: 0, timer: null };
+                    holdUntil: 0, timer: null, mode: 'mandelbrot' };
 
-function mandelEscape(cx, cy, iterCap) {
-    let zx = 0, zy = 0, x2 = 0, y2 = 0, i;
-    for (i = 0; i < iterCap && x2 + y2 < 4.0; i++) {
-        zy = 2 * zx * zy + cy;
-        zx = x2 - y2 + cx;
-        x2 = zx * zx; y2 = zy * zy;
+// Generic per-pixel escape iteration.  mode picks the recurrence.
+function escapeAt(zx0, zy0, cx, cy, iterCap, mode) {
+    let zx = zx0, zy = zy0, i;
+    for (i = 0; i < iterCap; i++) {
+        if (zx*zx + zy*zy > 4.0) return i;
+        let nx, ny;
+        if (mode === 'mandelbrot' || mode === 'julia') {
+            nx = zx*zx - zy*zy + cx;
+            ny = 2*zx*zy + cy;
+        } else if (mode === 'burning_ship') {
+            const ax = Math.abs(zx), ay = Math.abs(zy);
+            nx = ax*ax - ay*ay + cx;
+            ny = 2*ax*ay + cy;
+        } else if (mode === 'tricorn') {
+            nx = zx*zx - zy*zy + cx;
+            ny = -2*zx*zy + cy;
+        } else { return iterCap; }
+        zx = nx; zy = ny;
     }
-    return i;
+    return iterCap;
 }
-function mandelGrid(cx, cy, span, side) {
-    // Auto-tune iterCap as the C tool does.
-    let it = 192, s = span;
+function fractalGrid(params, side, mode) {
+    // params: for mandelbrot/burning_ship/tricorn → {cx,cy,span} (c is pixel coord)
+    //         for julia → {juliaCx, juliaCy, center_x, center_y, zoom}
+    let it = 192, s = params.span || params.zoom || 1.0;
     while (s < 1.0 && it < huntMaxIters) { it += 64; s *= 2; }
     const escape = new Int32Array(side * side);
-    const px = span / side;
-    const ox = cx - px * side * 0.5;
-    const oy = cy - px * side * 0.5;
-    for (let r = 0; r < side; r++) {
-        const y = oy + r * px;
-        for (let c = 0; c < side; c++) {
-            escape[r * side + c] = mandelEscape(ox + c * px, y, it);
+    if (mode === 'julia') {
+        const half = params.zoom / 2;
+        const px = params.zoom / side;
+        const ox = params.center_x - half;
+        const oy = params.center_y - half;
+        for (let r = 0; r < side; r++) {
+            const y = oy + r * px;
+            for (let c = 0; c < side; c++) {
+                escape[r * side + c] = escapeAt(
+                    ox + c * px, y, params.juliaCx, params.juliaCy, it, mode);
+            }
+        }
+    } else {
+        const half = params.span / 2;
+        const px = params.span / side;
+        const ox = params.cx - half;
+        const oy = params.cy - half;
+        for (let r = 0; r < side; r++) {
+            const y = oy + r * px;
+            for (let c = 0; c < side; c++) {
+                escape[r * side + c] = escapeAt(0, 0, ox + c * px, y, it, mode);
+            }
         }
     }
     return { escape, iterCap: it };
@@ -508,31 +557,69 @@ function srStrict(lut, ticks) {
 }
 
 function nextHuntCoord() {
-    // Random walk: small step from previous coord, with reset to a seed
-    // every ~24 steps to avoid getting trapped.
+    // For julia, "coords" means a c value (constant per pixel) and a
+    // viewport zoom; the walk perturbs both.
+    if (huntState.mode === 'julia') {
+        if (huntState.stepsInWalk >= 12) {
+            const c = JULIA_CS[Math.floor(Math.random() * JULIA_CS.length)];
+            huntState.juliaCx = c[0] + (Math.random() - 0.5) * 0.05;
+            huntState.juliaCy = c[1] + (Math.random() - 0.5) * 0.05;
+            huntState.center_x = 0; huntState.center_y = 0;
+            huntState.zoom = 1.5 + Math.random() * 3.0;
+            huntState.stepsInWalk = 0;
+            return;
+        }
+        huntState.juliaCx += (Math.random() - 0.5) * 0.04;
+        huntState.juliaCy += (Math.random() - 0.5) * 0.04;
+        huntState.zoom *= 0.7 + Math.random() * 0.5;
+        huntState.stepsInWalk++;
+        return;
+    }
+    // Mandelbrot / burning_ship / tricorn — escape-time over c-space.
     if (huntState.stepsInWalk >= 24 || huntState.walkSpan < 1e-9) {
-        const s = SEED_COORDS[Math.floor(Math.random() * SEED_COORDS.length)];
-        huntState.walkCx = s[0]; huntState.walkCy = s[1]; huntState.walkSpan = s[2];
+        let seed;
+        if (huntState.mode === 'burning_ship') {
+            seed = [BSHIP_CENTER[0] + (Math.random()-0.5)*0.3,
+                    BSHIP_CENTER[1] + (Math.random()-0.5)*0.3,
+                    Math.pow(10, -2 + Math.random()*2.3)];
+        } else if (huntState.mode === 'tricorn') {
+            seed = [(Math.random()-0.5)*2.0, (Math.random()-0.5)*2.0,
+                    Math.pow(10, -1.5 + Math.random()*2)];
+        } else {
+            seed = MANDEL_SEEDS[Math.floor(Math.random()*MANDEL_SEEDS.length)];
+        }
+        huntState.walkCx = seed[0]; huntState.walkCy = seed[1]; huntState.walkSpan = seed[2];
         huntState.stepsInWalk = 0;
         return;
     }
-    huntState.walkCx += (Math.random() * 2 - 1) * 0.4 * huntState.walkSpan;
-    huntState.walkCy += (Math.random() * 2 - 1) * 0.4 * huntState.walkSpan;
+    huntState.walkCx += (Math.random()*2 - 1) * 0.4 * huntState.walkSpan;
+    huntState.walkCy += (Math.random()*2 - 1) * 0.4 * huntState.walkSpan;
     huntState.walkSpan *= 0.6 + Math.random() * 0.35;
     huntState.stepsInWalk++;
 }
 
 function huntOnce() {
     nextHuntCoord();
-    const { escape, iterCap } = mandelGrid(huntState.walkCx, huntState.walkCy,
-                                                  huntState.walkSpan, SIDE);
+    let params, label;
+    if (huntState.mode === 'julia') {
+        params = { juliaCx: huntState.juliaCx, juliaCy: huntState.juliaCy,
+                   center_x: huntState.center_x, center_y: huntState.center_y,
+                   zoom: huntState.zoom };
+        label = `julia · c=(${params.juliaCx.toFixed(4)},${params.juliaCy.toFixed(4)}) ` +
+                `zoom=${params.zoom.toExponential(2)}`;
+    } else {
+        params = { cx: huntState.walkCx, cy: huntState.walkCy,
+                   span: huntState.walkSpan };
+        label = `${huntState.mode} · cx=${params.cx.toFixed(4)} ` +
+                `cy=${params.cy.toFixed(4)} span=${params.span.toExponential(2)}`;
+    }
+    const { escape, iterCap } = fractalGrid(params, SIDE, huntState.mode);
     const lut = posterise(escape, iterCap);
-    const sr  = srStrict(lut, 4);   // 4 ticks is enough for the gate
+    const sr  = srStrict(lut, 4);
     huntState.nScanned++;
     if (sr > huntState.bestSr) huntState.bestSr = sr;
     updateHuntStat();
-    return { lut, sr, cx: huntState.walkCx, cy: huntState.walkCy,
-             span: huntState.walkSpan };
+    return { lut, sr, label };
 }
 
 function updateHuntStat() {
@@ -565,9 +652,8 @@ function huntTick() {
         huntState.nAccepted++;
         loadLUT(found.lut);
         document.getElementById("statFile").innerHTML =
-            `<b>mandelhunt ${huntState.nAccepted}</b> · ` +
-            `cx=${found.cx.toFixed(4)} cy=${found.cy.toFixed(4)} ` +
-            `span=${found.span.toExponential(2)} · sr=${found.sr.toFixed(3)}`;
+            `<b>hunt ${huntState.nAccepted}</b> · ${found.label} ` +
+            `· sr=${found.sr.toFixed(3)}`;
         huntState.holdUntil = Date.now() + huntDisplayMs;
     }
     updateHuntStat();
@@ -575,13 +661,21 @@ function huntTick() {
     huntState.timer = setTimeout(huntTick, 5);
 }
 
+document.getElementById("huntMode").addEventListener("change", (e) => {
+    huntState.mode = e.target.value;
+    // Force a fresh seed pick on the next coord step so the walk
+    // restarts inside the new fractal.
+    huntState.stepsInWalk = 999;
+    huntState.walkSpan = 3.0;
+    updateHuntStat();
+});
 document.getElementById("btnHunt").addEventListener("click", () => {
     huntState.running = !huntState.running;
     document.getElementById("btnHunt").textContent =
-        huntState.running ? "❚❚ stop search" : "▶ mandelhunt search";
+        huntState.running ? "❚❚ stop search" : "▶ fractal search";
     if (huntState.running) {
         // Reset walk to a seed.
-        huntState.stepsInWalk = 24;
+        huntState.stepsInWalk = 999;
         huntState.holdUntil = 0;
         huntTick();
     } else if (huntState.timer) {
@@ -593,9 +687,7 @@ document.getElementById("btnHuntOnce").addEventListener("click", () => {
     const found = huntOnce();
     loadLUT(found.lut);
     document.getElementById("statFile").innerHTML =
-        `<b>mandelhunt one-shot</b> · cx=${found.cx.toFixed(4)} ` +
-        `cy=${found.cy.toFixed(4)} span=${found.span.toExponential(2)} ` +
-        `· sr=${found.sr.toFixed(3)}`;
+        `<b>one-shot</b> · ${found.label} · sr=${found.sr.toFixed(3)}`;
 });
 
 // ── Default-LUT auto-load on first open ────────────────────────────
