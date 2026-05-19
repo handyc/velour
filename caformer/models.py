@@ -360,6 +360,24 @@ class QRPair(models.Model):
     b032_rules_blob = models.BinaryField(null=True, blank=True)  # 32×32
     b016_rules_blob = models.BinaryField(null=True, blank=True)  # 16×16
     b008_rules_blob = models.BinaryField(null=True, blank=True)  # 8×8
+
+    # cell8 + 256×256 storage.  The 8→1 rule shape (65,536-byte LUT)
+    # paired with a 256×256 K=4 board (65,536 cells) preserves the
+    # LUT-as-board ouroboros symmetry that we lose on 128×128.
+    # N per-position cell8 rules concatenated; ``len(cell8_b256_rules_blob)
+    # == n_target_bytes × 65,536``.  Coexists with board128_rules_blob —
+    # both stay populated, dispatcher chooses (via ?engine=cell8 or
+    # priority order).  See caformer/board256.py for the trainer +
+    # caformer/io/rule_blob.py for the on-disk merge format.
+    cell8_b256_rules_blob = models.BinaryField(null=True, blank=True)
+    cell8_b256_exact      = models.BooleanField(default=False)
+    cell8_input_source    = models.CharField(max_length=16, blank=True,
+        default='off',
+        choices=[('off',       'port held at 0 (no modulation)'),
+                 ('dmn',       'DMN heartbeat tick parity'),
+                 ('router',    'router 2-bit category'),
+                 ('prev_byte', 'previous chain output cell')])
+
     last_queried_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
