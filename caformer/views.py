@@ -3681,6 +3681,16 @@ def caformer_ruleset_zoo_view(request):
     })
 
 
+def caformer_lutview(request):
+    """Serve the standalone LUT viewer HTML.  The exact same self-
+    contained file the caformer_emit_lutview command writes — embedded
+    here so it's discoverable from the chat UI without a download
+    step."""
+    from django.http import HttpResponse
+    from .management.commands.caformer_emit_lutview import HTML
+    return HttpResponse(HTML, content_type='text/html; charset=utf-8')
+
+
 def caformer_tier_compare_view(request):
     """Visualise the multires speed-vs-fidelity trade-off across all
     pairs that have multiple tiers populated.  Sorts by board128 wall

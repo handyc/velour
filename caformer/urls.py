@@ -61,6 +61,8 @@ urlpatterns = [
                                                                     name='caformer_ruleset_zoo'),
     path('tier-compare/',                 views.caformer_tier_compare_view,
                                                                     name='caformer_tier_compare'),
+    path('lutview/',                      views.caformer_lutview,
+                                                                    name='caformer_lutview'),
     path('funnel-chat/cli/binary',        views.funnel_cli_download,
                                                                     {'kind': 'binary'},
                                                                     name='funnel_cli_binary'),
