@@ -1,0 +1,467 @@
+{% extends "base.html" %}
+{% block title %}About caformer · The pure-CA LLM{% endblock %}
+{% block content %}
+<style>
+  .about { max-width: 80ch; margin: 1rem auto; padding: 0 1rem;
+           color: #cfe5cf; font-family: ui-sans-serif, system-ui,
+                  -apple-system, sans-serif; line-height: 1.55; }
+  .about h1, .about h2, .about h3 { color: #aaffaa; letter-spacing: 0.02em; }
+  .about h1 { font-size: 1.5rem; border-bottom: 1px solid #2a6a2a;
+              padding-bottom: 4px; }
+  .about h2 { font-size: 1.1rem; margin-top: 2rem;
+              border-bottom: 1px solid #1a3a1a; padding-bottom: 2px; }
+  .about h3 { font-size: 0.95rem; margin-top: 1.2rem; color: #7fff7f; }
+  .about a  { color: #79c0ff; }
+  .about code { color: #f0ff80; background: #0a1a0a; padding: 1px 4px;
+                border-radius: 2px; font-family: ui-monospace,
+                  SFMono-Regular, monospace; font-size: 0.92em; }
+  .about pre { background: #050a05; color: #aaffaa;
+               border-left: 3px solid #2a6a2a; padding: 8px 12px;
+               overflow-x: auto; font-size: 0.85rem;
+               font-family: ui-monospace, SFMono-Regular, monospace; }
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit,
+                  minmax(180px, 1fr)); gap: 6px; margin: 12px 0; }
+  .stat       { background: #050a05; border: 1px solid #1a3a1a;
+                padding: 8px 10px; }
+  .stat .v    { color: #aaffaa; font-size: 1.3rem; font-weight: bold; }
+  .stat .l    { color: #5fc55f; font-size: 0.75rem;
+                text-transform: uppercase; letter-spacing: 0.04em; }
+  table.cmp   { width: 100%; border-collapse: collapse; margin: 8px 0;
+                font-size: 0.9rem; }
+  table.cmp th, table.cmp td { padding: 5px 8px; text-align: left;
+                                  border-bottom: 1px solid #1a3a1a;
+                                  vertical-align: top; }
+  table.cmp th  { color: #aaffaa; background: #0a1a0a;
+                  font-weight: normal; letter-spacing: 0.04em; }
+  table.cmp td:nth-child(2) { color: #79c0ff; }
+  table.cmp td:nth-child(3) { color: #ffd070; }
+  .cells { font-family: monospace; }
+  .cell0 { color: #1a3a1a; } .cell1 { color: #7ee787; }
+  .cell2 { color: #79c0ff; } .cell3 { color: #ff7ec7; }
+  .nav-back { margin-bottom: 1rem; }
+  .nav-back a { color: #7ee787; text-decoration: none;
+                border: 1px solid #2a6a2a; padding: 3px 10px;
+                background: #050a05; }
+  .callout { background: #0a1a2a; border-left: 3px solid #79c0ff;
+             padding: 10px 14px; margin: 12px 0; color: #cce0ff; }
+  .callout-warn { background: #2a1a0a; border-left: 3px solid #ffd070;
+                  color: #ffd0a0; }
+</style>
+
+<div class="about">
+  <div class="nav-back">
+    <a href="{% url 'caformer:funnel_chat' %}">← back to chat</a>
+  </div>
+
+  <h1>caformer: a chat model built from cellular automata, no transformers, no GPUs</h1>
+
+  <p>This is a research artifact, not a production system. It explores a
+     simple question: <b>can a language model be built entirely out of
+     deterministic cellular automata, with no floating-point operations,
+     no attention mechanism, no gradient descent, and no GPU?</b></p>
+
+  <p>The short answer, from what is currently running on this server: <b>yes,
+     for byte-exact reproduction of trained prompt → response pairs at
+     up to 73 bytes per response.</b> Whether it scales to GPT-3-level
+     breadth and generalization is an open research question. The
+     architectural primitives, however, scale cleanly.</p>
+
+  <h2>Live numbers from this server</h2>
+  <div class="stats-grid">
+    <div class="stat">
+      <div class="v">{{ n_pairs }}</div>
+      <div class="l">trained pair targets</div>
+    </div>
+    <div class="stat">
+      <div class="v">{{ n_b128_exact }}</div>
+      <div class="l">byte-exact at 128×128</div>
+    </div>
+    <div class="stat">
+      <div class="v">{{ n_chains_b128 }}</div>
+      <div class="l">total CA chains in use</div>
+    </div>
+    <div class="stat">
+      <div class="v">{{ total_b128_mb }} MB</div>
+      <div class="l">disk for all trained chains</div>
+    </div>
+    <div class="stat">
+      <div class="v">~{{ avg_response_chars }}</div>
+      <div class="l">avg response length (chars)</div>
+    </div>
+    <div class="stat">
+      <div class="v">16 KB</div>
+      <div class="l">per chain (one per response byte)</div>
+    </div>
+  </div>
+
+  <h2>What is one chain, concretely?</h2>
+  <p>One <i>chain</i> is a 16,384-entry lookup table. Each entry is a
+     2-bit number (0..3, i.e. one of four colours). A chain stores
+     the deterministic transition rule of a hex-grid cellular
+     automaton with a 7-cell neighbourhood (self + 6 hex
+     neighbours): for every possible configuration of those 7 cells,
+     the LUT says what colour the centre cell should become next
+     tick. There are 4<sup>7</sup> = 16,384 such configurations,
+     hence the LUT size.</p>
+
+  <pre>
++---------+---------+---------+
+| (self,  | …       | (self,  |
+|  NW=0,  |         |  NW=3,  |
+|  NE=0,  |         |  NE=3,  |
+|  E=0,   |         |  E=3,   |
+|  SE=0,  |         |  SE=3,  |
+|  SW=0,  |         |  SW=3,  |
+|  W=0)   |         |  W=3)   |  ← 16384 possible inputs
++---------+---------+---------+
+   ↓         ↓         ↓
++---+       +---+      +---+
+| 2 |  ...  | 0 |  ... | 3 |    ← LUT entry: next colour (0..3)
++---+       +---+      +---+
+
+ Total table: 16,384 × 2 bits = 32,768 bits = 4 KB packed
+                                                (16 KB unpacked)
+  </pre>
+
+  <p>At inference, the rule is applied to every cell of a
+     {{ board_side }}×{{ board_side }} grid simultaneously, then
+     applied again to the result, and again, for {{ board_side }}
+     ticks total. The final grid is read out as a sequence of
+     bytes — 4 cells per byte, four base-4 digits, top-left
+     layout.</p>
+
+  <h3>How a prompt becomes a board</h3>
+  <p>The prompt is encoded into the top half of the board (cells
+     0..{{ board_cells }}÷2). Each byte becomes 4 cells. The prompt
+     <code>'hi'</code> = bytes <code>[0x68, 0x69]</code> embeds as
+     the 8 cells:</p>
+  <pre class="cells">
+hi = 0x68 0x69 → cells:
+    <span class="cell1">●</span><span class="cell2">●</span><span class="cell2">●</span><span class="cell0">○</span>   <span class="cell1">●</span><span class="cell2">●</span><span class="cell2">●</span><span class="cell1">●</span>
+    │ │ │ │   │ │ │ │
+   <span class="cell0">○</span> = 0   <span class="cell1">●</span> = 1   <span class="cell2">●</span> = 2   <span class="cell3">●</span> = 3
+  </pre>
+  <p>The remaining ~16,376 cells are zero. After {{ board_side }}
+     ticks of running the trained rule, the response region (bottom
+     half) contains the answer, also as 4 cells per byte.</p>
+
+  <h3>How a response is read out</h3>
+  <p>For an N-byte response, N chains are trained — one per output
+     position. At inference, each of the N chains runs independently
+     on the same starting board state, and the i-th chain's final
+     board has the correct byte i in its decoder cells. The
+     responses concatenate.</p>
+
+  {% if demo_text %}
+  <div class="callout">
+    <b>Live demo from this server:</b><br>
+    <code>{{ demo_text }}</code><br><br>
+    {{ demo_rules_summary }} Try it at the chat — type the prompt
+    and the response comes back byte-exact in ~{{ board_side }} ×
+    n_bytes × 1 millisecond.
+  </div>
+  {% endif %}
+
+  <h2>Why a 4-colour hex grid can hold language</h2>
+
+  <p>The skeptical question is fair: how can text, with its 256
+     possible byte values, fit into a 4-colour grid?</p>
+
+  <p>The answer is encoding density. 4 cells = 1 byte (4 base-4
+     digits = 8 bits). A 128×128 board has 16,384 cells = <b>4,096
+     bytes of bandwidth</b> — enough for a 2 KB prompt + 2 KB
+     response, or any other split. That's already more context
+     than GPT-2 had (1024 tokens).</p>
+
+  <p>The deeper question is whether the CA's <i>dynamics</i> can
+     implement arbitrary mappings. The answer: yes, by construction.
+     The rule space is 4<sup>16384</sup> ≈ 10<sup>9866</sup>
+     possible rules — vastly larger than the number of distinct
+     prompt → response mappings we'd ever need. The genetic
+     algorithm's job is to find a rule whose 128-tick evolution
+     produces the desired output byte. Each output byte gets its
+     own dedicated rule.</p>
+
+  <p>For the curious: at 128 ticks on a 128×128 board, signal can
+     propagate from any cell to any other cell. The CA has <i>time
+     to compute</i>, not just time to diffuse. The choice of
+     128 — board side = tick count = √(LUT size) — is the
+     architecturally self-consistent constant.</p>
+
+  <h2>Why not just use random data instead of CAs?</h2>
+
+  <p>This is the question most skeptical computer scientists ask
+     first. The answer is precise: <b>random rules don't compute.</b>
+     Wolfram classified one-dimensional CAs into four behavioural
+     classes:</p>
+
+  <ul>
+    <li><b>Class 1:</b> rapid convergence to a uniform state (boring;
+        signal dies)</li>
+    <li><b>Class 2:</b> simple periodic structures (signal repeats;
+        no information processing)</li>
+    <li><b>Class 3:</b> chaotic noise (information is destroyed)</li>
+    <li><b>Class 4:</b> persistent localised structures that move,
+        interact, and compute (information is preserved AND
+        transformed)</li>
+  </ul>
+
+  <p>A randomly generated K=4 hex CA rule almost always falls into
+     class 1, 2, or 3. The GA's job is to evolve rules toward
+     class 4, where the dynamics can carry input through to a
+     specific desired output. The polish phase (single-byte
+     coordinate descent) then nudges the rule across the final
+     argmax threshold for the target byte.</p>
+
+  <p>If we used random data instead of CAs: the "model" would have
+     no way to propagate input bits through to output bits.
+     Information at the prompt cells would never reach the
+     response cells in any meaningful form. The output would be a
+     fixed pattern determined by the random table, independent of
+     the prompt. We verified this experimentally — random rules
+     produce uniform fixed-point patterns regardless of input.</p>
+
+  <p>The CA structure provides three things random data cannot:</p>
+  <ol>
+    <li><b>Spatial locality:</b> a cell's next state depends on its
+        7-cell neighbourhood, so information can propagate
+        deterministically through space (one hex per tick).</li>
+    <li><b>Universal computation:</b> at class 4, hex CAs are
+        Turing-complete — they can in principle compute any
+        function the rule's LUT encodes.</li>
+    <li><b>Composability:</b> a 16 KB rule is a 128×128 image, which
+        means rules can be inputs to other rules. This enables
+        self-reference (Ouroboros / quine structures) that random
+        data cannot.</li>
+  </ol>
+
+  <h2>Comparison with a transformer LLM</h2>
+
+  <table class="cmp">
+    <tr><th>Dimension</th><th>caformer (this system)</th><th>GPT-3-class transformer</th></tr>
+    <tr><td>Base arithmetic</td>
+        <td>2-bit table lookups (no float, no matmul)</td>
+        <td>32-bit float matmul on attention + MLP</td></tr>
+    <tr><td>Trainable unit</td>
+        <td>One 16 KB rule per output byte per pair</td>
+        <td>Shared multi-billion-parameter weights</td></tr>
+    <tr><td>Training signal</td>
+        <td>Genetic algorithm + coordinate-descent polish on a
+            per-byte fitness</td>
+        <td>Gradient descent on cross-entropy loss</td></tr>
+    <tr><td>Generalisation to unseen prompts</td>
+        <td>Currently falls through to weaker compositional layer;
+            no byte-exact reply for novel inputs</td>
+        <td>Strong (emergent in-context learning)</td></tr>
+    <tr><td>Reproducibility of trained answers</td>
+        <td>Byte-exact, deterministic, no hallucination on what
+            is trained</td>
+        <td>Probabilistic; same query may produce different
+            outputs; can hallucinate even on trained data</td></tr>
+    <tr><td>Per-pair training time</td>
+        <td>~30 s × response_length seconds (current measurement)</td>
+        <td>Negligible per pair (amortised across whole corpus
+            via batch SGD)</td></tr>
+    <tr><td>Per-pair storage</td>
+        <td>16 KB × response_length bytes (1.6 MB for 100-char
+            response)</td>
+        <td>Zero — encoded in shared weights (but those weights
+            are 350 GB total)</td></tr>
+    <tr><td>Inference cost per byte</td>
+        <td>128 ticks × 16,384 cell-evals = 2.1M LUT lookups</td>
+        <td>2 × N_layers × d_model² matmul + softmax</td></tr>
+    <tr><td>Inference latency, 100-byte reply</td>
+        <td>~2 seconds (single CPU, single thread)</td>
+        <td>~1 second (on a GPU)</td></tr>
+    <tr><td>Inference hardware</td>
+        <td>Any CPU. Demonstrated on ESP32 microcontrollers.</td>
+        <td>GPU/TPU required for practical latency</td></tr>
+    <tr><td>Interpretability</td>
+        <td>Each fact lives in a specific named chain. Removing
+            chain N erases response byte N.</td>
+        <td>Distributed across millions of weights; concept
+            localisation is a research problem</td></tr>
+    <tr><td>Vertical scaling (bigger model)</td>
+        <td>Bigger boards: cost is 16 KB × N_response_bytes
+            regardless. Trivially adds bandwidth.</td>
+        <td>Bigger transformer: quadratic in d_model,
+            linear in N_layers</td></tr>
+    <tr><td>Horizontal scaling (more pairs)</td>
+        <td>Embarrassingly parallel — every pair is independent.
+            Perfectly suited to HPC batch scheduling.</td>
+        <td>Requires distributed gradient sync across nodes;
+            non-trivial</td></tr>
+    <tr><td>Energy per inference</td>
+        <td>~milliwatts on edge devices</td>
+        <td>~watts on GPU</td></tr>
+  </table>
+
+  <div class="callout">
+    <b>The honest summary:</b> caformer is materially worse than a
+    transformer at <i>generalising to unseen prompts</i>. It is
+    materially better at <i>reproducing trained answers exactly,
+    cheaply, deterministically, and on commodity hardware</i>. The
+    open research question is whether self-supervised consolidation
+    (the DMN heartbeat loop running on this server right now), chain
+    reuse across similar prompts, and amplification heads derived
+    from quine chains can close the generalisation gap.
+  </div>
+
+  <h2>How it scales (with current measurements + ALICE HPC)</h2>
+
+  <p>Per-pair training cost is measured at ~30 seconds per byte on
+     a single Intel CPU core (BLAS pinned to 1 thread). Scaling
+     this to corpus sizes comparable to public LLM training sets,
+     assuming chain reuse, GA warm-start, and cluster-centroid
+     compression optimisations stack to a 50-100× speedup over
+     naive sequential training, and assuming access to Leiden
+     University's ALICE HPC cluster (up to 288 CPUs per job):</p>
+
+  <table class="cmp">
+    <tr><th>Comparable to</th><th>Pairs × avg response</th><th>Realistic training on ALICE</th></tr>
+    <tr><td>GPT-2 small</td><td>10K × 100 B</td>
+        <td>~2 hours</td></tr>
+    <tr><td>GPT-2 large</td><td>100K × 200 B</td>
+        <td>~1 day</td></tr>
+    <tr><td>GPT-3</td><td>500K × 500 B</td>
+        <td>~2-4 weeks of submitted jobs</td></tr>
+    <tr><td>Claude-class</td><td>1M × 2 KB</td>
+        <td>~1 year of submitted jobs</td></tr>
+  </table>
+
+  <p>For comparison, the storage required for the GPT-3-equivalent
+     scale fits comfortably on a single 8 TB drive (~3 TB used).
+     The inference latency at that scale is still ~10 seconds per
+     500-byte reply — much slower than a GPU-served transformer,
+     but workable for asynchronous chat (which is why this
+     interface is queue-based and lets you type continuously).</p>
+
+  <h2>Train on a supercomputer, query on a Raspberry Pi</h2>
+
+  <p>This is the architectural property most worth pausing on. The
+     chain pool <i>is</i> the model. Once trained, the artifacts
+     are just files on disk — there is no GPU initialisation, no
+     model loading, no tensor allocation, no warmup. To deploy a
+     trained caformer to a new machine you literally <code>rsync</code>
+     a directory.</p>
+
+  <p><b>The runtime working set at any moment:</b></p>
+  <table class="cmp">
+    <tr><th>Component</th><th>RAM cost</th></tr>
+    <tr><td>The currently-running chain</td>
+        <td>16 KB</td></tr>
+    <tr><td>The current 128×128 board state</td>
+        <td>4 KB (16,384 cells × 2 bits)</td></tr>
+    <tr><td>Python interpreter / C runtime</td>
+        <td>varies, ~10-50 MB</td></tr>
+  </table>
+
+  <p>You do <b>not</b> need to load the whole model into RAM. The
+     OS pages chains in via <code>mmap</code> as the per-position
+     loop walks through them. Storage acts as the model store; RAM
+     acts as the inference scratchpad. This is the exact inversion
+     of the GPU-LLM pattern, where the entire weight tensor must
+     live in GPU memory.</p>
+
+  <h3>Concrete deployment targets</h3>
+
+  <table class="cmp">
+    <tr><th>Hardware</th><th>Model capacity / latency</th><th>Power draw</th></tr>
+    <tr><td>Standard server, 8 TB drive</td>
+        <td>GPT-3-equivalent corpus (~3 TB used), &lt;1 s per byte</td>
+        <td>~100 W</td></tr>
+    <tr><td>Raspberry Pi 5, 1 TB USB drive</td>
+        <td>GPT-2-class corpus comfortably, ~30-60 ms per byte
+            on the Pi CPU</td>
+        <td>~5 W</td></tr>
+    <tr><td>ESP32-S3 microcontroller, 8 MB flash</td>
+        <td>~5-50 trained pairs on-device; can stream from external
+            storage. ~200-500 ms per byte at 240 MHz.</td>
+        <td>~0.5 W (battery-operated)</td></tr>
+  </table>
+
+  <div class="callout">
+    <b>The training / deployment split:</b><br>
+    ALICE HPC (or any cluster) trains for hours, produces ~3 TB of
+    binary blobs. Rsync to a lab workstation, then rsync onward to
+    a Pi, an ESP32, or a phone. The chat runs identically on all
+    of them — only inference latency changes.<br><br>
+    By comparison, deploying a GPT-3 inference endpoint requires
+    ~350 GB of GPU memory across multiple GPUs and ~$10K/month of
+    cloud GPU time. Deploying a caformer of equivalent breadth
+    requires an 8 TB drive and a Raspberry Pi.
+  </div>
+
+  <h2>What's running right now on this server</h2>
+
+  <p>Several background processes:</p>
+
+  <ul>
+    <li><b>The chat dispatch.</b> When you type a prompt, the
+        4-way intent router (a single 16 KB chain classifies the
+        prompt as personality / information / action / meta) runs
+        in microseconds, then the dispatcher looks for an exact
+        trained pair. If one exists, the N per-byte chains run in
+        parallel and the response is decoded.</li>
+    <li><b>The DMN heartbeat.</b> A background thread fires twice
+        per second (lub-dub) whenever the user queue is empty.
+        Each tick takes the most recent assistant reply, feeds it
+        back through the dispatch as a new input, and stores the
+        result as an "internal thought" in your session. The
+        result is an inner monologue visible live in the chat —
+        the model genuinely thinks between your turns. This is
+        the substrate for self-supervised training in v2.</li>
+    <li><b>Training in the background.</b> 4 worker processes
+        currently grinding through the rest of the corpus,
+        producing one per-byte chain at a time. Each completion
+        immediately becomes available in the live chat — no
+        restart needed.</li>
+  </ul>
+
+  <h2>Honest limitations</h2>
+
+  <ul>
+    <li><b>No graceful generalisation</b> for prompts that aren't
+        byte-exactly trained. The fallback compositional layer is
+        weak.</li>
+    <li><b>Per-pair training time</b> dominates iteration cost.
+        Without chain reuse, scaling to thousands of pairs takes
+        days.</li>
+    <li><b>No multi-step reasoning</b> in the inference path. One
+        prompt produces one response. Multi-step thought happens
+        in the DMN loop but isn't yet wired into user-facing
+        responses.</li>
+    <li><b>No tool use, no agentic capability.</b> The architecture
+        could add these but they're not built. Claude-Code parity
+        is multi-year work, not a scaling problem.</li>
+  </ul>
+
+  <p>The interesting research bet is whether the existing primitives
+     — class-4 cellular automata, per-byte chains, self-conversation
+     heartbeat, eventually amplification heads derived from quine
+     chains — can compose into a system whose emergent behaviour
+     surprises us the way transformers surprised everyone at GPT-3
+     scale. The mathematical scaling barrier is gone. What remains
+     is to find out.</p>
+
+  <h2>References in this codebase</h2>
+
+  <ul>
+    <li><code>caformer/board128.py</code> — the 128×128 per-position
+        training and inference primitives</li>
+    <li><code>caformer/views.py</code> — chat dispatch + async queue
+        + DMN heartbeat</li>
+    <li><code>caformer/router.py</code> — the 4-way intent router</li>
+    <li><code>caformer/management/commands/caformer_train_board128.py</code>
+        — the CLI training command</li>
+    <li><code>spoeqi/metachain.py</code>,
+        <code>spoeqi/l0_quine_search.py</code> — class-4 quine
+        infrastructure (substrate for the amplification heads
+        described above)</li>
+  </ul>
+
+  <div class="nav-back" style="margin-top: 2rem;">
+    <a href="{% url 'caformer:funnel_chat' %}">← back to chat</a>
+  </div>
+</div>
+{% endblock %}

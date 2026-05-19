@@ -100,6 +100,16 @@ class GAConfig:
     # Useful range: 1.0–5.0 when base fitness is normalised to [0, 1].
     # 0 (default) disables the regulariser entirely.
     diversity_weight: float = 0.0
+    # Fire-mask-restricted mutation: when provided, mutations only
+    # touch LUT indices marked True in this 16384-bool array.  The
+    # mask is the union of LUT entries actually queried during one
+    # CA evaluation of the rule on the training input — typically <5%
+    # of entries at 128×128.  Mutating only those entries turns the
+    # intractable 16384-entry search into a manageable few-hundred-
+    # entry search, which is the gating step for board sizes ≥64.
+    # Build with caformer.primitives.compute_fire_mask().  When None
+    # (default), mutation runs over the full LUT as before.
+    fire_mask: object = None    # Optional[np.ndarray], 16384 bool
 
 
 @dataclass
@@ -162,15 +172,43 @@ def _crossover(a: Genome, b: Genome, rng: np.random.Generator,
 
 
 def _mutate(g: Genome, rng: np.random.Generator,
-            rate: float) -> Genome:
-    """Flip ~rate fraction of bytes per rule to a fresh random colour."""
+            rate: float, *,
+            fire_mask: Optional[np.ndarray] = None) -> Genome:
+    """Flip ~rate fraction of bytes per rule to a fresh random colour.
+
+    When ``fire_mask`` is provided (a 16384-bool array), mutations only
+    touch indices where the mask is True — i.e. LUT entries that were
+    actually queried during the rule's most recent CA evaluation.  At
+    128×128 this typically restricts mutation to ~few-hundred indices
+    instead of the full 16384, turning an intractable search into a
+    tractable one.  ``rate`` is interpreted relative to the *mask
+    size*, not the full LUT, so the absolute mutation count stays
+    similar to the unrestricted case.
+    """
+    if fire_mask is not None:
+        mask_size = int(fire_mask.sum())
+        if mask_size == 0:
+            return g    # nothing fired; mutation would be no-op anyway
     for name in g:
-        flips = rng.random(g[name].size) < rate
-        if flips.any():
-            new_bytes = rng.integers(0, 4, size=int(flips.sum()),
-                                       dtype=np.uint8)
-            g[name] = g[name].copy()
-            g[name][flips] = new_bytes
+        if fire_mask is not None and g[name].size == fire_mask.size:
+            # Restricted mutation: only flip indices in the fire mask.
+            # Sample which masked indices to flip; rate is per-masked-byte.
+            masked_idx = np.flatnonzero(fire_mask)
+            flips_mask = rng.random(masked_idx.size) < rate
+            if flips_mask.any():
+                hit_idx = masked_idx[flips_mask]
+                new_bytes = rng.integers(0, 4, size=hit_idx.size,
+                                          dtype=np.uint8)
+                g[name] = g[name].copy()
+                g[name][hit_idx] = new_bytes
+        else:
+            # Unrestricted (legacy): flip across the whole LUT.
+            flips = rng.random(g[name].size) < rate
+            if flips.any():
+                new_bytes = rng.integers(0, 4, size=int(flips.sum()),
+                                           dtype=np.uint8)
+                g[name] = g[name].copy()
+                g[name][flips] = new_bytes
     return g
 
 
@@ -329,7 +367,7 @@ def _evolve(template: Genome, fitness: FitnessFn,
             b = _tournament(scored, cfg.tournament_k, rng)
             kid = _crossover(a, b, rng, cfg.crossover_p,
                               intra_table_p=cfg.intra_table_p)
-            kid = _mutate(kid, rng, mut_rate)
+            kid = _mutate(kid, rng, mut_rate, fire_mask=cfg.fire_mask)
             next_pop.append(kid)
         pop = next_pop
     # Final scoring on the post-mutation population to surface the winner.
@@ -693,7 +731,8 @@ def make_qr_fitness(query: str, expected: str, *,
 
 def polish_genome(genome: Genome, fitness: FitnessFn, *,
                     trials: int = 60, seed: int = 0,
-                    on_trial: Optional[Callable] = None
+                    on_trial: Optional[Callable] = None,
+                    fire_mask: Optional[np.ndarray] = None
                     ) -> Tuple[Genome, float, int]:
     """Stochastic coordinate descent on a genome's LUT entries.
 
@@ -719,9 +758,21 @@ def polish_genome(genome: Genome, fitness: FitnessFn, *,
     best_score = fitness(g)
     improvements = 0
     rule_names = list(g.keys())
+    # Fire-mask-restricted polish: when given, the coordinate descent
+    # only considers LUT indices that actually fire during evaluation.
+    # Drastically narrows the search at 128×128 (mask is typically a
+    # few hundred indices out of 16384).
+    masked_idx = None
+    if fire_mask is not None and fire_mask.any():
+        masked_idx = np.flatnonzero(fire_mask)
     for trial_idx in range(trials):
         rname = rule_names[int(rng.integers(0, len(rule_names)))]
-        idx   = int(rng.integers(0, g[rname].size))
+        if (masked_idx is not None and
+                g[rname].size == fire_mask.size and
+                masked_idx.size > 0):
+            idx = int(masked_idx[int(rng.integers(0, masked_idx.size))])
+        else:
+            idx = int(rng.integers(0, g[rname].size))
         original = int(g[rname][idx])
         round_improved = False
         for v in range(4):

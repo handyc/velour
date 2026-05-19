@@ -2752,3 +2752,1091 @@ def rules_json(request, slug=None):
         },
         'rules': rules,
     })
+
+
+# ─── Funnel-tokens demo (per-cell-chain CA-LLM, 2026-05-18) ─────────
+
+def funnel_chat_view(request):
+    """Minimal chat UI backed by caformer funnel models — both byte-level
+    (caformer_funnel_tokens) and word-level (caformer_word_binder).
+    Layer toggle shows side-by-side comparison."""
+    from . import funnel_serve, word_binder
+    byte_prompts = sorted(funnel_serve.trained_prompt_lengths_for_demo().keys())
+    # Word-binder prompts come from its vocab json if trained.
+    word_prompts = []
+    try:
+        wm = word_binder.get_model('.artifacts/word_binder_v1', ticks=6)
+        # All pair prompts used for training, recovered from the
+        # vocab.json training_eval if available.
+        import json as _json
+        eval_path = (__import__('pathlib').Path(wm.model_dir)
+                       / 'training_eval.json')
+        if eval_path.exists():
+            data = _json.loads(eval_path.read_text())
+            word_prompts = sorted({r['prompt'] for r in data.get('per_pair', [])})
+    except (FileNotFoundError, ValueError):
+        pass
+    all_prompts = sorted(set(byte_prompts) | set(word_prompts))
+    return render(request, 'caformer/funnel_chat.html', {
+        'trained_prompts': all_prompts,
+        'word_binder_available': bool(word_prompts),
+    })
+
+
+def funnel_chat_reply(request):
+    """Generate a reply using either the byte-level or word-level binder.
+    ?layer=byte (default) | word — pick which trained model handles the
+    prompt.  Both produce a reply against the same prompt so a viewer
+    can compare layers directly."""
+    from . import funnel_serve, word_binder
+
+    q = (request.GET.get('q') or '').strip()
+    if not q:
+        return _json_response({'reply': '', 'error': 'empty prompt'})
+    layer = (request.GET.get('layer') or 'byte').strip().lower()
+    if layer not in ('byte', 'word', 'word2', 'phrase', 'router'):
+        return _json_response({'reply': '', 'error':
+            f'unknown layer {layer!r}; use byte|word|word2|phrase|router'})
+
+    if layer == 'router':
+        # 4-way intent router → routes to sub-funnel.  See
+        # caformer.router_corpus for category definitions.
+        from . import router as router_mod
+        from .router_corpus import CATEGORY_NAMES, CATEGORY_COLOURS
+        try:
+            rt = router_mod.get_router()
+        except FileNotFoundError as e:
+            return _json_response({'reply': '', 'error':
+                f'router not trained yet: {e}'})
+
+        cat = rt.route(q)
+        cat_name = CATEGORY_NAMES.get(cat, '?')
+        colour = CATEGORY_COLOURS.get(cat, 'ffffff')
+
+        # Exact-match QRPair dispatch — if this prompt was trained,
+        # serve its byte-exact reply directly.  Priority order:
+        #   (1) board128 rules (validated 2026-05-18, 100% byte-exact
+        #         even on long-prompt-long-response pairs)
+        #   (2) legacy 8×8 positional rules (works for short pairs)
+        #   (3) fall through to word_binder_v2 sub-funnel
+        from .models import QRPair
+        b128_pair = (QRPair.objects
+                       .filter(board128_exact=True, prompt=q)
+                       .first())
+        if b128_pair is not None and b128_pair.is_board128():
+            from . import board128 as _b128
+            rules = b128_pair.board128_rules()
+            n_bytes = len(b128_pair.expected.encode('utf-8'))
+            produced = _b128.forward_pair_board128_positional(
+                q, rules, n_bytes,
+                n_ticks=int(b128_pair.board128_ticks or 128))
+            try:
+                reply_text = produced.decode('utf-8')
+            except UnicodeDecodeError:
+                reply_text = produced.decode('latin-1', errors='replace')
+            return _json_response({
+                'layer':            'router',
+                'category':         cat,
+                'category_name':    cat_name,
+                'category_colour':  colour,
+                'sub_label':        f'board128 (positional, {len(rules)}×16KB rules)',
+                'reply':            reply_text,
+                'pure_ca':          True,
+                'external_used':    False,
+                'external_provider': '',
+                'external_model':    '',
+                'external_warning': '',
+                'words':            reply_text.split(),
+                'per_slot':         [],
+                'unk_count':        0,
+                'meta_replies':     {},
+                'sub_dirs_used':    {cat_name: f'qrpair-board128:{b128_pair.pk}'},
+                'loop_trace':       [],
+                'qrpair_id':        b128_pair.pk,
+                'qrpair_expected':  b128_pair.expected,
+            })
+
+        exact_pair = (QRPair.objects
+                        .filter(best_exact=True, prompt=q)
+                        .exclude(deployed_slug='')
+                        .first())
+        if exact_pair is not None and exact_pair.is_positional():
+            text, ids = _run_one_pair_inline(
+                q, exact_pair.deployed_slug, int(exact_pair.n_blocks or 1),
+                temperature=0.0, seed=0xCAFEBABE, allowed_bytes=None,
+                extra_tokens=0)
+            return _json_response({
+                'layer':            'router',
+                'category':         cat,
+                'category_name':    cat_name,
+                'category_colour':  colour,
+                'sub_label':        f'qrpair-exact (legacy 8×8 positional, slug={exact_pair.deployed_slug})',
+                'reply':            text,
+                'pure_ca':          True,
+                'external_used':    False,
+                'external_provider': '',
+                'external_model':    '',
+                'external_warning': '',
+                'words':            text.split(),
+                'per_slot':         [],
+                'unk_count':        0,
+                'meta_replies':     {},
+                'sub_dirs_used':    {cat_name: f'qrpair:{exact_pair.deployed_slug}'},
+                'loop_trace':       [],
+                'qrpair_id':        exact_pair.pk,
+                'qrpair_expected':  exact_pair.expected,
+            })
+
+        # Per-category sub-funnel dispatch.  Each category has its own
+        # word_binder_v2-shaped model on disk; if one is missing, we
+        # fall back to the general word_binder_v2.
+        from . import word_binder_v2
+        SUB_MODEL_DIRS = {
+            0: '.artifacts/word_binder_v2',   # personality: 18-pair chat corpus
+            1: '.artifacts/sub_info',
+            2: '.artifacts/sub_action',
+            3: '.artifacts/sub_meta',
+        }
+        SUB_LABELS = {
+            0: 'personality (word_binder_v2 chat corpus)',
+            1: 'information (sub_info)',
+            2: 'action (sub_action)',
+            3: 'meta (sub_meta)',
+        }
+
+        def _run_sub(category, prompt):
+            mdir = SUB_MODEL_DIRS.get(category, SUB_MODEL_DIRS[0])
+            try:
+                wm = word_binder_v2.get_model(mdir, ticks=6)
+                return wm.generate(prompt), mdir
+            except Exception:
+                wm = word_binder_v2.get_model(SUB_MODEL_DIRS[0], ticks=6)
+                return wm.generate(prompt), SUB_MODEL_DIRS[0] + ' (fallback)'
+
+        def _confidence(gen):
+            n_words = len(gen.get('words', []))
+            unk = gen.get('unk_count', 0)
+            return n_words - 2 * unk
+
+        replies = {}
+        sub_dirs_used = {}
+        loop_trace = []        # for meta: which strategies were tried
+        if cat != 3:
+            sub, model_used = _run_sub(cat, q)
+            sub_label = SUB_LABELS[cat] + f'  ←  {model_used}'
+            replies[cat_name] = sub
+            sub_dirs_used[cat_name] = model_used
+            chosen = sub
+        else:
+            # Strange-loop meta route.  Strategies tried in order:
+            #   (0) original — spawn 0+1+2 sub-models in parallel
+            #   (1) self — also query the meta sub-model directly
+            #   (2) suffix — drop everything except the last few words
+            #         (e.g. 'explain why the sky is blue' → 'sky is blue')
+            #   (3) prefix-drop — drop the first imperative/discourse word
+            #         (e.g. 'consider this problem' → 'this problem')
+            #   (4) split — split on ' and '/' or '/'; ' separators
+            #         and route each piece, concatenating replies
+            # Each strategy re-routes through the *full* dispatch
+            # (router → sub-model) so the loop can find a route that
+            # produces a confident reply.
+            sub_label = ('meta strange-loop (multi-strategy recursive '
+                          'self-reference)')
+            DEPTH_MAX = 1
+            depth = int(request.GET.get('_depth') or 0)
+
+            def _try(strategy_name, sub_prompt):
+                if not sub_prompt:
+                    return
+                if depth >= DEPTH_MAX and strategy_name != 'original':
+                    return
+                sub_cat = rt.route(sub_prompt)
+                gen, used = _run_sub(sub_cat, sub_prompt)
+                replies[strategy_name] = gen
+                sub_dirs_used[strategy_name] = (
+                    f'route→{sub_cat} {CATEGORY_NAMES.get(sub_cat,"?")}: '
+                    f'{used}')
+                loop_trace.append({
+                    'strategy':  strategy_name,
+                    'prompt':    sub_prompt,
+                    'route':     sub_cat,
+                    'reply':     gen.get('text', ''),
+                    'confidence': _confidence(gen),
+                })
+
+            # (0)+(1) original: spawn 0/1/2 + self meta sub-model
+            for c, name in ((0, 'orig-personality'),
+                            (1, 'orig-information'),
+                            (2, 'orig-action')):
+                sub, used = _run_sub(c, q)
+                replies[name] = sub
+                sub_dirs_used[name] = used
+                loop_trace.append({
+                    'strategy': name, 'prompt': q, 'route': c,
+                    'reply': sub.get('text', ''),
+                    'confidence': _confidence(sub),
+                })
+            sub, used = _run_sub(3, q)
+            replies['orig-meta-self'] = sub
+            sub_dirs_used['orig-meta-self'] = used
+            loop_trace.append({
+                'strategy': 'orig-meta-self', 'prompt': q, 'route': 3,
+                'reply': sub.get('text', ''),
+                'confidence': _confidence(sub),
+            })
+
+            # Strange-loop strategies (one level of recursion).
+            words = q.split()
+            if len(words) >= 2:
+                _try('suffix-last3', ' '.join(words[-3:]))
+                _try('prefix-drop',  ' '.join(words[1:]))
+            # Split on common conjunctions.
+            for sep in (' and ', ' or ', '; ', ', '):
+                if sep in q:
+                    parts = [p.strip() for p in q.split(sep) if p.strip()]
+                    if 2 <= len(parts) <= 4:
+                        _try(f'split-{sep.strip()}', parts[0])
+                        if len(parts) > 1:
+                            _try(f'split-{sep.strip()}-r', parts[-1])
+                    break
+
+            chosen = max(replies.values(), key=_confidence)
+
+        # Meta-route fallback: if the best confidence is too low, the
+        # pure-CA stack is exhausted on this prompt.  Warn + offer
+        # Anthropic API fallback.  ?fallback=1 triggers the actual
+        # external call; otherwise we just signal that the user can
+        # opt in.
+        external_ok = False
+        external_reply = ''
+        external_provider = ''
+        external_model = ''
+        external_warning = ''
+        if cat == 3 and _confidence(chosen) <= 0:
+            external_warning = (
+                '⚠ pure-CA recursion exhausted for this prompt. '
+                'Add ?fallback=1 to this URL to consult an external LLM '
+                '(Anthropic if ANTHROPIC_API_KEY set, otherwise a '
+                'community free-key proxy via alistaitsacle/'
+                'free-llm-api-keys).')
+            if request.GET.get('fallback') == '1':
+                try:
+                    from . import llm_fallback
+                    ext = llm_fallback.ask(q)
+                    external_reply    = ext['text']
+                    external_provider = ext.get('provider', '')
+                    external_model    = ext.get('model', '')
+                    external_ok = True
+                except Exception as e:
+                    external_warning = (
+                        f'⚠ pure-CA stack exhausted, external fallback '
+                        f'also failed: {type(e).__name__}: {e}')
+
+        return _json_response({
+            'layer':            'router',
+            'category':         cat,
+            'category_name':    cat_name,
+            'category_colour':  colour,
+            'sub_label':        sub_label,
+            'reply':            external_reply if external_ok
+                                else chosen.get('text', ''),
+            'pure_ca':          not external_ok,
+            'external_used':    external_ok,
+            'external_provider': external_provider,
+            'external_model':    external_model,
+            'external_warning': external_warning,
+            'words':            chosen.get('words', []),
+            'per_slot':         chosen.get('per_slot', []),
+            'unk_count':        chosen.get('unk_count', 0),
+            'meta_replies':     {k: {'text': v.get('text', ''),
+                                       'unk': v.get('unk_count', 0),
+                                       'n_words': len(v.get('words', []))}
+                                   for k, v in replies.items()},
+            'sub_dirs_used':    sub_dirs_used,
+            'loop_trace':       loop_trace,
+        })
+
+
+    if layer == 'byte':
+        for candidate in ('.artifacts/funnel_tokens_18p_pos40',
+                          '.artifacts/funnel_tokens_11p_pos256',
+                          '.artifacts/funnel_tokens_11p_pos40',
+                          '.artifacts/funnel_tokens_11p_pos12'):
+            try:
+                m = funnel_serve.get_model(candidate, ticks=6)
+                model_dir = candidate
+                break
+            except FileNotFoundError:
+                continue
+        else:
+            return _json_response({'reply': '', 'error':
+                'no funnel_tokens byte model found'})
+        lengths = funnel_serve.trained_prompt_lengths_for_demo()
+        try:
+            max_pos = int(request.GET.get('max_pos') or 0) or None
+        except ValueError:
+            max_pos = None
+        if max_pos is None and q in lengths:
+            max_pos = lengths[q]; trained = True
+        else:
+            trained = False
+            if max_pos is None:
+                max_pos = m.max_pos
+        out = m.generate(q, max_pos=max_pos)
+        return _json_response({
+            'layer':       'byte',
+            'reply':       out.decode('utf-8', errors='replace'),
+            'reply_bytes': list(out),
+            'trained':     trained,
+            'n_positions': len(out),
+            'n_chains':    len(m.chains) * 4,
+            'model_dir':   model_dir,
+        })
+
+    if layer == 'word':
+        try:
+            wm = word_binder.get_model('.artifacts/word_binder_v1', ticks=6)
+            model_dir = '.artifacts/word_binder_v1'
+        except FileNotFoundError as e:
+            return _json_response({'reply': '', 'error':
+                f'word_binder v1 not trained yet: {e}'})
+        gen = wm.generate(q)
+        return _json_response({
+            'layer':       'word',
+            'reply':       gen['text'],
+            'word_ids':    gen['word_ids'],
+            'words':       gen['words'],
+            'stopped':     gen['stopped'],
+            'unk_count':   gen['unk_count'],
+            'n_positions': len(gen['words']),
+            'n_chains':    len(wm.chains) * wm.k_cells,
+            'vocab_size':  wm.vocab['size'],
+            'model_dir':   model_dir,
+        })
+
+    if layer == 'word2':
+        from . import word_binder_v2
+        try:
+            wm2 = word_binder_v2.get_model('.artifacts/word_binder_v2', ticks=6)
+            model_dir = '.artifacts/word_binder_v2'
+        except FileNotFoundError as e:
+            return _json_response({'reply': '', 'error':
+                f'word_binder v2 not trained yet: {e}'})
+        gen = wm2.generate(q)
+        return _json_response({
+            'layer':       'word2',
+            'reply':       gen['text'],
+            'word_ids':    gen['word_ids'],
+            'words':       gen['words'],
+            'per_slot':    gen['per_slot'],
+            'unk_count':   gen['unk_count'],
+            'n_positions': len(gen['words']),
+            'n_input_slots': gen['n_input_slots'],
+            'n_chains':    len(wm2.chains) * wm2.k_cells,
+            'vocab_size':  wm2.vocab['size'],
+            'model_dir':   model_dir,
+        })
+
+    # layer == 'phrase' — recursive on top of word vocab
+    from . import phrase_binder
+    try:
+        pm = phrase_binder.get_model('.artifacts/phrase_binder_v1', ticks=6)
+        model_dir = '.artifacts/phrase_binder_v1'
+    except FileNotFoundError as e:
+        return _json_response({'reply': '', 'error':
+            f'phrase_binder not trained yet: {e}'})
+    gen = pm.generate(q)
+    return _json_response({
+        'layer':         'phrase',
+        'reply':         gen['text'],
+        'phrase_ids':    gen['phrase_ids'],
+        'phrases':       gen['phrases'],
+        'per_slot':      gen['per_slot'],
+        'unk_count':     gen['unk_count'],
+        'n_positions':   len(gen['phrases']),
+        'n_input_slots': gen['n_input_slots'],
+        'n_chains':      len(pm.chains) * pm.k_cells,
+        'vocab_size':    pm.vocab['size'],
+        'model_dir':     model_dir,
+    })
+
+
+# ── Async chat queue (2026-05-18) ───────────────────────────────────
+#
+# In-process queue so the user can fire off prompts without waiting
+# for each one's response.  Each Django process keeps its own dict;
+# under runserver that's a single shared dict, which is exactly what
+# we want for the dev/research workflow.  Persistence stays via
+# ChatTurn rows written from the background thread.
+#
+# Lifecycle:
+#   POST /funnel-chat/enqueue/  {q, layer, session_id?} → {turn_id,
+#       position_in_queue, status: 'queued'}
+#   GET  /funnel-chat/status/?turn_ids=A,B,C → [{turn_id, status,
+#       reply, ...}, …]  Done turns auto-evict after STATUS_RETENTION
+#       seconds so the dict doesn't grow unbounded.
+#
+# Concurrency: a single worker Thread per Django process picks items
+# off _CHAT_QUEUE in FIFO order and calls funnel_chat_reply()'s core
+# logic against a synthesized request-shaped object.
+
+import threading
+import uuid as _uuid
+from collections import deque as _deque
+
+_CHAT_QUEUE = _deque()
+_CHAT_TURNS: dict = {}    # turn_id → state dict
+_CHAT_QUEUE_LOCK = threading.Lock()
+_CHAT_WORKER_STARTED = False
+_CHAT_WORKER_LOCK = threading.Lock()
+_STATUS_RETENTION_SEC = 600    # 10 min before a done turn is evicted
+
+# Per-session rolling chat history.  4096-char cap matches the
+# eventual 128×128 K=4 board capacity (Phase 3 in our roadmap); for
+# now the engine only reads the first 16 bytes of the active query,
+# but the full history is preserved in this buffer so the UI can
+# render the transcript and the engine can start consuming more of
+# it as soon as the wider boards land.
+_CHAT_HISTORY: dict = {}      # session_id → list of (role, text, ts)
+_CHAT_HISTORY_LOCK = threading.Lock()
+_HISTORY_ACTIVE_CHARS = 4096
+
+
+def _chat_session_id(request) -> str:
+    """Stable id per browser session for transcript continuity.
+    Anonymous users get a Django session_key; authenticated users
+    get prefixed-by-user-id so per-user history is preserved."""
+    if request.user.is_authenticated:
+        return f'u{request.user.pk}'
+    if not request.session.session_key:
+        request.session.create()
+    return f's{request.session.session_key}'
+
+
+def _append_history(sid: str, role: str, text: str):
+    """Append a (role, text) entry to the session's rolling history;
+    evict from the head until total active-tier chars ≤ cap."""
+    import time
+    with _CHAT_HISTORY_LOCK:
+        buf = _CHAT_HISTORY.setdefault(sid, [])
+        buf.append((role, text, time.time()))
+        # Roll-up: cap by total text length (4096-char active tier).
+        total = sum(len(r[1]) for r in buf)
+        while total > _HISTORY_ACTIVE_CHARS and len(buf) > 1:
+            _, evicted, _ = buf.pop(0)
+            total -= len(evicted)
+
+
+def _get_history(sid: str, *, max_entries: int = 200):
+    with _CHAT_HISTORY_LOCK:
+        return list(_CHAT_HISTORY.get(sid, []))[-max_entries:]
+
+
+def _ensure_chat_worker():
+    """Lazy-start the single worker thread on first enqueue.
+    Also kicks the DMN heartbeat thread so internal thought begins
+    as soon as the first user turn lands."""
+    global _CHAT_WORKER_STARTED
+    with _CHAT_WORKER_LOCK:
+        if _CHAT_WORKER_STARTED:
+            return
+        t = threading.Thread(target=_chat_worker_loop, daemon=True,
+                                 name='funnel-chat-worker')
+        t.start()
+        _CHAT_WORKER_STARTED = True
+        # Kick the heartbeat too — it idles cheaply when there's no
+        # history to riff on.
+        h = threading.Thread(target=_dmn_heartbeat_loop, daemon=True,
+                                 name='funnel-chat-dmn-heartbeat')
+        h.start()
+
+
+# ── DMN heartbeat (2 ticks/sec lub-dub, idle-only routing) ──────────
+#
+# When the user queue is empty, the system thinks about itself.
+# Each heartbeat picks a session with recent history, feeds the most
+# recent assistant reply back through the chat reply path as a new
+# input, and stores the result with role='internal'.  Result: a
+# continuous self-conversation buffered to per-session history that
+# the UI can render distinctly and that v2 will use as training data.
+#
+# Lub-dub pattern: two heartbeats per second, ~50 ms apart, then a
+# ~900 ms idle.  Mimics biological cardiac rhythm and gives the
+# system two-chained-internal-thoughts per beat instead of one
+# isolated thought per second.
+
+_DMN_ENABLED = True              # global on/off; flip via endpoint
+_DMN_MAX_INTERNAL_PER_SESSION = 60  # cap so internal doesn't drown history
+                                      # (still bounded by 4096-char rolling history)
+_DMN_SESSION_COOLDOWN_SEC = 1.2     # ~1 heartbeat between picks (was 5s = sparse)
+
+
+def _dmn_heartbeat_loop():
+    """Background heartbeat firing at ~1 Hz with two ticks per beat.
+    Only fires the DMN when the chat queue is empty AND DMN is enabled
+    AND at least one session has assistant-role history to riff on."""
+    import time
+    import random
+    from types import SimpleNamespace
+    from django.contrib.auth.models import AnonymousUser
+
+    last_seen_per_session: dict = {}    # sid → unix ts of last DMN tick
+
+    while True:
+        try:
+            time.sleep(0.95)            # idle to start the lub
+            if not _DMN_ENABLED:
+                continue
+            # Skip when there's a user turn in flight.
+            with _CHAT_QUEUE_LOCK:
+                if len(_CHAT_QUEUE) > 0:
+                    continue
+            # Pick a candidate session: one with assistant OR internal
+            # history we can chain from (not picked too recently).
+            # Internal entries qualify as seeds — that way the inner
+            # monologue keeps moving even with no fresh user input.
+            now = time.time()
+            with _CHAT_HISTORY_LOCK:
+                candidates = []
+                for sid, buf in _CHAT_HISTORY.items():
+                    # Seed: most recent assistant OR internal text.
+                    last_seed = None
+                    n_internal = 0
+                    for entry in reversed(buf):
+                        role, text = entry[0], entry[1]
+                        if role in ('assistant', 'internal') and last_seed is None:
+                            last_seed = text
+                        if role == 'internal':
+                            n_internal += 1
+                    if last_seed is None:
+                        continue
+                    if n_internal >= _DMN_MAX_INTERNAL_PER_SESSION:
+                        continue
+                    last_pick = last_seen_per_session.get(sid, 0)
+                    if now - last_pick < _DMN_SESSION_COOLDOWN_SEC:
+                        continue
+                    candidates.append((sid, last_seed))
+            if not candidates:
+                continue
+            sid, seed_text = random.choice(candidates)
+            last_seen_per_session[sid] = now
+            # Two ticks per beat — first thought (feedback of last
+            # assistant) then a follow-up (feedback of the first
+            # thought).  Genuine lub-dub.
+            for tick_i in range(2):
+                # Re-check queue between ticks so the user can't be
+                # blocked by us if they enqueue.
+                with _CHAT_QUEUE_LOCK:
+                    if len(_CHAT_QUEUE) > 0:
+                        break
+                thought = _dmn_one_tick(sid, seed_text)
+                if thought is None:
+                    break
+                seed_text = thought       # chain into the second tick
+                if tick_i == 0:
+                    time.sleep(0.05)      # short interval between lub and dub
+        except Exception:
+            # Don't let a per-tick error kill the heartbeat for the
+            # life of the process.
+            time.sleep(0.5)
+
+
+def _dmn_one_tick(sid: str, seed_text: str):
+    """One DMN tick: feed seed_text back through the chat reply path
+    on the router layer, append the response to history with
+    role='internal', return the response text for chaining."""
+    from types import SimpleNamespace
+    from django.contrib.auth.models import AnonymousUser
+    try:
+        # The router path may serve byte-exact (if seed_text happens
+        # to be a trained prompt) or fall through to the sub-funnel.
+        # Either way, we get a reply and the dispatcher's category.
+        fake_get = {
+            'q':     seed_text[:400],   # cap the chained input length
+            'layer': 'router',
+        }
+        req = SimpleNamespace(
+            GET=fake_get, POST={},
+            user=AnonymousUser(),
+            session=SimpleNamespace(session_key=sid),
+            method='GET',
+        )
+        response = funnel_chat_reply(req)
+        payload = json.loads(response.content.decode('utf-8'))
+        reply = payload.get('reply', '')
+        # Don't pollute history with empty replies — they don't
+        # add anything to riff on next time.
+        if not reply:
+            return None
+        # Tag with category so the UI can color internal thoughts
+        # the same way it colors routed user replies.
+        meta = {
+            'category':         payload.get('category'),
+            'category_name':    payload.get('category_name', ''),
+            'category_colour':  payload.get('category_colour', ''),
+            'sub_label':        payload.get('sub_label', ''),
+            'echo_of':          seed_text[:80],
+        }
+        _append_history_with_meta(sid, 'internal', reply, meta)
+        return reply
+    except Exception:
+        return None
+
+
+def _append_history_with_meta(sid: str, role: str, text: str, meta: dict):
+    """Same as _append_history but stores a meta dict alongside.
+    Used by the DMN to record which reply each internal thought
+    echoed and what category the router assigned."""
+    import time
+    with _CHAT_HISTORY_LOCK:
+        buf = _CHAT_HISTORY.setdefault(sid, [])
+        # We extend the entry shape to (role, text, ts, meta).  The
+        # legacy 3-tuple readers still work because tuple-unpacking
+        # in _get_history's caller stops at index 2.  See history
+        # serialization below for meta surfacing.
+        buf.append((role, text, time.time(), meta))
+        # Same eviction as _append_history: cap by total chars in
+        # the active tier.
+        total = sum(len(r[1]) for r in buf)
+        while total > _HISTORY_ACTIVE_CHARS and len(buf) > 1:
+            evicted = buf.pop(0)
+            total -= len(evicted[1])
+
+
+def funnel_chat_dmn_toggle(request):
+    """GET /funnel-chat/dmn/?on=1 (or 0) to toggle the heartbeat.
+    Returns the current state.  Process-global flag, not per-session.
+
+    Also lazy-starts the worker threads as a side effect, so just
+    hitting this endpoint on page load is enough to bring up the
+    heartbeat — the user doesn't have to wait until they type
+    something for DMN to come alive."""
+    global _DMN_ENABLED
+    arg = request.GET.get('on')
+    if arg in ('0', 'off', 'false'):
+        _DMN_ENABLED = False
+    elif arg in ('1', 'on', 'true'):
+        _DMN_ENABLED = True
+    _ensure_chat_worker()
+    return _json_response({
+        'dmn_enabled': _DMN_ENABLED,
+        'max_internal_per_session': _DMN_MAX_INTERNAL_PER_SESSION,
+        'session_cooldown_sec':     _DMN_SESSION_COOLDOWN_SEC,
+        'worker_running': _CHAT_WORKER_STARTED,
+    })
+
+
+def _chat_worker_loop():
+    """Drain _CHAT_QUEUE one at a time, FIFO.  Reuses the existing
+    funnel_chat_reply() logic by constructing a minimal request-shaped
+    namespace; the reply path only touches request.GET and request.user."""
+    import time
+    from types import SimpleNamespace
+    from django.contrib.auth.models import AnonymousUser
+    while True:
+        with _CHAT_QUEUE_LOCK:
+            try:
+                turn_id = _CHAT_QUEUE.popleft()
+            except IndexError:
+                turn_id = None
+        if turn_id is None:
+            time.sleep(0.05)
+            _evict_old_turns()
+            continue
+        state = _CHAT_TURNS.get(turn_id)
+        if state is None:
+            continue
+        state['status'] = 'processing'
+        state['processing_started'] = time.time()
+        try:
+            # Build a request-shaped object so we can call into the
+            # existing funnel_chat_reply / per-layer code paths
+            # without duplicating dispatch logic.
+            fake_get = {
+                'q':        state['q'],
+                'layer':    state.get('layer') or 'router',
+                'fallback': '1' if state.get('fallback') else '0',
+                '_depth':   '0',
+            }
+            req = SimpleNamespace(
+                GET=fake_get,
+                POST={},
+                user=AnonymousUser(),    # session-only context
+                session=SimpleNamespace(session_key=state.get('session_id', '')),
+                method='GET',
+            )
+            response = funnel_chat_reply(req)
+            payload = json.loads(response.content.decode('utf-8'))
+            state['reply']           = payload.get('reply', '')
+            state['layer_used']      = payload.get('layer', '')
+            state['category']        = payload.get('category')
+            state['category_name']   = payload.get('category_name', '')
+            state['category_colour'] = payload.get('category_colour', '')
+            state['sub_label']       = payload.get('sub_label', '')
+            state['pure_ca']         = payload.get('pure_ca', True)
+            state['external_used']   = payload.get('external_used', False)
+            state['external_provider'] = payload.get('external_provider', '')
+            state['external_warning']  = payload.get('external_warning', '')
+            state['qrpair_id']       = payload.get('qrpair_id')
+            state['status']          = 'done'
+            # Append the reply to the session transcript.
+            sid = state.get('session_id')
+            if sid:
+                _append_history(sid, 'assistant', state['reply'])
+        except Exception as e:
+            state['status'] = 'failed'
+            state['error']  = f'{type(e).__name__}: {e}'
+        state['completed_at'] = time.time()
+
+
+def _evict_old_turns():
+    """Drop done/failed turns older than _STATUS_RETENTION_SEC so
+    the dict doesn't grow unbounded across long sessions."""
+    import time
+    cutoff = time.time() - _STATUS_RETENTION_SEC
+    to_drop = [tid for tid, s in _CHAT_TURNS.items()
+               if s.get('status') in ('done', 'failed')
+               and (s.get('completed_at') or 0) < cutoff]
+    for tid in to_drop:
+        _CHAT_TURNS.pop(tid, None)
+
+
+from django.views.decorators.csrf import csrf_exempt as _csrf_exempt
+
+
+@_csrf_exempt
+def funnel_chat_enqueue(request):
+    """POST (or GET, for curl convenience) a new chat turn — returns
+    immediately with a turn_id.  Body / query fields:
+      q        — the prompt
+      layer    — 'router' (default), 'word2', 'phrase', etc.
+      fallback — '1' to allow external LLM fallback for meta route
+    CSRF-exempt because this is a JSON API; production deploy should
+    front this with token auth."""
+    import time
+    q = (request.POST.get('q') or request.GET.get('q') or '').strip()
+    if not q:
+        return _json_response({'error': 'empty prompt'})
+    layer = (request.POST.get('layer')
+              or request.GET.get('layer') or 'router').strip()
+    fallback = bool(int(request.POST.get('fallback')
+                          or request.GET.get('fallback') or 0))
+    sid = _chat_session_id(request)
+    turn_id = _uuid.uuid4().hex[:12]
+    state = {
+        'turn_id':     turn_id,
+        'session_id':  sid,
+        'q':           q,
+        'layer':       layer,
+        'fallback':    fallback,
+        'status':      'queued',
+        'created_at':  time.time(),
+    }
+    _CHAT_TURNS[turn_id] = state
+    with _CHAT_QUEUE_LOCK:
+        _CHAT_QUEUE.append(turn_id)
+        position = len(_CHAT_QUEUE)
+    _append_history(sid, 'user', q)
+    _ensure_chat_worker()
+    return _json_response({
+        'turn_id':          turn_id,
+        'status':           'queued',
+        'position_in_queue': position,
+        'session_id':       sid,
+    })
+
+
+def funnel_chat_status(request):
+    """GET /funnel-chat/status/?turn_ids=A,B,C — return live state
+    for each id (or all queued+recent for the current session if no
+    ids given).
+    Status values: queued | processing | done | failed | unknown."""
+    ids_csv = (request.GET.get('turn_ids') or '').strip()
+    if ids_csv:
+        ids = [x.strip() for x in ids_csv.split(',') if x.strip()]
+    else:
+        sid = _chat_session_id(request)
+        ids = [tid for tid, s in _CHAT_TURNS.items()
+               if s.get('session_id') == sid]
+    out = []
+    for tid in ids:
+        s = _CHAT_TURNS.get(tid)
+        if s is None:
+            out.append({'turn_id': tid, 'status': 'unknown'})
+            continue
+        entry = {
+            'turn_id':         tid,
+            'status':          s.get('status'),
+            'q':               s.get('q'),
+            'reply':           s.get('reply', ''),
+            'category':        s.get('category'),
+            'category_name':   s.get('category_name', ''),
+            'category_colour': s.get('category_colour', ''),
+            'sub_label':       s.get('sub_label', ''),
+            'pure_ca':         s.get('pure_ca', True),
+            'external_used':   s.get('external_used', False),
+            'external_warning': s.get('external_warning', ''),
+            'qrpair_id':       s.get('qrpair_id'),
+            'error':           s.get('error', ''),
+        }
+        out.append(entry)
+    # Queue depth so the UI can show "you're #N in line."
+    with _CHAT_QUEUE_LOCK:
+        queue_depth = len(_CHAT_QUEUE)
+    return _json_response({'turns': out, 'queue_depth': queue_depth})
+
+
+def caformer_ruleset_zoo_view(request):
+    """The ruleset zoo: visualises the full hierarchy of K=4 hex CA
+    rule types from 2→1 (16-entry LUT, 4×4 natural board) through
+    8→1 (65,536-entry LUT, 256×256 natural board).  Each row of
+    the ladder is one neighbourhood size with its own quine pool
+    expectations and concrete uses.  Also surfaces the
+    Mandelbrot-derived quine pool discovered on 2026-05-19 via
+    fractal-region scanning."""
+    # Mandelbrot quine pool from the mass scan.
+    from pathlib import Path
+    import json as _json
+    from django.conf import settings
+    mb_pool = None
+    leaderboard_path = (Path(settings.BASE_DIR) /
+                          '.artifacts' / 'loupe_rules' /
+                          'leaderboard.json')
+    if leaderboard_path.exists():
+        try:
+            data = _json.loads(leaderboard_path.read_text())
+            top_class4 = sorted(data.get('all_class4', []),
+                                  key=lambda r: -(r['sr_strict']
+                                                       * (0.3 + r['c4_score'])))
+            mb_pool = {
+                'n_frames':       data.get('n_frames'),
+                'n_class4':       data.get('n_class4'),
+                'n_quine_cand':   data.get('n_quine_cand'),
+                'wall_seconds':   data.get('wall_seconds'),
+                'top_combined':   top_class4[:10],
+            }
+        except Exception:
+            mb_pool = None
+    # The full hierarchy, computed inline (no DB queries needed
+    # because this is mathematical structure, not state).
+    ladder = []
+    for n_input in range(2, 9):
+        lut_entries  = 4 ** n_input
+        packed_bytes = (lut_entries * 2 + 7) // 8       # 2 bits / entry
+        unpacked_bytes = lut_entries                      # 1 byte / entry raw
+        # Board side that makes the unpacked LUT a perfect square.
+        # (1 byte == 1 cell at K=4.)
+        side = int(lut_entries ** 0.5) if lut_entries ** 0.5 == int(lut_entries ** 0.5) else None
+        ladder.append({
+            'n_input':        n_input,
+            'lut_entries':    lut_entries,
+            'packed_bytes':   packed_bytes,
+            'unpacked_bytes': unpacked_bytes,
+            'board_side':     side,
+            'board_cells':    side * side if side else None,
+            'is_current':     n_input == 7,
+            'is_new':         n_input == 8,
+            'enumeration_feasible': lut_entries <= 1024,   # 2→1 ... 5→1
+        })
+    return render(request, 'caformer/ruleset_zoo.html', {
+        'ladder': ladder,
+        'mb_pool': mb_pool,
+    })
+
+
+def caformer_cell8_view(request):
+    """The cell8 subpage: introduces the 8→1 hex CA primitive and
+    demos the input-port wiring that makes chain composition
+    first-class.  Runs the smoke test on every page load so the
+    user sees real numbers from a fresh run, not a cached blob."""
+    from . import cell8 as _c8
+    smoke = _c8.smoke_two_chain_composition(n_ticks=24, rng_seed=42)
+    return render(request, 'caformer/cell8.html', {
+        'lut_size_8':       _c8.LUT_SIZE_8,
+        'board_side_8':     _c8.BOARD_SIDE_8,
+        'packed_bytes_8':   _c8.PACKED_BYTES_8,
+        'smoke':            smoke,
+    })
+
+
+def caformer_about_view(request):
+    """The 'about' page for caformer — explains the architecture to
+    skeptical colleagues with live stats, math, and worked examples
+    of how text becomes a CA board state and back."""
+    from .models import QRPair
+    import numpy as np
+
+    pairs = QRPair.objects.all()
+    n_pairs           = pairs.count()
+    n_b128_exact      = pairs.filter(board128_exact=True).count()
+    n_legacy_exact    = pairs.filter(best_exact=True).count()
+    pairs_with_b128   = [p for p in pairs if p.is_board128()]
+    n_chains_b128     = sum(len(bytes(p.board128_rules_blob)) // 16384
+                             for p in pairs_with_b128)
+    total_b128_bytes  = sum(len(bytes(p.board128_rules_blob))
+                             for p in pairs_with_b128)
+    total_b128_mb     = total_b128_bytes / (1024 * 1024)
+    avg_response_chars = (sum(len(p.expected) for p in pairs)
+                              / max(1, n_pairs))
+
+    # An example forward pass — embed 'hi' into 128×128, take a couple
+    # of ticks with the trained 'hello' rule, show the board state.
+    from .board128 import (embed_prompt, decode_byte_at_position,
+                              BOARD_SIDE, BOARD_CELLS,
+                              RESPONSE_CELLS_START)
+    from .primitives import hex_ca_step
+
+    # Tiny embedding example for the page: show 'hi' as 8 cells.
+    hi_cells = []
+    for b in b'hi':
+        hi_cells.extend([(b >> 6) & 3, (b >> 4) & 3,
+                         (b >> 2) & 3,  b       & 3])
+
+    # Try to demo a real trained pair if one exists.
+    demo_pair = pairs.filter(board128_exact=True).first()
+    demo_text = ''
+    demo_rules_summary = ''
+    if demo_pair is not None:
+        rules = demo_pair.board128_rules()
+        demo_text = (f"{demo_pair.prompt!r} → {demo_pair.expected!r} "
+                     f"(via {len(rules)} chains, {len(rules)*16} KB)")
+        demo_rules_summary = (
+            f"Each of the {len(rules)} chains is a 16,384-byte K=4 "
+            f"hex CA rule table.  Chain i predicts byte i of the "
+            f"response given the prompt embedded into a 128×128 "
+            f"board.")
+
+    return render(request, 'caformer/about.html', {
+        'n_pairs':           n_pairs,
+        'n_b128_exact':      n_b128_exact,
+        'n_legacy_exact':    n_legacy_exact,
+        'n_chains_b128':     n_chains_b128,
+        'total_b128_mb':     round(total_b128_mb, 2),
+        'avg_response_chars': round(avg_response_chars, 1),
+        'board_side':        BOARD_SIDE,
+        'board_cells':       BOARD_CELLS,
+        'hi_cells':          hi_cells,
+        'demo_text':         demo_text,
+        'demo_rules_summary': demo_rules_summary,
+    })
+
+
+def funnel_chat_history(request):
+    """GET /funnel-chat/history/ — return the current session's
+    rolling 4096-char transcript.  Entries may be (role, text, ts)
+    triples (user/assistant) or (role, text, ts, meta) quads
+    (internal, with DMN bookkeeping)."""
+    sid = _chat_session_id(request)
+    entries = _get_history(sid)
+    out = []
+    for entry in entries:
+        if len(entry) >= 4:
+            r, t, ts, meta = entry[0], entry[1], entry[2], entry[3]
+        else:
+            r, t, ts, meta = entry[0], entry[1], entry[2], None
+        item = {'role': r, 'text': t, 'ts': ts}
+        if meta:
+            item['meta'] = meta
+        out.append(item)
+    return _json_response({
+        'session_id': sid,
+        'entries':    out,
+        'active_chars_cap':  _HISTORY_ACTIVE_CHARS,
+        'active_chars_used': sum(len(e[1]) for e in entries),
+        'dmn_enabled': _DMN_ENABLED,
+    })
+
+
+# ── Standalone C binary download (pure-CA proof) ────────────────────
+
+def funnel_cli_download(request, kind='binary'):
+    """Serve a standalone C binary (or .c source) of the trained
+    word_binder_v2 pipeline.  Binary is compiled on demand, cached by
+    model-dir mtime so the same trained model serves identical bytes
+    indefinitely.
+
+    kind in {'binary', 'source'}."""
+    import hashlib
+    import subprocess
+    import tempfile
+    from pathlib import Path
+    from django.conf import settings
+    from . import funnel_emit_c
+
+    model_dir = Path(settings.BASE_DIR) / '.artifacts' / 'word_binder_v2'
+    if not (model_dir / 'vocab.json').exists():
+        return HttpResponse('word_binder_v2 not trained yet', status=404)
+
+    # Cache key: latest mtime over all model files.
+    files = list(model_dir.glob('*.lut')) + [model_dir / 'vocab.json']
+    mtime = max(f.stat().st_mtime for f in files)
+    cache_tag = hashlib.sha1(
+        f'{model_dir}:{mtime}'.encode()).hexdigest()[:12]
+
+    cache_dir = Path(tempfile.gettempdir()) / 'funnel-cli-cache' / cache_tag
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    src_path = cache_dir / 'funnel-cli.c'
+    bin_path = cache_dir / 'funnel-cli'
+
+    if not src_path.exists():
+        src_path.write_text(funnel_emit_c.emit_word_binder_v2_c(model_dir))
+    if kind == 'binary' and not bin_path.exists():
+        r = subprocess.run(['cc', '-O2', '-o', str(bin_path), str(src_path)],
+                            capture_output=True, text=True)
+        if r.returncode != 0:
+            return HttpResponse(f'compile failed:\n{r.stderr}',
+                                  status=500,
+                                  content_type='text/plain')
+
+    if kind == 'source':
+        blob = src_path.read_bytes()
+        resp = HttpResponse(blob, content_type='text/x-csrc')
+        resp['Content-Disposition'] = (
+            'attachment; filename="funnel-cli.c"')
+    else:
+        blob = bin_path.read_bytes()
+        resp = HttpResponse(blob, content_type='application/octet-stream')
+        resp['Content-Disposition'] = (
+            'attachment; filename="funnel-cli"')
+    resp['Content-Length'] = str(len(blob))
+    resp['Cache-Control'] = 'public, max-age=3600'
+    return resp
+
+
+def funnel_trainer_download(request, kind='binary'):
+    """Serve the model-agnostic trainer binary (or source).  Unlike
+    funnel-cli, this binary has *no* embedded model — it loads/saves
+    a packed .fnl model file and can train new (prompt, response)
+    pairs at runtime."""
+    import subprocess
+    from pathlib import Path
+    from django.conf import settings
+
+    src_dir = Path(settings.BASE_DIR) / '.artifacts' / 'funnel-trainer'
+    src_path = src_dir / 'funnel-trainer.c'
+    bin_path = src_dir / 'funnel-trainer'
+    if not src_path.exists():
+        return HttpResponse('funnel-trainer source missing', status=404)
+    if kind == 'binary':
+        # Build if missing or stale.
+        if not bin_path.exists() or \
+                bin_path.stat().st_mtime < src_path.stat().st_mtime:
+            r = subprocess.run(
+                ['cc', '-O2', '-o', str(bin_path), str(src_path)],
+                capture_output=True, text=True)
+            if r.returncode != 0:
+                return HttpResponse(
+                    f'compile failed:\n{r.stderr}',
+                    status=500, content_type='text/plain')
+        blob = bin_path.read_bytes()
+        resp = HttpResponse(blob, content_type='application/octet-stream')
+        resp['Content-Disposition'] = (
+            'attachment; filename="funnel-trainer"')
+    else:
+        blob = src_path.read_bytes()
+        resp = HttpResponse(blob, content_type='text/x-csrc')
+        resp['Content-Disposition'] = (
+            'attachment; filename="funnel-trainer.c"')
+    resp['Content-Length'] = str(len(blob))
+    resp['Cache-Control'] = 'public, max-age=3600'
+    return resp

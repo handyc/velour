@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% block title %}Ruleset Zoo · caformer{% endblock %}
+{% block content %}
+<style>
+  .rz { max-width: 88ch; margin: 1rem auto; padding: 0 1rem;
+        color: #cfe5cf; font-family: ui-sans-serif, system-ui,
+              -apple-system, sans-serif; line-height: 1.55; }
+  .rz h1, .rz h2 { color: #aaffaa; letter-spacing: 0.02em; }
+  .rz h1 { font-size: 1.4rem; border-bottom: 1px solid #2a6a2a;
+           padding-bottom: 4px; }
+  .rz h2 { font-size: 1rem; margin-top: 2rem;
+           border-bottom: 1px solid #1a3a1a; padding-bottom: 2px; }
+  .rz a  { color: #79c0ff; }
+  .rz code { color: #f0ff80; background: #0a1a0a; padding: 1px 4px;
+             border-radius: 2px; font-family: ui-monospace, monospace; }
+  table.zoo { width: 100%; border-collapse: collapse;
+              margin: 12px 0; font-size: 0.9rem; }
+  table.zoo th, table.zoo td { padding: 6px 8px;
+                                 border-bottom: 1px solid #1a3a1a;
+                                 text-align: right; }
+  table.zoo th  { color: #aaffaa; background: #0a1a0a;
+                  font-weight: normal; letter-spacing: 0.04em;
+                  text-transform: uppercase; font-size: 0.72rem; }
+  table.zoo td:first-child, table.zoo th:first-child { text-align: left; }
+  table.zoo tr.current { background: #0a2a0a; }
+  table.zoo tr.current td { color: #aaffaa; font-weight: bold; }
+  table.zoo tr.new { background: #1a1a2a; }
+  table.zoo tr.new td { color: #79c0ff; font-weight: bold; }
+  .badge { display: inline-block; padding: 1px 6px;
+           border-radius: 2px; font-size: 0.7rem;
+           text-transform: uppercase; letter-spacing: 0.04em; }
+  .badge-current { background: #2a6a2a; color: #aaffaa; }
+  .badge-new     { background: #1a4a6a; color: #79c0ff; }
+  .badge-enum    { background: #6a5a18; color: #ffd070; }
+  .nav-back a { color: #7ee787; text-decoration: none;
+                border: 1px solid #2a6a2a; padding: 3px 10px;
+                background: #050a05; font-size: 0.85rem; }
+  .callout { background: #0a1a2a; border-left: 3px solid #79c0ff;
+             padding: 10px 14px; margin: 12px 0; color: #cce0ff; }
+</style>
+
+<div class="rz">
+  <div class="nav-back">
+    <a href="{% url 'caformer:caformer_about' %}">← about</a>
+    &nbsp; <a href="{% url 'caformer:caformer_cell8' %}">← cell8</a>
+    &nbsp; <a href="{% url 'caformer:funnel_chat' %}">← chat</a>
+  </div>
+
+  <h1>Ruleset Zoo — the full ladder of K=4 hex CA rule sizes</h1>
+
+  <p>Every neighbourhood size N→1 has its own LUT size (4<sup>N</sup>
+     entries), its own natural Ouroboros board (where the LUT
+     interpreted as a K=4 image is square), and its own pool of
+     class-4 quines.  The whole stack is a fractal of self-similar
+     CA scales — each rung is the same shape, just at a different
+     resolution.</p>
+
+  <table class="zoo">
+    <tr>
+      <th>Rule</th>
+      <th>LUT entries</th>
+      <th>Packed bytes</th>
+      <th>Unpacked bytes</th>
+      <th>Quine board side</th>
+      <th>Status</th>
+    </tr>
+    {% for r in ladder %}
+    <tr class="{% if r.is_current %}current{% elif r.is_new %}new{% endif %}">
+      <td><b>{{ r.n_input }}→1</b></td>
+      <td>{{ r.lut_entries }}</td>
+      <td>{{ r.packed_bytes }} B</td>
+      <td>{{ r.unpacked_bytes }} B</td>
+      <td>{% if r.board_side %}{{ r.board_side }}×{{ r.board_side }}
+              ({{ r.board_cells }} cells){% else %}—{% endif %}</td>
+      <td>
+        {% if r.is_current %}<span class="badge badge-current">current</span>{% endif %}
+        {% if r.is_new %}<span class="badge badge-new">cell8</span>{% endif %}
+        {% if r.enumeration_feasible %}<span class="badge badge-enum">enumerable</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <h2>Why the small end is worth pursuing</h2>
+
+  <p>At the smallest rule sizes (2→1, 3→1, 4→1, 5→1), the LUT search
+     space is small enough to <b>enumerate exhaustively</b>:</p>
+
+  <ul>
+    <li><b>2→1:</b> 4<sup>16</sup> = 4.3 billion possible rules. Brute
+        force in a few CPU-hours. We could have the COMPLETE catalogue
+        of every 2→1 quine.</li>
+    <li><b>3→1:</b> 4<sup>64</sup> ≈ 3.4 × 10<sup>38</sup> — too many to
+        enumerate, but the Ouroboros manifold is dense enough that GA
+        sampling will hit hundreds of class-4 quines in an hour.</li>
+    <li><b>4→1, 5→1:</b> still tractable; the search-space-to-quine-
+        density ratio becomes very favourable.</li>
+  </ul>
+
+  <p>Useful roles for tiny rules:</p>
+  <ul>
+    <li><b>2→1 as logic primitives:</b> CA-native NAND/NOR/XOR-equivalent
+        gates. Compose into logic families.</li>
+    <li><b>3→1 majority votes:</b> 3-input symmetric functions for
+        ensemble decisions across the system.</li>
+    <li><b>4→1 mode selectors:</b> 256 distinct LUTs, perfect for
+        small categorical filters (e.g. a 4-way intent router could
+        live here instead of at 7→1).</li>
+    <li><b>Cross-scale gating:</b> any small rule's output cell can be
+        wired into a larger rule's input port (see
+        <a href="{% url 'caformer:caformer_cell8' %}">cell8</a>) to
+        compose hierarchies of computation.</li>
+  </ul>
+
+  <h2>Multi-resolution storage hierarchy (the next move)</h2>
+
+  <p>Every rung of this ladder is a valid resolution at which to
+     store a trained chain. A chain that no longer needs full
+     fidelity can be downsampled by powers of 4:</p>
+
+  <pre>
+256×256  →  128×128  →  64×64  →  32×32  →  16×16  →  8×8  →  4×4  →  2×2
+64 KB    →  16 KB    →  4 KB   →  1 KB   →  256 B  →  64 B → 16 B  →  4 B
+
+      hot          cool          cold        dust       topic-flag
+      (recently used)                                   (~1 byte of info)
+  </pre>
+
+  <p>Memory ageing becomes graceful resolution loss instead of binary
+     deletion.  Old knowledge persists at low resolution at almost
+     no cost — a 2×2 chain is 4 bytes.  Promotion: when a dust chain
+     is matched by an incoming query, retraining at higher resolution
+     uses the dust as a seed instead of starting from scratch.</p>
+
+  <div class="callout">
+    <b>The integration:</b> the trained dispatcher decides query-by-
+    query what resolution suffices.  A quick semantic match? Hit the
+    16×16 chain in microseconds.  Need byte-exact byte-by-byte
+    response?  Pipeline up to 128×128, paying 256× more compute for
+    precision.  Same query, multiple cost/quality levels.  The
+    multi-resolution stack is the CA-native expression of how brains
+    do approximate-then-refine cognition.
+  </div>
+
+  {% if mb_pool %}
+  <h2>Mandelbrot-derived quine pool (discovered 2026-05-19)</h2>
+
+  <p>Hypothesis from this session: fractal self-similarity correlates
+     with class-4 + quine-friendly LUT structure (because both
+     properties involve scale-invariant local patterning).  Test:
+     posterise Mandelbrot regions to K=4, treat the resulting
+     128×128 image as a 16,384-byte LUT, classify.</p>
+
+  <div class="stats-row" style="display: flex; gap: 16px; margin: 10px 0;">
+    <div class="stat" style="background: #050a05; border: 1px solid #1a3a1a; padding: 6px 12px;">
+      <div style="color: #aaffaa; font-weight: bold; font-size: 1.1rem;">{{ mb_pool.n_frames }}</div>
+      <div style="color: #5fc55f; font-size: 0.7rem; text-transform: uppercase;">frames scanned</div>
+    </div>
+    <div class="stat" style="background: #050a05; border: 1px solid #1a3a1a; padding: 6px 12px;">
+      <div style="color: #aaffaa; font-weight: bold; font-size: 1.1rem;">{{ mb_pool.n_class4 }}</div>
+      <div style="color: #5fc55f; font-size: 0.7rem; text-transform: uppercase;">class-4 hits</div>
+    </div>
+    <div class="stat" style="background: #050a05; border: 1px solid #1a3a1a; padding: 6px 12px;">
+      <div style="color: #aaffaa; font-weight: bold; font-size: 1.1rem;">{{ mb_pool.n_quine_cand }}</div>
+      <div style="color: #5fc55f; font-size: 0.7rem; text-transform: uppercase;">quine candidates</div>
+    </div>
+    <div class="stat" style="background: #050a05; border: 1px solid #1a3a1a; padding: 6px 12px;">
+      <div style="color: #aaffaa; font-weight: bold; font-size: 1.1rem;">{{ mb_pool.wall_seconds|floatformat:0 }}s</div>
+      <div style="color: #5fc55f; font-size: 0.7rem; text-transform: uppercase;">scan wall time</div>
+    </div>
+  </div>
+
+  <p><b>Top 10 by combined (SR × c4 + 0.3) rank</b> — the genuine
+     class-4 + near-quine candidates worth hill-climbing:</p>
+
+  <table class="zoo">
+    <tr>
+      <th>rank</th><th>SR strict</th><th>c4 score</th><th>activity</th>
+      <th>source walk</th><th>span</th>
+    </tr>
+    {% for r in mb_pool.top_combined %}
+    <tr>
+      <td>{{ forloop.counter }}</td>
+      <td>{{ r.sr_strict|floatformat:4 }}</td>
+      <td>{{ r.c4_score|floatformat:4 }}</td>
+      <td>{{ r.activity|floatformat:3 }}</td>
+      <td><code>{{ r.walk_slug }}/step{{ r.step }}</code></td>
+      <td>{{ r.span|floatformat:4 }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <div class="callout">
+    <b>Comparison to the spoeqi famous-artwork scan (overnight
+    2026-05-18):</b> 27 paintings scanned, best Mondrian
+    <i>Composition with Red Blue Yellow</i> at SR=0.7007 + c4=0.85.
+    The Mandelbrot scan produced multiple comparable candidates in
+    a single 5-minute run — fractal regions appear to be an
+    <i>orders-of-magnitude richer source</i> of class-4 quine
+    candidates than curated art.  The top combined-rank candidate
+    (SR=0.701 + c4=0.673) is currently in a 200K-iter hill-climb
+    targeting SR≥0.995.
+  </div>
+  {% endif %}
+
+  <h2>Status</h2>
+  <p>This page is the scaffold.  Currently shipped:</p>
+  <ul>
+    <li>7→1 (current): hexhunter library + 1722 known L0 fixed-point
+        class-4 quines + the entire caformer chat dispatch trained at
+        128×128 boards.</li>
+    <li>8→1 (cell8): primitive landed; smoke test demonstrates the
+        input port carries signal.  See
+        <a href="{% url 'caformer:caformer_cell8' %}">/caformer/cell8/</a>.</li>
+  </ul>
+  <p>Planned (task #64 in the workspace tracker):</p>
+  <ul>
+    <li>2→1 through 6→1 primitives + their quine pools (enumeration
+        + GA sampling).</li>
+    <li>Cross-scale wiring infrastructure: any small rule's output
+        cell wired into a larger rule's input port.</li>
+    <li>Multi-resolution memory ageing: cool chains downsample
+        automatically; dust chains promote on match.</li>
+  </ul>
+
+  <div class="nav-back" style="margin-top: 2rem;">
+    <a href="{% url 'caformer:caformer_about' %}">← about</a>
+    &nbsp; <a href="{% url 'caformer:caformer_cell8' %}">← cell8</a>
+    &nbsp; <a href="{% url 'caformer:funnel_chat' %}">← chat</a>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,543 @@
+{% extends "base.html" %}
+{% block title %}Funnel Chat · CAformer{% endblock %}
+{% block content %}
+<style>
+  /* Take the whole viewport below the velour topbar (~4.5rem). */
+  .fc-shell  { display: flex; flex-direction: column;
+               height: calc(100vh - 4.5rem); margin: 0.5rem;
+               border: 1px solid #1a3a1a; background: #000;
+               color: #7fff7f; font-family: ui-monospace,
+                  SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+  .fc-head   { display: flex; flex-direction: column; gap: 6px;
+               padding: 6px 10px; background: #050a05;
+               border-bottom: 1px solid #1a3a1a; flex: none; }
+  .fc-head h2 { margin: 0; color: #7fff7f; font-size: 0.95rem;
+                font-weight: normal; letter-spacing: 0.05em;
+                text-transform: uppercase; }
+  .fc-head .tag { color: #3a7a3a; font-size: 0.72rem; }
+  .fc-intro  { color: #5fc55f; font-size: 0.75rem; line-height: 1.4;
+               max-width: 100ch; opacity: 0.85; }
+  .fc-intro b { color: #aaffaa; }
+  .fc-intro code { color: #f0ff80; }
+
+  .fc-controls { display: flex; gap: 12px; align-items: center;
+                 flex-wrap: wrap; padding: 4px 10px; background: #030803;
+                 border-bottom: 1px solid #1a3a1a;
+                 font-size: 0.72rem; color: #4a8a4a; flex: none; }
+  .fc-controls label { cursor: pointer; padding: 2px 8px;
+                       border: 1px solid #1a3a1a; background: #050a05;
+                       color: #5fc55f; }
+  .fc-controls input[type="radio"] { display: none; }
+  .fc-controls input[type="radio"]:checked + span {
+                       background: #0a2a0a; color: #aaffaa;
+                       border: 1px solid #2a6a2a;
+                       padding: 2px 8px; margin: -2px -8px;
+                       display: inline-block; }
+
+  .fc-chips  { display: flex; flex-wrap: wrap; gap: 4px;
+               padding: 4px 10px; background: #030803;
+               border-bottom: 1px solid #1a3a1a; flex: none; }
+  .fc-chips .chip { background: #050a05; border: 1px solid #1a3a1a;
+                    color: #5fc55f; padding: 2px 7px; cursor: pointer;
+                    font-size: 0.7rem; }
+  .fc-chips .chip:hover { background: #0a2a0a; color: #aaffaa;
+                          border-color: #2a6a2a; }
+
+  /* The terminal-like scrollable log fills remaining space. */
+  .fc-log    { flex: 1; overflow-y: auto; padding: 8px 10px;
+               background: #000; color: #7fff7f; font-size: 0.85rem;
+               line-height: 1.45; }
+  .fc-log::-webkit-scrollbar { width: 8px; }
+  .fc-log::-webkit-scrollbar-track { background: #050a05; }
+  .fc-log::-webkit-scrollbar-thumb { background: #1a3a1a; }
+
+  .fc-msg    { margin-bottom: 8px; }
+  .fc-msg .role { color: #3a7a3a; font-size: 0.7rem; padding: 0;
+                  display: flex; align-items: baseline; gap: 8px; }
+  .fc-msg .role b { font-weight: normal; }
+  .fc-msg .role.you b { color: #80ffff; }
+  .fc-msg .role.ca  b { color: #aaffaa; }
+  .fc-msg .role.ca.word  b { color: #ffd070; }
+  .fc-msg .meta { color: #305030; font-size: 0.65rem; }
+  .fc-msg pre  { margin: 1px 0 0 0; padding: 2px 0; background: transparent;
+                 border: none; color: #7fff7f; white-space: pre-wrap;
+                 word-break: break-all; font: inherit; }
+  .fc-msg pre.untrained { color: #ffd070; }
+  .fc-msg pre.word      { color: #ffe070; }
+  .fc-msg .wordids { color: #305030; font-size: 0.65rem; padding: 1px 0; }
+
+  /* Input pinned to the bottom of the shell. */
+  .fc-form   { display: flex; gap: 6px; padding: 6px 10px;
+               background: #050a05; border-top: 1px solid #1a3a1a;
+               flex: none; }
+  .fc-form .prompt { color: #aaffaa; padding: 6px 4px 6px 0;
+                     font-weight: bold; }
+  .fc-form input[type="text"] { flex: 1; background: #000;
+                 color: #7fff7f; border: 1px solid #1a3a1a;
+                 padding: 6px 10px; font: inherit;
+                 caret-color: #aaffaa; }
+  .fc-form input[type="text"]:focus { outline: none;
+                 border-color: #2a6a2a; }
+  .fc-form button { background: #0a2a0a; color: #aaffaa;
+                 border: 1px solid #2a6a2a;
+                 padding: 6px 14px; cursor: pointer; font: inherit; }
+  .fc-form button:hover { background: #1a4a1a; }
+</style>
+
+<div class="fc-shell">
+  <div class="fc-head">
+    <h2>funnel-chat <span class="tag">— per-cell-chain CA-LLM</span></h2>
+    <div class="fc-intro">
+      Two pure-CA models — same per-cell-chain architecture, two granularities.
+      <b>byte</b>: 4 cells × 2 bits per output position.
+      <b>word</b>: K cells per output position decode to a vocab ID, then
+      string lookup.  Same trick at different scales; phrase layer queued next.
+    </div>
+  </div>
+
+  <div class="fc-controls">
+    <span>layer:</span>
+    <label><input type="radio" name="layer" value="byte" checked>
+      <span>byte</span></label>
+    <label><input type="radio" name="layer" value="word">
+      <span>word v1</span></label>
+    <label><input type="radio" name="layer" value="word2">
+      <span>word v2 (compositional)</span></label>
+    <label><input type="radio" name="layer" value="phrase">
+      <span>phrase (recursive)</span></label>
+    <label><input type="radio" name="layer" value="router" checked>
+      <span>router (4-way intent)</span></label>
+    <label><input type="radio" name="layer" value="all">
+      <span>all 5</span></label>
+    <span style="margin-left:12px; color:#5fc55f;">
+      ↻ DMN:
+      <button type="button" id="fc-dmn-btn"
+              style="background:#0a2a0a; color:#aaffaa;
+                     border:1px solid #2a6a2a; padding:1px 8px;
+                     cursor:pointer; font-family:inherit;
+                     font-size:0.72rem;">on</button>
+    </span>
+    <a href="{% url 'caformer:caformer_about' %}"
+       style="color:#79c0ff; text-decoration:none;
+              border:1px solid #1a4a6a; padding:2px 8px;
+              background:#050a0a; font-size:0.72rem;">
+      about
+    </a>
+    <a href="{% url 'caformer:caformer_cell8' %}"
+       style="color:#79c0ff; text-decoration:none;
+              border:1px solid #1a4a6a; padding:2px 8px;
+              background:#050a0a; font-size:0.72rem;">
+      cell8
+    </a>
+    <a href="{% url 'caformer:caformer_ruleset_zoo' %}"
+       style="color:#79c0ff; text-decoration:none;
+              border:1px solid #1a4a6a; padding:2px 8px;
+              background:#050a0a; font-size:0.72rem;">
+      ruleset zoo
+    </a>
+    <span style="color:#305030; margin-left:auto;">
+      tip: click a chip to fill, then Enter ·
+      <a href="/caformer/funnel-chat/cli/binary" download
+         style="color:#aaffaa; text-decoration:none;
+                border:1px solid #2a6a2a; padding:1px 6px;
+                background:#0a2a0a;">
+        ⬇ funnel-cli (this model)</a>
+      <a href="/caformer/funnel-chat/cli/source" download
+         style="color:#5fc55f; text-decoration:none;
+                padding:1px 6px;">
+        (.c)</a>
+      &nbsp;·&nbsp;
+      <a href="/caformer/funnel-chat/trainer/binary" download
+         style="color:#ffd070; text-decoration:none;
+                border:1px solid #6a5a18; padding:1px 6px;
+                background:#2a1a0a;">
+        ⬇ funnel-trainer (init+add+infer)</a>
+      <a href="/caformer/funnel-chat/trainer/source" download
+         style="color:#aa8050; text-decoration:none;
+                padding:1px 6px;">
+        (.c)</a>
+    </span>
+  </div>
+
+  <div class="fc-chips">
+    {% for p in trained_prompts %}
+      <span class="chip" data-q="{{ p }}">{{ p }}</span>
+    {% endfor %}
+  </div>
+
+  <div id="fc-log" class="fc-log">
+    <div class="fc-msg"><div class="role"><b>system</b></div>
+      <pre style="color:#305030;">funnel-chat ready · click a chip or type a prompt</pre>
+    </div>
+  </div>
+
+  <form class="fc-form" id="fc-form" autocomplete="off">
+    <span class="prompt">&gt;</span>
+    <input type="text" id="fc-q" name="q" placeholder="prompt" autofocus>
+    <button type="submit">send</button>
+  </form>
+</div>
+
+<script>
+(function(){
+  const log = document.getElementById('fc-log');
+  const form = document.getElementById('fc-form');
+  const inp = document.getElementById('fc-q');
+
+  function appendRouted(role, text, meta, cat, catName, colour, subLabel, metaReplies){
+    const m = document.createElement('div'); m.className = 'fc-msg';
+    const r = document.createElement('div'); r.className = 'role ca';
+    r.innerHTML = `<b style="color:#${colour};">CA·route ${cat} (${catName})</b>`
+                + '<span class="meta">' + meta + '</span>';
+    const pre = document.createElement('pre');
+    pre.style.borderLeft = `3px solid #${colour}`;
+    pre.style.color = `#${colour}`;
+    pre.textContent = text || '(empty)';
+    m.appendChild(r); m.appendChild(pre);
+    if (subLabel) {
+      const sl = document.createElement('div');
+      sl.className = 'wordids';
+      sl.textContent = '↳ ' + subLabel;
+      m.appendChild(sl);
+    }
+    if (cat === 3 && metaReplies) {
+      // Compact summary line of each spawned/strange-loop candidate.
+      for (const [name, info] of Object.entries(metaReplies)) {
+        const line = document.createElement('div');
+        line.className = 'wordids';
+        line.textContent = '  ' + name + ': '
+                          + JSON.stringify(info.text || '')
+                          + ' (' + info.n_words + 'w/' + info.unk + 'u)';
+        m.appendChild(line);
+      }
+    }
+    log.appendChild(m);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function appendWarning(text){
+    const m = document.createElement('div'); m.className = 'fc-msg';
+    const r = document.createElement('div');
+    r.className = 'role ca';
+    r.innerHTML = '<b style="color:#ff7f7f;">⚠ system</b>';
+    const pre = document.createElement('pre');
+    pre.style.color = '#ff9a4a';
+    pre.style.borderLeft = '3px solid #ff5500';
+    pre.textContent = text;
+    m.appendChild(r); m.appendChild(pre);
+    log.appendChild(m);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function append(role, text, meta, layer, ids){
+    const m = document.createElement('div'); m.className = 'fc-msg';
+    const r = document.createElement('div');
+    r.className = 'role ' + role + (layer === 'word' ? ' word' : '');
+    const tag = role === 'you' ? '>'
+              : (layer === 'word'   ? 'CA·word/v1'
+              :  layer === 'word2'  ? 'CA·word/v2'
+              :  layer === 'phrase' ? 'CA·phrase'
+              :  layer === 'router' ? 'CA·router'
+              :                        'CA·byte');
+    r.innerHTML = '<b>' + tag + '</b>'
+                + (meta ? '<span class="meta">' + meta + '</span>' : '');
+    const pre = document.createElement('pre');
+    if (layer === 'word') pre.classList.add('word');
+    if (meta && meta.indexOf('untrained') >= 0) pre.classList.add('untrained');
+    pre.textContent = text;
+    m.appendChild(r); m.appendChild(pre);
+    if (ids && ids.length) {
+      const idDiv = document.createElement('div');
+      idDiv.className = 'wordids';
+      idDiv.textContent = 'word_ids: [' + ids.join(', ') + ']';
+      m.appendChild(idDiv);
+    }
+    log.appendChild(m);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function callOne(q, layer){
+    const t0 = performance.now();
+    try {
+      const r = await fetch('/caformer/funnel-chat/reply/?q='
+                            + encodeURIComponent(q)
+                            + '&layer=' + layer);
+      const j = await r.json();
+      const ms = Math.round(performance.now() - t0);
+      if (j.error) {
+        append('ca', '⚠ ' + j.error, layer + ' ' + ms + 'ms', layer);
+      } else {
+        let tag;
+        if (layer === 'byte') {
+          tag = (j.trained ? `trained · ${j.n_positions}B · ${ms}ms`
+                            : `untrained · ${j.n_positions}B · ${ms}ms`);
+        } else if (layer === 'word2') {
+          tag = `${j.n_input_slots} input slots · ${j.n_positions} words out · `
+              + `vocab ${j.vocab_size} · ${ms}ms`
+              + (j.unk_count ? ' · ' + j.unk_count + '×UNK' : '');
+        } else if (layer === 'phrase') {
+          tag = `${j.n_input_slots} slots · ${j.n_positions} phrases · `
+              + `vocab ${j.vocab_size} · ${ms}ms`
+              + (j.unk_count ? ' · ' + j.unk_count + '×UNK' : '');
+        } else if (layer === 'router') {
+          tag = `→ ${j.category} (${j.category_name}) · ${ms}ms`;
+        } else {  // word v1
+          tag = `${j.n_positions} words · vocab ${j.vocab_size} · ${ms}ms`
+              + (j.unk_count ? ' · ' + j.unk_count + '×UNK' : '');
+        }
+        if (layer === 'router' && j.category_colour) {
+          appendRouted('ca', j.reply, tag, j.category, j.category_name,
+                          j.category_colour, j.sub_label,
+                          j.meta_replies);
+          if (j.external_warning) {
+            appendWarning(j.external_warning);
+          }
+          if (j.external_used) {
+            appendWarning('Reply above came from external LLM ('
+                + (j.external_provider || '?') + ' / '
+                + (j.external_model || '?') + '), not from the CA stack.');
+          }
+        } else {
+          append('ca', j.reply, tag, layer, j.word_ids || j.phrase_ids);
+        }
+      }
+    } catch (e) {
+      append('ca', '⚠ network error: ' + e, layer);
+    }
+  }
+
+  // ── Async chat: enqueue + poll ──────────────────────────────────
+  // Each submitted prompt becomes a queued turn server-side; we
+  // append a pending placeholder immediately so the textarea stays
+  // available, and the poller fills in the reply when it arrives.
+  // ────────────────────────────────────────────────────────────────
+  const _pending = new Map();   // turn_id → placeholder DOM element
+  let _pollTimer = null;
+
+  function _renderPlaceholder(q, turnId){
+    const m = document.createElement('div'); m.className = 'fc-msg';
+    m.dataset.turnId = turnId;
+    const r = document.createElement('div'); r.className = 'role ca';
+    r.innerHTML = '<b style="color:#5fc55f;">CA·route</b>'
+                + ' <span class="meta">queued · turn ' + turnId + '</span>';
+    const pre = document.createElement('pre');
+    pre.style.color = '#3a7a3a';
+    pre.style.borderLeft = '3px dashed #2a5a2a';
+    pre.textContent = '⋯';
+    m.appendChild(r); m.appendChild(pre);
+    log.appendChild(m);
+    log.scrollTop = log.scrollHeight;
+    return m;
+  }
+
+  function _renderTurn(turn){
+    const ph = _pending.get(turn.turn_id);
+    if (!ph) return;
+    ph.innerHTML = '';      // clear placeholder
+    if (turn.status === 'failed') {
+      const r = document.createElement('div'); r.className = 'role ca';
+      r.innerHTML = '<b style="color:#ff7f7f;">⚠ failed</b>';
+      const pre = document.createElement('pre');
+      pre.style.color = '#ff9a4a';
+      pre.style.borderLeft = '3px solid #ff5500';
+      pre.textContent = turn.error || '(unknown error)';
+      ph.appendChild(r); ph.appendChild(pre);
+      _pending.delete(turn.turn_id);
+      return;
+    }
+    // Render same shape as appendRouted() does for the router layer.
+    const colour = turn.category_colour || '7ee787';
+    const r = document.createElement('div'); r.className = 'role ca';
+    r.innerHTML = `<b style="color:#${colour};">CA·route ${turn.category}`
+                + ` (${turn.category_name})</b>`
+                + ' <span class="meta">turn ' + turn.turn_id + '</span>';
+    const pre = document.createElement('pre');
+    pre.style.borderLeft = `3px solid #${colour}`;
+    pre.style.color = `#${colour}`;
+    pre.textContent = turn.reply || '(empty)';
+    ph.appendChild(r); ph.appendChild(pre);
+    if (turn.sub_label) {
+      const sl = document.createElement('div');
+      sl.className = 'wordids';
+      sl.textContent = '↳ ' + turn.sub_label;
+      ph.appendChild(sl);
+    }
+    if (turn.external_warning) {
+      const w = document.createElement('div');
+      w.className = 'wordids';
+      w.style.color = '#ff9a4a';
+      w.textContent = '⚠ ' + turn.external_warning;
+      ph.appendChild(w);
+    }
+    _pending.delete(turn.turn_id);
+  }
+
+  async function _pollStatus(){
+    if (_pending.size === 0) {
+      clearInterval(_pollTimer); _pollTimer = null; return;
+    }
+    const ids = [..._pending.keys()].join(',');
+    try {
+      const r = await fetch('/caformer/funnel-chat/status/?turn_ids=' + ids);
+      const j = await r.json();
+      for (const t of (j.turns || [])) {
+        if (t.status === 'done' || t.status === 'failed') {
+          _renderTurn(t);
+        } else if (t.status === 'processing') {
+          const ph = _pending.get(t.turn_id);
+          if (ph) {
+            const meta = ph.querySelector('.meta');
+            if (meta) meta.textContent = 'processing · turn ' + t.turn_id;
+          }
+        }
+      }
+    } catch (e) {
+      // network blip — keep polling
+    }
+  }
+
+  async function send(q){
+    if (!q) return;
+    append('you', q);
+    const chosen = document.querySelector('input[name="layer"]:checked').value;
+    // Layers other than 'router' / 'all' still go through the
+    // synchronous path until the queue worker supports them too.
+    if (chosen !== 'router' && chosen !== 'all') {
+      await callOne(q, chosen);
+      return;
+    }
+    // Async path: enqueue + placeholder + poll.
+    const fd = new FormData();
+    fd.append('q', q);
+    fd.append('layer', chosen === 'all' ? 'router' : chosen);
+    try {
+      const r = await fetch('/caformer/funnel-chat/enqueue/',
+                              {method: 'POST', body: fd});
+      const j = await r.json();
+      if (j.error) {
+        append('ca', '⚠ ' + j.error, 'enqueue', 'router');
+        return;
+      }
+      const ph = _renderPlaceholder(q, j.turn_id);
+      _pending.set(j.turn_id, ph);
+      if (_pollTimer === null) {
+        _pollTimer = setInterval(_pollStatus, 400);
+      }
+    } catch (e) {
+      append('ca', '⚠ network error: ' + e, 'enqueue', 'router');
+    }
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const q = inp.value;
+    inp.value = '';
+    inp.focus();       // textarea stays ready for the next prompt
+    send(q);
+  });
+
+  // ── DMN live view ───────────────────────────────────────────────
+  // Poll /history/ for new role='internal' entries (the DMN's self-
+  // conversation) and render them inline in the transcript with
+  // distinct styling — italics, dim border, ↻ glyph — so the user
+  // can see the system thinking between their turns.
+  //
+  // Sticky-bottom logic: if the user was at the bottom of the log
+  // before any append, scroll to the new bottom afterwards.  If
+  // they've scrolled up to read history, don't yank them down.
+  // ────────────────────────────────────────────────────────────────
+  let _lastInternalTs = 0;
+
+  function _wasAtBottom(){
+    // ~10px slack for sub-pixel scroll noise.
+    return (log.scrollTop + log.clientHeight + 10) >= log.scrollHeight;
+  }
+
+  function _stickyAppend(node){
+    const stickToBottom = _wasAtBottom();
+    log.appendChild(node);
+    if (stickToBottom) {
+      log.scrollTop = log.scrollHeight;
+    }
+  }
+
+  function _renderInternal(entry){
+    const m = document.createElement('div'); m.className = 'fc-msg dmn';
+    const colour = (entry.meta && entry.meta.category_colour)
+                      || '5fc55f';
+    const catName = (entry.meta && entry.meta.category_name) || '?';
+    const echoOf = (entry.meta && entry.meta.echo_of) || '';
+    const r = document.createElement('div'); r.className = 'role ca';
+    r.innerHTML = `<b style="color:#${colour}; opacity:0.75;">↻ DMN (${catName})</b>`
+                + ` <span class="meta" style="opacity:0.6;">echo of "${echoOf}"</span>`;
+    const pre = document.createElement('pre');
+    pre.style.borderLeft = `2px dotted #${colour}`;
+    pre.style.color = `#${colour}`;
+    pre.style.opacity = '0.7';
+    pre.style.fontStyle = 'italic';
+    pre.textContent = entry.text || '(empty)';
+    m.appendChild(r); m.appendChild(pre);
+    if (entry.meta && entry.meta.sub_label) {
+      const sl = document.createElement('div');
+      sl.className = 'wordids';
+      sl.style.opacity = '0.5';
+      sl.style.fontStyle = 'italic';
+      sl.textContent = '↳ ' + entry.meta.sub_label;
+      m.appendChild(sl);
+    }
+    _stickyAppend(m);
+  }
+
+  async function _pollDMN(){
+    try {
+      const r = await fetch('/caformer/funnel-chat/history/');
+      const j = await r.json();
+      // Render any internal entries we haven't seen yet.
+      const fresh = (j.entries || []).filter(
+        e => e.role === 'internal' && e.ts > _lastInternalTs);
+      if (fresh.length) {
+        for (const e of fresh) _renderInternal(e);
+        _lastInternalTs = fresh[fresh.length - 1].ts;
+      }
+    } catch (e) {
+      // ignore transient errors
+    }
+  }
+  // Initialize _lastInternalTs to "now" so we don't backfill old
+  // internal entries on page load (they'd dump in a chunk and be
+  // confusing).  From here forward, only NEW ones render live.
+  _lastInternalTs = Date.now() / 1000;
+  setInterval(_pollDMN, 1500);     // every 1.5s — fast enough to feel live
+
+  // DMN toggle button.
+  const dmnBtn = document.getElementById('fc-dmn-btn');
+  let _dmnOn = true;
+  async function _updateDMN(){
+    try {
+      const r = await fetch('/caformer/funnel-chat/dmn/');
+      const j = await r.json();
+      _dmnOn = !!j.dmn_enabled;
+      dmnBtn.textContent = _dmnOn ? 'on' : 'off';
+      dmnBtn.style.background = _dmnOn ? '#0a2a0a' : '#2a0a0a';
+      dmnBtn.style.color      = _dmnOn ? '#aaffaa' : '#ffaaaa';
+      dmnBtn.style.borderColor = _dmnOn ? '#2a6a2a' : '#6a2a2a';
+    } catch (e) {}
+  }
+  dmnBtn.addEventListener('click', async () => {
+    try {
+      await fetch('/caformer/funnel-chat/dmn/?on='
+                    + (_dmnOn ? '0' : '1'));
+      await _updateDMN();
+    } catch (e) {}
+  });
+  _updateDMN();
+
+  document.querySelectorAll('.fc-chips .chip').forEach((c) => {
+    c.addEventListener('click', () => {
+      inp.value = c.dataset.q;
+      inp.focus();
+    });
+  });
+})();
+</script>
+{% endblock %}

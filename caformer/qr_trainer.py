@@ -34,8 +34,26 @@ import numpy as np
 
 from .ga import (FULL_STACK_NAMES, GAConfig, _evolve, make_qr_fitness,
                   polish_genome)
-from .primitives import random_rule_table
+from .primitives import random_rule_table, compute_fire_mask
 from .transformer import ca_forward_qkv
+
+
+def _embed_context_for_fire_mask(ctx_bytes, side: int = 8) -> np.ndarray:
+    """Reproduce the embedding shape ca_forward_qkv uses for its
+    output head: pack ctx bytes into a side×side K=4 board, 4 base-4
+    digits per byte, top-left layout.  This board is then used to
+    compute which LUT entries the output rule queries — i.e. the
+    fire mask for GA mutation."""
+    n_cells = side * side
+    cap_bytes = n_cells // 4
+    raw = bytes(ctx_bytes)[:cap_bytes]
+    out = np.zeros(n_cells, dtype=np.uint8)
+    for i, b in enumerate(raw):
+        out[i * 4 + 0] = (b >> 6) & 3
+        out[i * 4 + 1] = (b >> 4) & 3
+        out[i * 4 + 2] = (b >> 2) & 3
+        out[i * 4 + 3] =  b       & 3
+    return out.reshape(side, side)
 
 
 # ── Defaults tuned for the "hi → hello" class of target ──────────────
@@ -188,12 +206,24 @@ def train_pair_positional(pair_id: int, *,
 
         template = {'output': random_rule_table(
             cfg.out_seed ^ (pos * 7919))}
+        # Fire-mask: which 16,384 LUT entries actually fire when this
+        # template runs on this position's context.  The base genome
+        # is frozen during per-position training, so the mask is
+        # stable across the GA — compute once before the phase, reuse
+        # for every mutation + polish step.
+        # We embed the context into an 8×8 K=4 board (matches the
+        # embed used inside ca_forward_qkv) so the mask covers the
+        # entries the output rule will actually query.
+        sample_board = _embed_context_for_fire_mask(ctx)
+        fmask = compute_fire_mask(template['output'], sample_board,
+                                     n_ticks=1)
         ga_cfg = GAConfig(
             pop_size=cfg.pop_size, generations=cfg.gens_per_phase,
             tournament_k=3, elite_n=2,
             mutation_rate=cfg.mutation_rate,
             seed=cfg.out_seed + pos * 4099,
-            parallel_workers=1)
+            parallel_workers=1,
+            fire_mask=fmask)
         phase_t = time.time()
         fire('phase_begin', {
             'pair_id': pair_id, 'pos': pos, 'target_byte': tb,
@@ -205,7 +235,8 @@ def train_pair_positional(pair_id: int, *,
         # rule.  Often flips the argmax that GA almost reached.
         polished, fit2, n_imp = polish_genome(
             r.best_genome, _f, trials=cfg.polish_trials,
-            seed=cfg.out_seed ^ 0xCAFE ^ (pos * 31))
+            seed=cfg.out_seed ^ 0xCAFE ^ (pos * 31),
+            fire_mask=fmask)
         out_rule = polished['output']
         out_rules.append(out_rule)
 

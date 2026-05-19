@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}cell8 · 8-cell-input hex CA · caformer{% endblock %}
+{% block content %}
+<style>
+  .c8 { max-width: 80ch; margin: 1rem auto; padding: 0 1rem;
+        color: #cfe5cf; font-family: ui-sans-serif, system-ui,
+              -apple-system, sans-serif; line-height: 1.55; }
+  .c8 h1, .c8 h2 { color: #aaffaa; letter-spacing: 0.02em; }
+  .c8 h1 { font-size: 1.4rem; border-bottom: 1px solid #2a6a2a;
+           padding-bottom: 4px; }
+  .c8 h2 { font-size: 1rem; margin-top: 2rem;
+           border-bottom: 1px solid #1a3a1a; padding-bottom: 2px; }
+  .c8 a  { color: #79c0ff; }
+  .c8 code { color: #f0ff80; background: #0a1a0a; padding: 1px 4px;
+             border-radius: 2px; font-family: ui-monospace, monospace; }
+  .c8 pre { background: #050a05; color: #aaffaa;
+            border-left: 3px solid #2a6a2a; padding: 8px 12px;
+            overflow-x: auto; font-size: 0.85rem;
+            font-family: ui-monospace, monospace; }
+  .grid { display: inline-grid; gap: 1px;
+          font-family: monospace; font-size: 0.85rem; }
+  .grid .c { width: 14px; height: 14px; display: inline-block;
+             text-align: center; line-height: 14px; color: #050a05; }
+  .c0 { background: #0a1a0a; color: #1a3a1a; }
+  .c1 { background: #7ee787; }
+  .c2 { background: #79c0ff; }
+  .c3 { background: #ff7ec7; }
+  .panels { display: grid; grid-template-columns: repeat(3, auto);
+            gap: 18px; align-items: start; margin: 12px 0; }
+  .panels h3 { font-size: 0.85rem; margin: 0 0 4px 0;
+               color: #aaffaa; }
+  .panels .label { font-size: 0.7rem; color: #5fc55f;
+                   opacity: 0.7; margin-bottom: 4px; }
+  .verdict { padding: 10px 14px; margin: 16px 0;
+             font-weight: bold; font-size: 1.05rem; }
+  .ok      { background: #0a2a0a; color: #7ee787;
+             border-left: 4px solid #7ee787; }
+  .meh     { background: #2a1a0a; color: #ffd070;
+             border-left: 4px solid #ffd070; }
+  .nav-back a { color: #7ee787; text-decoration: none;
+                border: 1px solid #2a6a2a; padding: 3px 10px;
+                background: #050a05; font-size: 0.85rem; }
+  .stats-row { display: flex; gap: 16px; flex-wrap: wrap;
+               margin: 10px 0; }
+  .stats-row .stat { background: #050a05; border: 1px solid #1a3a1a;
+                     padding: 6px 12px; }
+  .stats-row .v { color: #aaffaa; font-weight: bold; font-size: 1.1rem; }
+  .stats-row .l { color: #5fc55f; font-size: 0.7rem;
+                  text-transform: uppercase; }
+</style>
+
+<div class="c8">
+  <div class="nav-back">
+    <a href="{% url 'caformer:caformer_about' %}">← about</a>
+    &nbsp; <a href="{% url 'caformer:funnel_chat' %}">← chat</a>
+  </div>
+
+  <h1>cell8 · 8-cell-input hex CA primitive</h1>
+
+  <p>The default caformer CAs read 7 cells (self + 6 hex neighbours)
+     and produce 1 output cell — LUT size 4<sup>7</sup> = 16,384
+     entries. The <b>cell8</b> primitive adds an eighth input cell:
+     an <b>external input port</b> that any signal can be wired into.
+     LUT size becomes 4<sup>8</sup> = 65,536 entries.</p>
+
+  <div class="stats-row">
+    <div class="stat">
+      <div class="v">{{ lut_size_8 }}</div>
+      <div class="l">LUT entries</div>
+    </div>
+    <div class="stat">
+      <div class="v">{{ packed_bytes_8 }} B</div>
+      <div class="l">packed LUT (2 bits/entry)</div>
+    </div>
+    <div class="stat">
+      <div class="v">{{ board_side_8 }}×{{ board_side_8 }}</div>
+      <div class="l">natural Ouroboros board</div>
+    </div>
+    <div class="stat">
+      <div class="v">4×</div>
+      <div class="l">larger than 7→1 unpacked</div>
+    </div>
+  </div>
+
+  <h2>What the input port is for</h2>
+  <p>The input port carries one K=4 value per cell per tick, sourced
+     from outside the local hex neighbourhood. Use cases:</p>
+  <ul>
+    <li><b>Chain composition:</b> wire rule B's input port to rule A's
+        output cell. Rule B's behaviour now depends on what rule A
+        emitted — first-class cross-chain signalling without
+        neighbourhood propagation.</li>
+    <li><b>Global modulation:</b> broadcast a single bit (mood, DMN
+        heartbeat phase, sensor reading) across every cell's input
+        port. Same rule, different macro behaviour per signal.</li>
+    <li><b>Attention primitives:</b> a "query" cell selects which of
+        K source cells flows in.  This is the CA-native sibling of
+        the transformer's gated attention.</li>
+  </ul>
+
+  <h2>Live smoke test: does the input port actually carry signal?</h2>
+
+  <p>Three CAs run for {{ smoke.n_ticks }} ticks on an
+     {{ smoke.side }}×{{ smoke.side }} board seeded with a single
+     live cell at the centre.  Same rule for paths B-zero and
+     B-wired; only the input port source differs.</p>
+
+  <div class="panels">
+    <div>
+      <h3>A · 7→1 baseline</h3>
+      <div class="label">A standard hex CA run; provides the source
+        for path B-wired's input port.</div>
+      <div class="grid" style="grid-template-columns: repeat({{ smoke.side }}, 14px);">
+      {% for row in smoke.final_a %}{% for c in row %}<span class="c c{{c}}">{{c}}</span>{% endfor %}{% endfor %}
+      </div>
+    </div>
+    <div>
+      <h3>B · port=0 (baseline)</h3>
+      <div class="label">8→1 rule, input port broadcast at colour 0.
+        Behaves like a 7→1 rule because the port carries no info.</div>
+      <div class="grid" style="grid-template-columns: repeat({{ smoke.side }}, 14px);">
+      {% for row in smoke.final_b_zero %}{% for c in row %}<span class="c c{{c}}">{{c}}</span>{% endfor %}{% endfor %}
+      </div>
+    </div>
+    <div>
+      <h3>B · port wired to A</h3>
+      <div class="label">Same 8→1 rule, but input port reads cell-for-
+        cell from A's evolving state.  Should differ substantially
+        from baseline if the port is doing real work.</div>
+      <div class="grid" style="grid-template-columns: repeat({{ smoke.side }}, 14px);">
+      {% for row in smoke.final_b_wired %}{% for c in row %}<span class="c c{{c}}">{{c}}</span>{% endfor %}{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  {% if smoke.input_port_works %}
+    <div class="verdict ok">
+      ✓ Input port carries signal — {{ smoke.cells_differing }} of
+      {{ smoke.cells_total }} cells differ between port=0 and
+      port-wired-to-A ({{ smoke.diff_fraction|floatformat:2 }} of
+      the board changed).  The port is doing real work, not just
+      sitting unused in the rule's LUT.
+    </div>
+  {% else %}
+    <div class="verdict meh">
+      ⚠ Input port produces only minor differences this run
+      ({{ smoke.cells_differing }} of {{ smoke.cells_total }} cells
+      changed). Could be that this particular random rule barely
+      reads the port; re-run or pick a different seed.
+    </div>
+  {% endif %}
+
+  <h2>How the LUT key is laid out</h2>
+  <p>Bit packing (high → low, 2 bits per cell, K=4):</p>
+  <pre>
+key  = input_port[14..15] | self[12..13]   | nw[10..11]   | ne[8..9]
+       | r[6..7]            | se[4..5]      | sw[2..3]     | l[0..1]
+
+Total: 16 bits → 65,536 distinct keys → 65,536 LUT entries.
+Each entry: 2 bits = the next-tick colour for the centre cell.
+  </pre>
+
+  <p>When input_port is held at 0 across all cells, the high 2 bits
+     of the key never vary.  The rule then effectively uses only
+     1/4 of its LUT (the entries with key &gt;&gt; 14 == 0),
+     reducing to 16,384 active entries — exactly equivalent to a
+     7→1 rule.  Adding signal on the input port unlocks the other
+     three quadrants.</p>
+
+  <h2>What's next</h2>
+  <ul>
+    <li>Wire the DMN heartbeat into the input port of one of the
+        chat dispatch's chains — verify the model's mood literally
+        affects its byte-level output.</li>
+    <li>Train a 256×256 Ouroboros pool via hexhunter-style GA
+        targeting the new natural quine scale.</li>
+    <li>Wire output of a small (2→1) chain into the input port of a
+        large (8→1) chain as a categorical gate — first concrete
+        cross-scale composition.</li>
+  </ul>
+
+  <div class="nav-back" style="margin-top: 2rem;">
+    <a href="{% url 'caformer:caformer_about' %}">← about</a>
+    &nbsp; <a href="{% url 'caformer:caformer_ruleset_zoo' %}">ruleset zoo →</a>
+  </div>
+</div>
+{% endblock %}

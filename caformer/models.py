@@ -337,6 +337,17 @@ class QRPair(models.Model):
     # this field is empty (legacy single-rule pairs).
     positional_output_blob = models.BinaryField(null=True, blank=True)
 
+    # board128 positional storage: N per-position 16,384-byte rules,
+    # one per byte of the expected response.  Validated 2026-05-18:
+    # combines 128×128 board bandwidth (full 4096-char prompt fits)
+    # with per-position decomposition (each rule = single-byte target,
+    # tractable in 10-50s).  When non-empty, dispatch prefers these
+    # over positional_output_blob.  Tick count is fixed at 128 to
+    # match board dimensions.
+    board128_rules_blob = models.BinaryField(null=True, blank=True)
+    board128_exact      = models.BooleanField(default=False)
+    board128_ticks      = models.PositiveSmallIntegerField(default=128)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -375,6 +386,24 @@ class QRPair(models.Model):
             return None
         import numpy as np
         blob = bytes(self.positional_output_blob)
+        n = len(blob) // 16_384
+        return [np.frombuffer(blob[i * 16_384:(i + 1) * 16_384],
+                                  dtype=np.uint8).copy()
+                for i in range(n)]
+
+    def is_board128(self):
+        """True when this pair has board128 per-position rules
+        trained.  Dispatch prefers board128 over legacy positional."""
+        blob = self.board128_rules_blob
+        return bool(blob) and len(bytes(blob)) >= 16_384
+
+    def board128_rules(self):
+        """Yield the N board128 per-position rules.  None if not in
+        board128 mode."""
+        if not self.is_board128():
+            return None
+        import numpy as np
+        blob = bytes(self.board128_rules_blob)
         n = len(blob) // 16_384
         return [np.frombuffer(blob[i * 16_384:(i + 1) * 16_384],
                                   dtype=np.uint8).copy()

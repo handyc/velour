@@ -73,10 +73,17 @@ def random_rule_table(seed: int) -> np.ndarray:
 # Same indexing scheme as spoeqi.keystream._step and the workspace
 # app2_caview.c, so byte-streams stay cross-component compatible.
 
-def hex_ca_step(state: np.ndarray, rule_table: np.ndarray) -> np.ndarray:
+def hex_ca_step(state: np.ndarray, rule_table: np.ndarray,
+                *, return_keys: bool = False):
     """One generation.  `state` is a (H, W) uint8 array of 0..3 colours;
     `rule_table` is the 16,384-entry table.  Returns a new array of
-    the same shape with toroidal boundary conditions."""
+    the same shape with toroidal boundary conditions.
+
+    When ``return_keys=True``, also returns the per-cell key array
+    (shape == state.shape, dtype uint16) so callers can derive a
+    "fire mask" — the set of LUT entries actually queried during this
+    step.  Used by fire-mask-restricted GA mutation to mutate only
+    entries that affect the rule's behaviour on the training input."""
     if state.dtype != np.uint8:
         state = state.astype(np.uint8)
     H, W = state.shape
@@ -109,7 +116,46 @@ def hex_ca_step(state: np.ndarray, rule_table: np.ndarray) -> np.ndarray:
             | (n_sw.astype(np.uint16) << 2)
             | n_l.astype(np.uint16))
     out = rule_table[key]
+    if return_keys:
+        return out.astype(np.uint8), key
     return out.astype(np.uint8)
+
+
+def compute_fire_mask(rule_table: np.ndarray, sample_state: np.ndarray,
+                       *, n_ticks: int = 1) -> np.ndarray:
+    """Run ``rule_table`` on ``sample_state`` for ``n_ticks`` ticks and
+    return a boolean array of length 16384 marking which LUT entries
+    were queried.  These are the ONLY entries that affect the rule's
+    behaviour on this input — at 128×128 with K=4, typically just a
+    few percent of the 16384 entries actually fire, so mutating only
+    these turns an intractable search into a tractable one.
+
+    Cheap: one full CA evaluation + numpy bincount on the keys.
+    Re-run periodically (or once per phase if the rule is frozen
+    during search) as the rule evolves and its fire-pattern shifts."""
+    mask = np.zeros(16384, dtype=bool)
+    s = sample_state.astype(np.uint8)
+    for _ in range(max(1, int(n_ticks))):
+        _, keys = hex_ca_step(s, rule_table, return_keys=True)
+        flat_keys = keys.ravel().astype(np.int64)
+        # Mark every queried index.  np.put with mode='clip' is faster
+        # than a Python loop for large grids.
+        mask[flat_keys] = True
+        s = _ if False else hex_ca_step(s, rule_table)  # advance
+    return mask
+
+
+def fire_mask_union(rule_table: np.ndarray,
+                      sample_states: list, *,
+                      n_ticks: int = 1) -> np.ndarray:
+    """Compute the fire mask over a *set* of sample inputs and return
+    the union — i.e. an entry is in the mask if ANY of the sample
+    inputs queries it.  Useful when the GA training set has multiple
+    inputs and we want a mask that covers all of them."""
+    mask = np.zeros(16384, dtype=bool)
+    for s in sample_states:
+        mask |= compute_fire_mask(rule_table, s, n_ticks=n_ticks)
+    return mask
 
 
 # ─── ca_softmax_sample — softmax + multinomial via CA-derived noise ──

@@ -165,7 +165,7 @@ class Command(BaseCommand):
                 token_origins[tb], ctx_list, tb, nb_first,
                 base, block_tmpls[nb_first],
                 chain_depth=depth, ticks_per_level=ticks,
-                chain_mode='ca_evolution', argmax_bonus=0.0,
+                chain_mode='ca_evolution', argmax_bonus=5.0,
                 mu=max(2, pop // 3), lam=pop, generations=gens,
                 mutation_min=mut_min, mutation_max=mut_max,
                 smart_mutation=not no_smart_mutation,
