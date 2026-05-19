@@ -69,6 +69,46 @@
   </table>
 
   <div class="ws-section">
+    <h2>Packed rulesets (K=4, 4 cells/byte)</h2>
+    <p style="color:#aaa; font-size:0.82rem; max-width:48em; margin:4px 0 8px;">
+      Population of <b>64 component rules</b> as packed K=4 streams.
+      Each component LUT is 16,384 raw cells × 2 bits = <b>4,096 bytes
+      packed</b>; the full set is <b>256 KiB</b> (≈ 0.26 MB).  The pack
+      format puts four cells per byte so every output bit varies —
+      drop-in for keystream, compression dictionaries, or seeding
+      another CA run.
+    </p>
+    <div style="margin: 6px 0 10px;">
+      <a href="{% url 'spoeqi:workspace_packed_all' slug=pact.slug %}"
+         style="color:#cfa; font-family:ui-monospace,monospace; font-size:0.85rem;">
+        ⬇ all64.k4pack
+      </a>
+      <span style="color:#666; font-size:0.78rem;">  (256 KiB, components concatenated 0..63)</span>
+      &nbsp;·&nbsp;
+      <a href="{% url 'spoeqi:workspace_packed_tar' slug=pact.slug %}"
+         style="color:#cfa; font-family:ui-monospace,monospace; font-size:0.85rem;">
+        ⬇ all64.tar
+      </a>
+      <span style="color:#666; font-size:0.78rem;">  (same payload, one file per component)</span>
+    </div>
+    <details style="margin-top: 6px;">
+      <summary style="color:#888; font-size:0.8rem; cursor: pointer;">
+        Individual components (64 × 4 KiB)
+      </summary>
+      <div style="font-family: ui-monospace, monospace; font-size: 0.78rem;
+                  line-height: 1.5; margin-top: 6px; column-count: 4;
+                  column-gap: 14px;">
+        {% for c in component_indices %}
+          <a href="{% url 'spoeqi:workspace_packed_component' slug=pact.slug component=c %}"
+             style="color:#ace; display: block; text-decoration: none;">
+            c{{ c }}.k4pack
+          </a>
+        {% endfor %}
+      </div>
+    </details>
+  </div>
+
+  <div class="ws-section">
     <h2>Share token (for curl / cross-machine download)</h2>
     <p style="color:#aaa; font-size:0.82rem; max-width:46em; margin:4px 0;">
       Anyone with this pact's <code>slug</code> + <code>token</code> can

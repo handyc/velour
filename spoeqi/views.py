@@ -1573,6 +1573,7 @@ def workspace_index(request, slug):
         'pact':  pact,
         'apps':  WORKSPACE_APPS,
         'ticks': [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144],
+        'component_indices': list(range(COMPONENTS)),
         # Fully-qualified base URL so the curl recipe works from any
         # machine — request.get_host() includes the port when present.
         'scheme_host': f'{request.scheme}://{request.get_host()}',
@@ -1614,6 +1615,93 @@ def workspace_app_elf_token(request, slug, token, app, tick):
     if not hmac.compare_digest(token, pact.workspace_share_token):
         raise Http404('bad share token')
     return _serve_workspace_elf(pact, app, tick)
+
+
+# ─── Packed-ruleset downloads (per-component K=4 LUTs) ──────────────
+#
+# A pact's per-component rules are 64 × 16,384 bytes raw = 1 MiB total.
+# Packed at 4 cells/byte (K=4 = 2 bits each) the same payload is
+# 64 × 4,096 bytes = 256 KiB.  Per-component download + a single
+# concatenated bundle so a researcher can grab the whole population in
+# one shot.  See feedback_k4_stream_pack_default — raw 1B/cell wastes
+# 75 % per byte; the packed form is what researchers actually want.
+
+COMPONENT_LUT_BYTES = 16384   # 4^7 K=4 LUT entries, raw
+COMPONENT_PACKED_BYTES = 4096  # K=4 packed, 4 cells/byte
+
+
+def _packed_component_rules(pact):
+    """Returns 64 × 4096 = 262,144 bytes (256 KiB) — packed K=4 LUTs
+    in component order 0..63."""
+    from .metachain import pack_k4_stream
+    raw = pact.per_component_rules()  # 64 × 16,384 = 1 MiB
+    if len(raw) != COMPONENTS * COMPONENT_LUT_BYTES:
+        raise ValueError(
+            f'pact {pact.slug}: per_component_rules returned '
+            f'{len(raw)} B, expected {COMPONENTS * COMPONENT_LUT_BYTES}')
+    out = bytearray()
+    for c in range(COMPONENTS):
+        s = c * COMPONENT_LUT_BYTES
+        out.extend(pack_k4_stream(raw[s:s + COMPONENT_LUT_BYTES]))
+    return bytes(out)
+
+
+@login_required
+def workspace_packed_component(request, slug, component):
+    """Per-component packed K=4 LUT — 4,096 bytes.  component in 0..63."""
+    pact = get_object_or_404(Pact, slug=slug)
+    if not (0 <= component < COMPONENTS):
+        raise Http404(f'component must be 0..{COMPONENTS - 1}')
+    packed = _packed_component_rules(pact)
+    s = component * COMPONENT_PACKED_BYTES
+    blob = packed[s:s + COMPONENT_PACKED_BYTES]
+    resp = HttpResponse(blob, content_type='application/octet-stream')
+    resp['Content-Disposition'] = (
+        f'attachment; filename="{pact.slug}-rule-c{component:02d}.k4pack"')
+    resp['Content-Length'] = str(len(blob))
+    resp['Cache-Control'] = 'public, max-age=31536000, immutable'
+    return resp
+
+
+@login_required
+def workspace_packed_all(request, slug):
+    """All 64 components concatenated, packed — 256 KiB total."""
+    pact = get_object_or_404(Pact, slug=slug)
+    blob = _packed_component_rules(pact)
+    resp = HttpResponse(blob, content_type='application/octet-stream')
+    resp['Content-Disposition'] = (
+        f'attachment; filename="{pact.slug}-rules-all64.k4pack"')
+    resp['Content-Length'] = str(len(blob))
+    resp['Cache-Control'] = 'public, max-age=31536000, immutable'
+    return resp
+
+
+@login_required
+def workspace_packed_tar(request, slug):
+    """All 64 components as a tar archive of individual .k4pack files.
+    Same total bytes as workspace_packed_all but each component lives in
+    its own file inside the archive (~262 KB tarred)."""
+    import io
+    import tarfile
+    pact = get_object_or_404(Pact, slug=slug)
+    packed = _packed_component_rules(pact)
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode='w') as tar:
+        for c in range(COMPONENTS):
+            blob = packed[c * COMPONENT_PACKED_BYTES:
+                              (c + 1) * COMPONENT_PACKED_BYTES]
+            info = tarfile.TarInfo(name=f'{pact.slug}-rule-c{c:02d}.k4pack')
+            info.size = len(blob)
+            info.mode = 0o644
+            tar.addfile(info, io.BytesIO(blob))
+    blob_out = buf.getvalue()
+    resp = HttpResponse(blob_out, content_type='application/x-tar')
+    resp['Content-Disposition'] = (
+        f'attachment; filename="{pact.slug}-rules-all64.tar"')
+    resp['Content-Length'] = str(len(blob_out))
+    resp['Cache-Control'] = 'public, max-age=31536000, immutable'
+    return resp
 
 
 # ─── Metapact views ──────────────────────────────────────────────────
