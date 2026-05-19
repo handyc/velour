@@ -80,6 +80,81 @@ def from_caformer(model_slug: str, *, role: str = 'embed',
             f'caformer · {model_slug} · rule_{role}')
 
 
+def from_mandelhunt(ref: str = 'best', *,
+                       seed_init: int = 0xCAFE,
+                       pool_dir: str = None) -> Tuple[bytes, int, str]:
+    """Use a 16,384-byte K=4 hex CA rule LUT from a mandelhunt pool
+    as the CA rule.  These are posterised Mandelbrot regions that
+    passed the class-4 + sr_strict filter — visually rich and dense
+    in computational structure (see project_caformer_session_2026_05_19
+    for the visual-archetype analysis).
+
+    `ref` can be:
+      'best'                  — pick the highest-sr (filename-parsed) LUT
+      'random'                — pick a random LUT from the pool
+      '<filename>'            — exact .lut filename within the pool
+      '<full/path/to.lut>'    — direct path (overrides pool_dir)
+
+    `pool_dir` defaults to .artifacts/loupe_rules/.  Other useful pools:
+      .artifacts/mandelhunt_pool/     (from `mandelhunt -o ...`)
+      .artifacts/true_l0_quines/      (extracted strict-L0 quines)
+      .artifacts/strict_class4_quines/ (extracted class-4 quines)
+      .artifacts/mandelbrot_climb/    (hill-climbed candidates)
+    """
+    import re
+    from pathlib import Path
+    from django.conf import settings
+    base = Path(settings.BASE_DIR)
+    # Direct path takes precedence — handy for ad-hoc imports.
+    if ref.endswith('.lut') and ('/' in ref or '\\' in ref):
+        p = Path(ref) if Path(ref).is_absolute() else (base / ref)
+        if not p.exists():
+            raise SourceUnavailable(f'mandelhunt LUT not found: {p}')
+        return _load_mandelhunt_lut(p, seed_init)
+    # Pool-based lookup.
+    pool = Path(pool_dir) if pool_dir else (base / '.artifacts' / 'loupe_rules')
+    if not pool.is_absolute():
+        pool = base / pool
+    if not pool.is_dir():
+        raise SourceUnavailable(
+            f'mandelhunt pool dir not found: {pool}.  '
+            f'Run `./isolation/artifacts/mandelhunt/mandelhunt -h 0.05 '
+            f'-o .artifacts/mandelhunt_pool` to populate one.')
+    luts = sorted(pool.glob('*.lut'))
+    if not luts:
+        raise SourceUnavailable(f'no .lut files in pool {pool}')
+    sr_re = re.compile(r'sr(\d+\.\d+)')
+    if ref == 'best':
+        scored = [(float(sr_re.search(p.name).group(1)) if sr_re.search(p.name)
+                     else 0.0, p) for p in luts]
+        scored.sort(key=lambda x: -x[0])
+        picked = scored[0][1]
+    elif ref == 'random':
+        import random
+        rng = random.Random(seed_init)
+        picked = rng.choice(luts)
+    else:
+        cand = pool / ref
+        if not cand.exists():
+            raise SourceUnavailable(
+                f'.lut {ref!r} not in pool {pool.name}.  '
+                f'Available: {[p.name for p in luts[:5]]}{"..." if len(luts) > 5 else ""}')
+        picked = cand
+    return _load_mandelhunt_lut(picked, seed_init,
+                                    pool_label=pool.name)
+
+
+def _load_mandelhunt_lut(path, seed_init: int,
+                              pool_label: str = '') -> Tuple[bytes, int, str]:
+    blob = path.read_bytes()
+    if len(blob) != 16_384:
+        raise SourceUnavailable(
+            f'{path.name} is {len(blob)} B (need 16,384 for hex K=4)')
+    label = (f'mandelhunt · {pool_label}/{path.name}'
+                if pool_label else f'mandelhunt · {path.name}')
+    return (blob, int(seed_init) & 0xFFFFFFFF, label)
+
+
 def from_loupe_walk(walk_slug: str, *,
                       seed_init: int = 0xCAFE) -> Tuple[bytes, int, str]:
     """A loupe Mandelbrot walk's final image hashed into an init seed;

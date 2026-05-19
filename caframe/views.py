@@ -254,6 +254,11 @@ def import_source(request):
         elif source == 'spoeqi':   rule, init, label = src.from_spoeqi(ref, seed_init=seed)
         elif source == 'metapact': rule, init, label = src.from_metapact(ref, seed_init=seed)
         elif source == 'escher':   rule, init, label = src.from_escher(ref, seed_init=seed)
+        elif source == 'mandelhunt':
+            pool = (request.POST.get('pool_dir') or '').strip() or None
+            rule, init, label = src.from_mandelhunt(ref or 'best',
+                                                          seed_init=seed,
+                                                          pool_dir=pool)
         else: return JsonResponse({'ok': False, 'error': f'unknown source {source!r}'})
     except src.SourceUnavailable as e:
         return JsonResponse({'ok': False, 'error': str(e)})
