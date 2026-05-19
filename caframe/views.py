@@ -259,11 +259,28 @@ def import_source(request):
             rule, init, label = src.from_mandelhunt(ref or 'best',
                                                           seed_init=seed,
                                                           pool_dir=pool)
+        elif source == 'fractal':
+            # ref selects which fractal ('mandelbrot', 'julia', …, or
+            # 'random' to pick one).  Empty → 'random'.
+            ws_raw = (request.POST.get('walk_seed') or '').strip()
+            ws = int(ws_raw, 0) if ws_raw else None
+            rule, init, label = src.from_fractal(ref or 'random',
+                                                       seed_init=seed,
+                                                       walk_seed=ws)
         else: return JsonResponse({'ok': False, 'error': f'unknown source {source!r}'})
     except src.SourceUnavailable as e:
         return JsonResponse({'ok': False, 'error': str(e)})
-    slug = (request.POST.get('slug') or
-              f'from-{source}-{ref or "auto"}-{init:08x}')[:80]
+    # For fractal source, derive a slug that includes the picked
+    # fractal name + walk_seed (parsed from the label, which always
+    # says "fractal · <name> · walk_seed=0x…").  Each "random fractal"
+    # click then yields a *new* Sequence instead of overwriting one row.
+    slug_default = f'from-{source}-{ref or "auto"}-{init:08x}'
+    if source == 'fractal':
+        import re as _re
+        m = _re.search(r'fractal · (\w+) · walk_seed=0x([0-9a-f]+)', label or '')
+        if m:
+            slug_default = f'fractal-{m.group(1)}-{m.group(2)}'
+    slug = (request.POST.get('slug') or slug_default)[:80]
     name = (request.POST.get('name') or f'{label} (init {init:x})')[:120]
     seq, _ = Sequence.objects.update_or_create(
         slug=slug, defaults={

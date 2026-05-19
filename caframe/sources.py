@@ -144,6 +144,50 @@ def from_mandelhunt(ref: str = 'best', *,
                                     pool_label=pool.name)
 
 
+FRACTAL_MODES = ('mandelbrot', 'julia', 'burning_ship', 'tricorn',
+                     'multibrot', 'newton', 'phoenix')
+
+
+def from_fractal(mode: str = 'random', *,
+                     seed_init: int = 0xCAFE,
+                     walk_seed: int = None) -> Tuple[bytes, int, str]:
+    """Generate a fresh fractal-derived LUT on the fly (no pool needed).
+
+    `mode` is one of FRACTAL_MODES, or 'random' to pick one at random.
+    `walk_seed` controls which patch of fractal-space we visit; defaults
+    to `seed_init` if not given.  The same (mode, walk_seed) always
+    yields the same LUT.
+    """
+    import numpy as np
+    from caformer import lut_generators as lg
+    GENS = {
+        'mandelbrot':   lg.gen_mandelbrot,
+        'julia':        lg.gen_julia,
+        'burning_ship': lg.gen_burning_ship,
+        'tricorn':      lg.gen_tricorn,
+        'multibrot':    lg.gen_multibrot,
+        'newton':       lg.gen_newton,
+        'phoenix':      lg.gen_phoenix,
+    }
+    ws = walk_seed if walk_seed is not None else seed_init
+    rng = np.random.RandomState(ws & 0xFFFFFFFF)
+    picked = mode
+    if mode == 'random' or not mode:
+        names = list(GENS.keys())
+        picked = names[rng.randint(0, len(names))]
+    if picked not in GENS:
+        raise SourceUnavailable(
+            f'unknown fractal mode {picked!r}; pick from '
+            f'{list(GENS.keys()) + ["random"]}')
+    lut = GENS[picked](rng)
+    blob = bytes(np.asarray(lut, dtype=np.uint8).ravel())
+    if len(blob) != 16_384:
+        raise SourceUnavailable(
+            f'{picked} generator returned {len(blob)} B (expected 16384)')
+    label = f'fractal · {picked} · walk_seed=0x{ws & 0xFFFFFFFF:08x}'
+    return (blob, int(seed_init) & 0xFFFFFFFF, label)
+
+
 def _load_mandelhunt_lut(path, seed_init: int,
                               pool_label: str = '') -> Tuple[bytes, int, str]:
     blob = path.read_bytes()

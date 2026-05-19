@@ -129,24 +129,37 @@
     </p>
     <form id="cf-import-form" class="cf-form" onsubmit="return false;">
       <label>source
-        <select name="source">
-          <option value="taxon">taxon (class-4)</option>
-          <option value="caformer">caformer (TrainedModel)</option>
-          <option value="loupe">loupe (Mandelbrot walk)</option>
-          <option value="spoeqi">spoeqi (Pact component)</option>
-          <option value="escher">escher (Motif)</option>
-          <option value="mandelhunt">mandelhunt (fractal-derived LUT)</option>
+        <select name="source" id="cf-import-source">
+          <option value="taxon"           data-ref="class-4">taxon (class-4)</option>
+          <option value="caformer"        data-ref="">caformer (TrainedModel)</option>
+          <option value="loupe"           data-ref="">loupe (Mandelbrot walk)</option>
+          <option value="spoeqi"          data-ref="">spoeqi (Pact component)</option>
+          <option value="escher"          data-ref="">escher (Motif)</option>
+          <option value="mandelhunt"      data-ref="best">mandelhunt (pool .lut)</option>
+          <option value="fractal"         data-ref="random" selected>🎲 fractal · random walk</option>
+          <option value="fractal"         data-ref="mandelbrot">fractal · mandelbrot</option>
+          <option value="fractal"         data-ref="julia">fractal · julia</option>
+          <option value="fractal"         data-ref="burning_ship">fractal · burning_ship</option>
+          <option value="fractal"         data-ref="tricorn">fractal · tricorn</option>
+          <option value="fractal"         data-ref="multibrot">fractal · multibrot</option>
+          <option value="fractal"         data-ref="newton">fractal · newton</option>
+          <option value="fractal"         data-ref="phoenix">fractal · phoenix</option>
         </select>
       </label>
       <label>source slug / ref
-        <input type="text" name="source_ref"
-               placeholder="(mandelhunt: 'best', 'random', or filename)" style="width:18em;">
+        <input type="text" name="source_ref" id="cf-import-ref"
+               placeholder="auto from source ↑" style="width:14em;">
       </label>
       <label>seed_init <input type="number" name="seed_init" value="51966"></label>
       <label>w        <input type="number" name="w"  value="48"></label>
       <label>h        <input type="number" name="h"  value="48"></label>
       <label>frames   <input type="number" name="n_frames" value="40"></label>
       <button type="button" id="cf-import-go">⤓ import as Sequence</button>
+      <button type="button" id="cf-import-random"
+              style="background:#221a3a; border-color:#5a3a8a; color:#cca5ff;"
+              title="Pick a random fractal + random walk seed and import">
+        🎲 random fractal
+      </button>
       <span id="cf-import-msg" style="color:#888; font-size:0.78rem;
                                         align-self:center;"></span>
     </form>
@@ -255,11 +268,29 @@
   // ── Cross-app import ─────────────────────────────────────────
   const importForm = document.getElementById('cf-import-form');
   const importMsg  = document.getElementById('cf-import-msg');
-  document.getElementById('cf-import-go').addEventListener('click', async () => {
+  const importSrc  = document.getElementById('cf-import-source');
+  const importRef  = document.getElementById('cf-import-ref');
+
+  // When the source <option> changes, auto-fill the ref field with
+  // that option's data-ref default.  Empty input means "use the
+  // option's default", so we re-fill on each change rather than only
+  // when the field is blank.
+  function syncRefDefault() {
+    const opt = importSrc.options[importSrc.selectedIndex];
+    importRef.value = opt.dataset.ref || '';
+    importRef.placeholder = (opt.dataset.ref
+      ? `default: ${opt.dataset.ref}` : 'auto from source ↑');
+  }
+  importSrc.addEventListener('change', syncRefDefault);
+  syncRefDefault();   // initial fill so the default-selected option works
+
+  async function doImport(extraFields) {
     const fd = new FormData();
     Array.from(importForm.querySelectorAll('input,select')).forEach(el => {
       if (el.name) fd.append(el.name, el.value);
     });
+    if (extraFields) for (const [k,v] of Object.entries(extraFields))
+      fd.set(k, v);
     const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
     importMsg.textContent = 'importing…';
     try {
@@ -277,6 +308,14 @@
     } catch (err) {
       importMsg.textContent = `import failed: ${err.message}`;
     }
+  }
+  document.getElementById('cf-import-go').addEventListener('click', () => doImport());
+  document.getElementById('cf-import-random').addEventListener('click', () => {
+    // Force source=fractal + ref=random + a fresh walk_seed so each
+    // click yields a different movie even if the dropdown is set to
+    // something else.
+    const ws = (Math.floor(Math.random() * 0xFFFFFFFE) + 1) >>> 0;
+    doImport({source: 'fractal', source_ref: 'random', walk_seed: ws});
   });
 })();
 </script>
