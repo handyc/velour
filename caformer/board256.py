@@ -532,6 +532,208 @@ def train_position_board256_modulated(
             'phase': 'matched' if all(matches) else 'budget_out'}
 
 
+# ── Pool-as-context: paint a class-4 LUT into the board init state ─
+#
+# The board256 layout has lots of unused cells: prompts in the corpus
+# are 2-30 bytes (8-120 cells), leaving ~32K cells in the prompt
+# region as zero padding.  Rather than waste them, we paint a class-4
+# LUT (e.g. a mandelhunt-derived rule) into those cells as part of
+# the initial state.  The cell8 rule trains to produce its target
+# byte *regardless* of which class-4 LUT was painted — i.e. it learns
+# to be context-invariant.  At inference time, swapping the painted
+# context changes the intermediate CA dynamics (visually) without
+# changing the output byte.  This is the substrate for Phase 3
+# (where the context selects different output bytes).
+#
+# Context region: cells [CONTEXT_OFFSET .. CONTEXT_OFFSET+CONTEXT_LEN)
+# = cells 8192..24575 (16,384 cells = exactly one 7→1 LUT or one
+# quarter of a cell8 LUT).  Sits between the prompt (which fills the
+# first few hundred cells) and the response region (which starts at
+# RESPONSE_CELLS_START_256 = 32,768).  No collision with prompt or
+# response for any corpus pair (longest prompt is ~30 bytes = 120
+# cells).
+
+CONTEXT_OFFSET_256 = 8192     # cells 8192..24575 = context region
+CONTEXT_LEN_256    = 16384    # exactly one 16K LUT
+
+
+def paint_context_into_state(state: np.ndarray, context_bytes: bytes,
+                                   offset: int = CONTEXT_OFFSET_256,
+                                   length: int = CONTEXT_LEN_256) -> np.ndarray:
+    """Overlay `context_bytes` (must be >= length bytes) into the
+    flat-cell range [offset .. offset+length).  Each byte's lower
+    2 bits becomes the cell value (K=4).  Non-destructive — returns
+    a new array."""
+    if len(context_bytes) < length:
+        raise ValueError(
+            f'context_bytes must have >= {length} bytes; got {len(context_bytes)}')
+    arr = np.asarray(state, dtype=np.uint8).copy()
+    flat = arr.ravel()
+    ctx = np.frombuffer(context_bytes[:length], dtype=np.uint8) & 3
+    flat[offset:offset + length] = ctx
+    return arr.reshape(state.shape)
+
+
+def train_position_b256_pool_context(
+        prompt: str, target_byte: int, position: int, *,
+        context_pool,                  # list of bytes objects, each >=16384 B
+        n_ticks: int = DEFAULT_N_TICKS_256,
+        max_seconds: float = 300.0,
+        pop_size: int = 8,
+        generations_per_burst: int = 8,
+        mutation_rate: float = 0.005,
+        seed: int = 0xC02E7E47,
+        seed_rule=None,
+        port_value: int = 0,
+        on_event=None) -> dict:
+    """Train one cell8 rule to produce `target_byte` at `position`
+    INVARIANT TO which member of `context_pool` is painted into the
+    board's context region.
+
+    Fitness averages cell-match across all pool members; byte-match
+    requires ALL pool members to produce the target byte.  Cost
+    scales with len(context_pool).  Typical K=2..4 keeps wall time
+    sane.
+
+    `context_pool` is a list of >=16,384-byte blobs (mandelhunt LUTs,
+    julia LUTs, etc. — anything class-4-ish).  Pool is fixed across
+    training; new pool members can be tested at inference time."""
+    import random
+    import time
+
+    fire = on_event or (lambda *_a, **_kw: None)
+    rng = random.Random(seed)
+    t0 = time.time()
+    inp = broadcast_input(BOARD_SIDE_256, port_value)
+    K = len(context_pool)
+    if K == 0:
+        raise ValueError('context_pool must not be empty')
+    target_cells = [(target_byte >> (6 - 2 * i)) & 3 for i in range(4)]
+    base_offset = RESPONSE_CELLS_START_256 + position * 4
+
+    def _run_with_context(rule, ctx_idx):
+        state = embed_prompt_256(prompt)
+        state = paint_context_into_state(state, context_pool[ctx_idx])
+        for _ in range(n_ticks):
+            state = hex_ca_step_cell8(state, inp, rule)
+        return state
+
+    def _fitness(rule):
+        total_cell_match = 0.0
+        bonus = 0.0
+        for k in range(K):
+            st = _run_with_context(rule, k)
+            flat = st.ravel()
+            cm = sum(1 for i in range(4)
+                          if (int(flat[base_offset + i]) & 3) == target_cells[i])
+            total_cell_match += cm / 4.0
+            byte = ((int(flat[base_offset + 0]) & 3) << 6) \
+                 | ((int(flat[base_offset + 1]) & 3) << 4) \
+                 | ((int(flat[base_offset + 2]) & 3) << 2) \
+                 |  (int(flat[base_offset + 3]) & 3)
+            if byte == target_byte:
+                bonus += 1.0
+        return total_cell_match + bonus
+
+    def _byte_match_all(rule):
+        for k in range(K):
+            st = _run_with_context(rule, k)
+            flat = st.ravel()
+            byte = ((int(flat[base_offset + 0]) & 3) << 6) \
+                 | ((int(flat[base_offset + 1]) & 3) << 4) \
+                 | ((int(flat[base_offset + 2]) & 3) << 2) \
+                 |  (int(flat[base_offset + 3]) & 3)
+            if byte != target_byte:
+                return False, k
+        return True, -1
+
+    # Initial population.
+    pop = []
+    seed_arr = None
+    if seed_rule is not None:
+        sr_len = len(seed_rule)
+        if sr_len == 16_384:
+            seed_arr = upcast_7to1_to_cell8(seed_rule)
+        elif sr_len == LUT_SIZE_8:
+            seed_arr = (np.frombuffer(seed_rule, dtype=np.uint8).copy()
+                          if isinstance(seed_rule, (bytes, bytearray, memoryview))
+                          else np.asarray(seed_rule, dtype=np.uint8).copy()) & 3
+        else:
+            raise ValueError(
+                f'seed_rule must be 16,384 or {LUT_SIZE_8} bytes; got {sr_len}')
+    for i in range(pop_size):
+        if seed_arr is not None and i < (pop_size + 1) // 2:
+            r = seed_arr.copy()
+            if i > 0:
+                jit_rng = random.Random(seed ^ (i * 31337))
+                for _ in range(max(1, int(0.001 * LUT_SIZE_8))):
+                    idx = jit_rng.randrange(LUT_SIZE_8)
+                    cur = int(r[idx])
+                    new = jit_rng.randint(0, 3)
+                    while new == cur: new = jit_rng.randint(0, 3)
+                    r[idx] = new
+        else:
+            r = random_rule_table_8(seed ^ (i * 7919))
+        pop.append((r, _fitness(r)))
+    pop.sort(key=lambda rf: -rf[1])
+    best_rule, best_fit = pop[0]
+    matched, miss_ctx = _byte_match_all(best_rule)
+    fire('init', {'best_fit': best_fit, 'matched': matched,
+                    'miss_ctx': miss_ctx, 'K': K,
+                    'elapsed_s': time.time() - t0})
+    if matched:
+        return {'rule_table': best_rule, 'byte_match_all': True,
+                'K': K, 'wall': time.time() - t0, 'phase': 'init'}
+
+    burst = 0
+    while time.time() - t0 < max_seconds and not matched:
+        burst += 1
+        for _gen in range(generations_per_burst):
+            if time.time() - t0 >= max_seconds:
+                break
+            parent = pop[rng.randrange(max(1, len(pop) // 2))][0]
+            child = parent.copy()
+            n_flips = max(1, int(mutation_rate * LUT_SIZE_8))
+            for _ in range(n_flips):
+                idx = rng.randrange(LUT_SIZE_8)
+                cur = int(child[idx])
+                new = rng.randint(0, 3)
+                while new == cur: new = rng.randint(0, 3)
+                child[idx] = new
+            cf = _fitness(child)
+            worst_idx = min(range(len(pop)), key=lambda i: pop[i][1])
+            if cf > pop[worst_idx][1]:
+                pop[worst_idx] = (child, cf)
+                if cf > best_fit:
+                    best_rule, best_fit = child, cf
+                    matched, miss_ctx = _byte_match_all(best_rule)
+                    fire('improved', {'burst': burst, 'best_fit': cf,
+                                          'matched': matched,
+                                          'miss_ctx': miss_ctx,
+                                          'elapsed_s': time.time() - t0})
+                    if matched:
+                        break
+
+    return {'rule_table': best_rule, 'byte_match_all': matched,
+            'K': K, 'wall': time.time() - t0,
+            'phase': 'matched' if matched else 'budget_out'}
+
+
+def forward_byte_with_context(prompt: str, rule: np.ndarray,
+                                     context_bytes: bytes, position: int, *,
+                                     n_ticks: int = DEFAULT_N_TICKS_256,
+                                     port_value: int = 0) -> int:
+    """Inference helper: run cell8 `rule` on a board seeded with
+    `prompt` + `context_bytes` painted; return the byte decoded at
+    `position`.  Use to confirm context-invariance at inference."""
+    inp = broadcast_input(BOARD_SIDE_256, port_value)
+    state = embed_prompt_256(prompt)
+    state = paint_context_into_state(state, context_bytes)
+    for _ in range(n_ticks):
+        state = hex_ca_step_cell8(state, inp, rule)
+    return decode_byte_at_position_256(state, position)
+
+
 def forward_pair_board256_positional(prompt: str, rules,
                                             n_bytes: int, *,
                                             n_ticks: int = DEFAULT_N_TICKS_256,
