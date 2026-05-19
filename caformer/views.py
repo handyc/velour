@@ -17,6 +17,57 @@ from django.views.decorators.http import require_GET
 from . import components as cmp
 
 
+# ── Inference-time multi-response pool sampling ────────────────────
+#
+# When the corpus has K > 1 trained QRPairs sharing the same prompt
+# (e.g. "hi" has 4 variants: hello / hey / HEY! / hi), the default
+# dispatch picks the first one deterministically.  Pool sampling
+# instead selects among the K candidates at chat time, so the same
+# prompt produces different responses across queries.
+#
+# Sampling sources (`?sample=`):
+#   first   — current default; takes qs.first() (no variation)
+#   pool    — random.choice across all matches (urandom source)
+#   time    — index = int(time.time()) % K  (varies once per second)
+#   rotate  — counter shared across this process (varies per call)
+#   port    — read from a query param ?port=N, indexes pool member N
+#             (mod K).  Wires into the same cell8 port mechanism we
+#             use for conditional output.
+#
+# The selected pair's pk + how many siblings it had are surfaced
+# back to the caller in pool_pk / pool_size so the UI can show
+# "picked pair pk=7 (1 of 4 candidates)".
+_POOL_ROTATE_COUNTER = [0]   # mutable singleton, per-process
+
+def _pool_pick(qs, sample_mode: str = 'first', *,
+                port_value: int = 0,
+                rng_seed: int = None):
+    """Pick one row from a QuerySet, honouring the requested sampling
+    mode.  Returns (selected_or_None, list_of_all_candidates_pks)."""
+    import random
+    import time
+    candidates = list(qs)
+    if not candidates:
+        return None, []
+    if len(candidates) == 1 or sample_mode in ('first', '', None):
+        return candidates[0], [p.pk for p in candidates]
+    if sample_mode == 'pool':
+        r = random.Random(rng_seed) if rng_seed is not None else random
+        return r.choice(candidates), [p.pk for p in candidates]
+    if sample_mode == 'time':
+        idx = int(time.time()) % len(candidates)
+        return candidates[idx], [p.pk for p in candidates]
+    if sample_mode == 'rotate':
+        _POOL_ROTATE_COUNTER[0] += 1
+        idx = _POOL_ROTATE_COUNTER[0] % len(candidates)
+        return candidates[idx], [p.pk for p in candidates]
+    if sample_mode == 'port':
+        idx = int(port_value) % len(candidates)
+        return candidates[idx], [p.pk for p in candidates]
+    # Unknown mode — fall back to first.
+    return candidates[0], [p.pk for p in candidates]
+
+
 @login_required
 def index(request):
     return render(request, 'caformer/index.html', {
@@ -2821,9 +2872,12 @@ def funnel_chat_reply(request):
         #   (3) legacy 8×8 positional rules (works for short pairs)
         #   (4) fall through to word_binder_v2 sub-funnel
         from .models import QRPair
-        b128_pair = (QRPair.objects
-                       .filter(board128_exact=True, prompt=q)
-                       .first())
+        # Multi-response pool sampling.  See _pool_pick docstring.
+        sample_mode = (request.GET.get('sample') or 'first').strip().lower()
+        port_value  = int(request.GET.get('port') or 0) & 0xFFFF
+        b128_pair, b128_pool_pks = _pool_pick(
+            QRPair.objects.filter(board128_exact=True, prompt=q),
+            sample_mode, port_value=port_value)
         tier_pref = (request.GET.get('tier') or '').strip().lower()
         if b128_pair is not None and tier_pref == 'auto':
             from .tier_dispatch import best_exact_tier, inference_at_tier
@@ -2858,6 +2912,9 @@ def funnel_chat_reply(request):
                     'qrpair_expected':  b128_pair.expected,
                     'tier_used':        side,
                     'tier_wall_ms':     r['wall'] * 1000.0,
+                    'pool_pks':         b128_pool_pks,
+                    'pool_size':        len(b128_pool_pks),
+                    'sample_mode':      sample_mode,
                 })
 
         if b128_pair is not None and b128_pair.is_board128():
@@ -2891,12 +2948,15 @@ def funnel_chat_reply(request):
                 'loop_trace':       [],
                 'qrpair_id':        b128_pair.pk,
                 'qrpair_expected':  b128_pair.expected,
+                'pool_pks':         b128_pool_pks,
+                'pool_size':        len(b128_pool_pks),
+                'sample_mode':      sample_mode,
             })
 
-        exact_pair = (QRPair.objects
-                        .filter(best_exact=True, prompt=q)
-                        .exclude(deployed_slug='')
-                        .first())
+        exact_pair, exact_pool_pks = _pool_pick(
+            QRPair.objects.filter(best_exact=True, prompt=q)
+                              .exclude(deployed_slug=''),
+            sample_mode, port_value=port_value)
         if exact_pair is not None and exact_pair.is_positional():
             text, ids = _run_one_pair_inline(
                 q, exact_pair.deployed_slug, int(exact_pair.n_blocks or 1),
