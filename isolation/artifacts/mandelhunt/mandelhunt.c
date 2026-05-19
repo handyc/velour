@@ -36,6 +36,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <signal.h>
+#include <dirent.h>
 
 #define SIDE        128                   /* 128x128 K=4 board */
 #define BOARD_CELLS (SIDE * SIDE)         /* 16384 = one LUT */
@@ -154,6 +155,25 @@ static void hex_step(const uint8_t *state, const uint8_t *rule,
             out[r * SIDE + c] = rule[key];
         }
     }
+}
+
+/* L0 fixed-point check: run the rule on its own LUT-as-image for a
+ * SINGLE tick and count how many cells didn't change.  Returns the
+ * match count (0..BOARD_CELLS).  When the match count == BOARD_CELLS
+ * the rule is a strict L0 fixed-point quine — its LUT-as-image is a
+ * fixed point of one CA step, so it's also a fixed point at every
+ * deeper depth (it's the strictest possible ouroboros condition).
+ *
+ * 16× cheaper than self_reproduce_score with its default 16 ticks, so
+ * cheap enough to use as a positive-confirmation pre-filter on every
+ * accepted candidate. */
+static int l0_fixed_point_match(const uint8_t *rule) {
+    static uint8_t buf[BOARD_CELLS];
+    hex_step(rule, rule, buf);
+    int match = 0;
+    for (int i = 0; i < BOARD_CELLS; i++)
+        if (buf[i] == rule[i]) match++;
+    return match;
 }
 
 /* Self-reproduction score: run the rule on its own LUT-as-image for
@@ -281,6 +301,7 @@ static void usage(const char *prog) {
     fprintf(stderr,
         "usage: %s [-h hours] [-o out_dir] [-s min_sr] [-c min_c4]\n"
         "          [-w walk_steps] [-r report_every] [-S rng_seed] [-d]\n"
+        "          [-L] [-C dir]\n"
         "  -h hours      wall-clock budget       (default 1.0)\n"
         "  -o out_dir    where to write LUTs     (default ./mh_pool)\n"
         "  -s min_sr     min SR strict to save   (default 0.4)\n"
@@ -288,8 +309,79 @@ static void usage(const char *prog) {
         "  -w walk_steps frames per random walk  (default 24)\n"
         "  -r every      report stats every N    (default 500)\n"
         "  -S seed       RNG seed                (default = time)\n"
-        "  -d            dry-run (no files written)\n",
+        "  -d            dry-run (no files written)\n"
+        "  -L            run L0 fixed-point check on accepted candidates;\n"
+        "                strict-quine hits are copied to <out_dir>/ouroboros/\n"
+        "                with a _L0 tag.  Adds tiny per-candidate overhead.\n"
+        "  -C dir        SCAN MODE: don't generate; just L0-check every .lut\n"
+        "                in <dir>, report counts.  All other flags ignored.\n",
         prog);
+}
+
+/* ── L0 directory scan mode (-C) ────────────────────────────────────── */
+
+static int scan_directory_for_l0(const char *dir) {
+    DIR *d = opendir(dir);
+    if (!d) {
+        fprintf(stderr, "cannot open dir %s\n", dir);
+        return 1;
+    }
+    fprintf(stderr, "scanning %s for L0 fixed-point quines...\n", dir);
+
+    long n_files = 0;
+    long n_strict = 0;          /* match == BOARD_CELLS */
+    long n_near   = 0;          /* match >= 16128 (≥ 98.4 %) */
+    long sum_match = 0;
+    int  best_match = -1;
+    char best_name[512] = {0};
+    static uint8_t lut[BOARD_CELLS];
+
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        const char *name = de->d_name;
+        size_t len = strlen(name);
+        if (len < 4 || strcmp(name + len - 4, ".lut") != 0) continue;
+
+        char path[1024];
+        snprintf(path, sizeof path, "%s/%s", dir, name);
+        FILE *fp = fopen(path, "rb");
+        if (!fp) continue;
+        size_t got = fread(lut, 1, BOARD_CELLS, fp);
+        fclose(fp);
+        if (got != BOARD_CELLS) {
+            fprintf(stderr, "  skip %s: %zu bytes (expected %d)\n",
+                    name, got, BOARD_CELLS);
+            continue;
+        }
+
+        int m = l0_fixed_point_match(lut);
+        n_files++;
+        sum_match += m;
+        if (m == BOARD_CELLS) {
+            n_strict++;
+            printf("  STRICT L0 ✓  %s  (%d/%d)\n", name, m, BOARD_CELLS);
+        }
+        if (m >= 16128) n_near++;
+        if (m > best_match) {
+            best_match = m;
+            snprintf(best_name, sizeof best_name, "%s", name);
+        }
+    }
+    closedir(d);
+
+    printf("\n=== L0 scan done ===\n");
+    printf("  scanned:        %ld .lut files\n", n_files);
+    printf("  strict L0 (match==16384):  %ld\n", n_strict);
+    printf("  near-strict   (>=98.4%%):  %ld\n", n_near);
+    if (n_files > 0) {
+        printf("  mean match:                %.1f / %d  (%.2f%%)\n",
+               (double)sum_match / n_files, BOARD_CELLS,
+               100.0 * sum_match / n_files / BOARD_CELLS);
+        printf("  best match:                %d / %d  (%.4f%%)  %s\n",
+               best_match, BOARD_CELLS,
+               100.0 * best_match / BOARD_CELLS, best_name);
+    }
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -300,10 +392,12 @@ int main(int argc, char **argv) {
     int walk_steps = 24;
     int report_every = 500;
     int dry_run = 0;
+    int l0_check = 0;
+    const char *scan_dir = NULL;
     rng_state = (uint64_t)time(NULL);
 
     int opt;
-    while ((opt = getopt(argc, argv, "h:o:s:c:w:r:S:d")) != -1) {
+    while ((opt = getopt(argc, argv, "h:o:s:c:w:r:S:dLC:")) != -1) {
         switch (opt) {
             case 'h': hours = atof(optarg); break;
             case 'o': out_dir = optarg; break;
@@ -313,10 +407,22 @@ int main(int argc, char **argv) {
             case 'r': report_every = atoi(optarg); break;
             case 'S': rng_state = (uint64_t)atoll(optarg); break;
             case 'd': dry_run = 1; break;
+            case 'L': l0_check = 1; break;
+            case 'C': scan_dir = optarg; break;
             default:  usage(argv[0]); return 1;
         }
     }
-    if (!dry_run) mkdir(out_dir, 0755);
+    /* Scan mode (-C) short-circuits everything else. */
+    if (scan_dir) return scan_directory_for_l0(scan_dir);
+
+    if (!dry_run) {
+        mkdir(out_dir, 0755);
+        if (l0_check) {
+            char path[1024];
+            snprintf(path, sizeof path, "%s/ouroboros", out_dir);
+            mkdir(path, 0755);
+        }
+    }
     signal(SIGTERM, on_signal);
     signal(SIGINT,  on_signal);
 
@@ -331,6 +437,9 @@ int main(int argc, char **argv) {
     long n_scanned = 0;
     long n_class4  = 0;
     long n_saved   = 0;
+    long n_l0_strict = 0;       /* match == BOARD_CELLS (when -L) */
+    long n_l0_near   = 0;       /* match >= 16128 = 98.4 % */
+    int  best_l0_match = -1;    /* tracks best per-run L0 score */
     double best_combined = -1.0;
     Coord best_coord = {0};
     double best_sr = 0.0, best_c4 = 0.0;
@@ -372,6 +481,14 @@ int main(int argc, char **argv) {
                 best_coord = cur;
                 best_sr = sr; best_c4 = c4;
             }
+            /* Optional L0 fixed-point check. */
+            int l0_match = -1;
+            if (l0_check) {
+                l0_match = l0_fixed_point_match(lut);
+                if (l0_match > best_l0_match) best_l0_match = l0_match;
+                if (l0_match == BOARD_CELLS) n_l0_strict++;
+                if (l0_match >= 16128) n_l0_near++;
+            }
             if (!dry_run) {
                 char path[512];
                 snprintf(path, sizeof path,
@@ -385,6 +502,20 @@ int main(int argc, char **argv) {
                 fprintf(stderr,
                     "  + saved %s  cx=%+.6f cy=%+.6f span=%.4g\n",
                     path, cur.cx, cur.cy, cur.span);
+                /* If L0-strict, also copy to ouroboros/ with L0 tag. */
+                if (l0_check && l0_match == BOARD_CELLS) {
+                    char opath[512];
+                    snprintf(opath, sizeof opath,
+                        "%s/ouroboros/mh_n%06ld_sr%.3f_c4%.3f_L0.lut",
+                        out_dir, n_saved, sr, c4);
+                    FILE *op = fopen(opath, "wb");
+                    if (op) {
+                        fwrite(lut, 1, BOARD_CELLS, op);
+                        fclose(op);
+                    }
+                    fprintf(stderr,
+                        "  ★ STRICT L0 quine → %s\n", opath);
+                }
             }
         }
 
@@ -408,6 +539,9 @@ int main(int argc, char **argv) {
                         "  \"n_scanned\":       %ld,\n"
                         "  \"n_class4\":        %ld,\n"
                         "  \"n_saved\":         %ld,\n"
+                        "  \"n_l0_strict\":     %ld,\n"
+                        "  \"n_l0_near\":       %ld,\n"
+                        "  \"best_l0_match\":   %d,\n"
                         "  \"rate_per_sec\":    %.1f,\n"
                         "  \"best_combined\":   %.4f,\n"
                         "  \"best_sr\":         %.4f,\n"
@@ -416,7 +550,8 @@ int main(int argc, char **argv) {
                         "  \"best_cy\":         %.10f,\n"
                         "  \"best_span\":       %.6g\n"
                         "}\n",
-                        elapsed, n_scanned, n_class4, n_saved, rate,
+                        elapsed, n_scanned, n_class4, n_saved,
+                        n_l0_strict, n_l0_near, best_l0_match, rate,
                         best_combined, best_sr, best_c4,
                         best_coord.cx, best_coord.cy, best_coord.span);
                     fclose(fp);
@@ -442,6 +577,14 @@ int main(int argc, char **argv) {
            best_combined, best_sr, best_c4);
     printf("  best coord:     cx=%+.10f cy=%+.10f span=%.6g\n",
            best_coord.cx, best_coord.cy, best_coord.span);
+    if (l0_check) {
+        printf("  L0 strict:      %ld (true ouroboros, sr_1tick = 1.0)\n",
+               n_l0_strict);
+        printf("  L0 near (≥98.4%%): %ld\n", n_l0_near);
+        printf("  best L0 match:  %d / %d (%.4f%%)\n",
+               best_l0_match, BOARD_CELLS,
+               100.0 * (best_l0_match > 0 ? best_l0_match : 0) / BOARD_CELLS);
+    }
     printf("  wall:           %.0fs\n", total);
     printf("  output dir:     %s\n", out_dir);
     return 0;
