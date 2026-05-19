@@ -70,6 +70,40 @@ def upcast_7to1_to_cell8(lut_7to1) -> np.ndarray:
     return np.tile(arr & 3, 4)        # 65,536 bytes
 
 
+def compose_cell8_from_quarters(quarters) -> np.ndarray:
+    """Build a cell8 LUT by stacking 4 separate 7→1 LUTs, one per
+    port value.  Port=K (K∈{0,1,2,3}) selects which 7→1 LUT fires
+    at inference time.
+
+    Each quarter is 16,384 bytes.  Result is 65,536 bytes.
+
+    This is the generalisation of upcast_7to1_to_cell8 (which uses
+    the SAME 7→1 LUT for all 4 quarters → port-agnostic):
+      - compose_cell8_from_quarters([R, R, R, R]) == upcast_7to1_to_cell8(R)
+      - compose_cell8_from_quarters([Rh, Ry, Rw, Rmh]) =
+            "personality MoE": port=0 → 'hello', port=1 → 'hey',
+            port=2 → 'wat?', port=3 → mandelhunt creative.
+
+    No training needed — just bolts 4 already-trained 7→1 rules
+    into one cell8 LUT.  Port at chat-time picks the personality.
+    Zero compute cost vs upcast.
+    """
+    if len(quarters) != 4:
+        raise ValueError(f'need exactly 4 quarters (one per K=4 port value); '
+                            f'got {len(quarters)}')
+    arrs = []
+    for i, q in enumerate(quarters):
+        if isinstance(q, (bytes, bytearray, memoryview)):
+            a = np.frombuffer(q, dtype=np.uint8).copy() & 3
+        else:
+            a = np.asarray(q, dtype=np.uint8).copy() & 3
+        if a.size != 16_384:
+            raise ValueError(
+                f'quarter {i} has {a.size} bytes (need 16384)')
+        arrs.append(a)
+    return np.concatenate(arrs)         # 65,536 bytes
+
+
 def is_port_agnostic(cell8_lut: np.ndarray) -> bool:
     """True iff the 4 port quarters of an 8→1 LUT are byte-identical
     — i.e. the rule's output never depends on the port value.  These
