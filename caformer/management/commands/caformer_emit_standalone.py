@@ -281,6 +281,11 @@ def _build_html(blob_b64: str, n_pairs: int) -> str:
         '    <input id="inp" type="text" placeholder="trained prompt (try \'hi\', \'hey\', \'bye\')" />\n'
         '    <button type="submit">run</button>\n'
         '  </form>\n'
+        '  <div class="controls">\n'
+        '    <label title="When ON, untrained prompts still run through some trained pair\'s rules so you can SEE the meaningless output — proves the CA is doing real computation, not lookup">\n'
+        '      <input type="checkbox" id="showUntrained" /> show output for untrained prompts (run through a random trained pair\'s rules)\n'
+        '    </label>\n'
+        '  </div>\n'
         '  <div id="status" class="status"></div>\n'
         '</div>\n'
         '<details class="trained">\n'
@@ -304,10 +309,13 @@ def _build_html(blob_b64: str, n_pairs: int) -> str:
         '   embed the prompt into a tile grid, run the CA forward `ticks`\n'
         '   times per response byte, and decode the output cells.\n'
         '\n'
-        '4. Try a NON-trained prompt: the response is meaningless because\n'
-        '   we only ship rules for trained pairs.  This proves the CA is\n'
-        '   doing the lookup, not pattern-matching strings to canned\n'
-        '   replies.\n'
+        '4. Try a NON-trained prompt: by default you get a "no rules"\n'
+        '   message.  Tick "show output for untrained prompts" to BORROW\n'
+        '   the rules from a random trained pair and run them on your\n'
+        '   prompt.  The output will be garbage bytes (often unprintable\n'
+        '   — rendered as hex).  This is the most direct proof the CA\n'
+        '   is computing, not memorising: same rule table, different\n'
+        '   input prompt → completely different (and meaningless) output.\n'
         '\n'
         'View source to inspect the entire pipeline.  The JavaScript is\n'
         'small enough to fit in your head.\n'
@@ -347,6 +355,10 @@ h1 { color: #aaffaa; font-size: 1.4rem;
 #inp  { flex: 1; background: #0a1a0a; color: #cfe5cf;
         border: 1px solid #2a6a2a; padding: 6px 10px;
         font-family: ui-monospace, monospace; }
+.controls { margin-top: 8px; font-size: 0.78rem; color: #88aa88; }
+.controls input { margin-right: 4px; }
+.log .msg.ca.untrained b { color: #ffaa44; }
+.log .msg.ca.untrained pre { color: #ffd080; }
 button { background: #0a2a0a; color: #aaffaa;
          border: 1px solid #2a6a2a; padding: 6px 14px;
          font-family: inherit; cursor: pointer; }
@@ -525,30 +537,68 @@ status.textContent = "loaded " + PAIRS.length + " trained pairs · "
                    + (BLOB.length / 1024 / 1024).toFixed(2) + " MB blob · "
                    + "tier sizes: " + [...new Set(PAIRS.map(p => p.side))].join(", ");
 
+const showUntrained = document.getElementById("showUntrained");
+
+function appendCa(text, meta, untrained) {
+    const cls = untrained ? "ca untrained" : "ca";
+    const headLabel = untrained ? "ca?" : "ca ";
+    append(cls, headLabel, text, meta);
+}
+
 form.addEventListener("submit", (e) => {
     e.preventDefault();
     const q = inp.value.trim();
     if (!q) return;
     append("user", "you ", q, "");
     const p = byPrompt.get(q);
-    if (!p) {
-        append("ca", "ca ",
-               "(prompt not in trained set — only " + PAIRS.length
-               + " pairs are bundled here)",
-               "no rules for prompt; type a trained prompt instead");
+    if (p) {
+        const t0 = performance.now();
+        const out = infer(p.prompt, p.rules, p.side, p.ticks);
+        const wall = performance.now() - t0;
+        let txt;
+        try { txt = new TextDecoder("utf-8", { fatal: true }).decode(out); }
+        catch (e) { txt = new TextDecoder("latin1").decode(out); }
+        const ok = txt === p.expected;
+        appendCa(txt,
+               "tier=" + p.side + " · " + p.rules.length
+               + " rules · " + wall.toFixed(1) + " ms"
+               + (ok ? " · byte-exact ✓" : " · ⚠ MISMATCH"),
+               false);
+        inp.value = "";
         return;
     }
+    // Untrained prompt path.
+    if (!showUntrained.checked) {
+        appendCa(
+            "(prompt not in trained set — only " + PAIRS.length
+            + " pairs are bundled here)",
+            "no rules for prompt · tick the checkbox below to see meaningless CA output anyway",
+            false);
+        return;
+    }
+    // Pick a random trained pair's rules and run them on this prompt.
+    const borrow = PAIRS[Math.floor(Math.random() * PAIRS.length)];
     const t0 = performance.now();
-    const out = infer(p.prompt, p.rules, p.side, p.ticks);
+    const out = infer(q, borrow.rules, borrow.side, borrow.ticks);
     const wall = performance.now() - t0;
     let txt;
     try { txt = new TextDecoder("utf-8", { fatal: true }).decode(out); }
     catch (e) { txt = new TextDecoder("latin1").decode(out); }
-    const ok = txt === p.expected;
-    append("ca", "ca ", txt,
-           "tier=" + p.side + " · " + p.rules.length
-           + " rules · " + wall.toFixed(1) + " ms"
-           + (ok ? " · byte-exact ✓" : " · ⚠ MISMATCH"));
+    // Some bytes may be control chars (NUL etc.); render as hex if mostly so.
+    let printable = 0;
+    for (let i = 0; i < out.length; i++) {
+        const b = out[i];
+        if ((b >= 32 && b < 127) || b === 10 || b === 9) printable++;
+    }
+    if (out.length > 0 && printable / out.length < 0.5) {
+        txt = "[" + Array.from(out, b => b.toString(16).padStart(2, "0")).join(" ") + "]";
+    }
+    appendCa(txt,
+           'untrained · borrowed rules from "' + borrow.prompt
+           + '" (' + borrow.rules.length + ' rules @ tier '
+           + borrow.side + ') · ' + wall.toFixed(1) + ' ms '
+           + '— proof the CA is computing, not memorising',
+           true);
     inp.value = "";
 });
 
