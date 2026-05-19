@@ -719,6 +719,215 @@ def train_position_b256_pool_context(
             'phase': 'matched' if matched else 'budget_out'}
 
 
+# ── Phase 3: pool conditioning that changes output bytes ───────────
+#
+# Same context-painting mechanism as Phase 2, but the goal flips:
+# instead of the rule being INVARIANT to which context is painted,
+# the rule learns to produce DIFFERENT output bytes per context.
+# Co-trains (rule, [ctx_0, ..., ctx_K-1]) jointly.
+#
+# Genome layout per population member:
+#     rule        65,536 bytes (cell8 LUT)
+#     contexts    K × 16,384 bytes (one painted region per port-id)
+# K=2 already proves the mechanism; K=4 maps naturally to the 4
+# port values of cell8 if we want to align with the existing port
+# enum.  Note: the contexts evolve freely — they may NOT remain
+# class-4 after training.  That's a known limitation of the
+# unconstrained version; a constrained variant (reject mutations
+# that drop class-4) is a follow-up.
+
+
+def train_position_b256_conditional(
+        prompt: str,
+        target_bytes: list,                # length K — one byte per context
+        position: int,
+        *,
+        seed_contexts: list = None,        # optional list of K initial context blobs
+        n_ticks: int = DEFAULT_N_TICKS_256,
+        max_seconds: float = 900.0,
+        pop_size: int = 4,                 # smaller — each genome carries K+1 LUTs
+        generations_per_burst: int = 8,
+        mutation_rate_rule: float = 0.001,
+        mutation_rate_ctx:  float = 0.005,
+        seed: int = 0xC02DC01,
+        seed_rule=None,
+        port_value: int = 0,
+        on_event=None) -> dict:
+    """Train ONE cell8 rule + K context LUTs jointly such that, when
+    context_k is painted into the board's context region, the rule
+    produces target_bytes[k] at `position`.  K = len(target_bytes).
+
+    Returns {'rule_table', 'contexts': [bytes, …], 'matches': [bool]*K,
+             'all_matched', 'wall', 'phase'}."""
+    import random
+    import time
+
+    fire = on_event or (lambda *_a, **_kw: None)
+    rng = random.Random(seed)
+    t0 = time.time()
+    inp = broadcast_input(BOARD_SIDE_256, port_value)
+    K = len(target_bytes)
+    if K < 2:
+        raise ValueError('K must be >= 2 (Phase 2 covers K=1)')
+    target_cells = [[(tb >> (6 - 2 * i)) & 3 for i in range(4)]
+                       for tb in target_bytes]
+    base_offset = RESPONSE_CELLS_START_256 + position * 4
+
+    def _run_one(rule, ctx_bytes):
+        st = embed_prompt_256(prompt)
+        st = paint_context_into_state(st, ctx_bytes)
+        for _ in range(n_ticks):
+            st = hex_ca_step_cell8(st, inp, rule)
+        return st
+
+    def _fitness(genome):
+        rule, contexts = genome
+        total_cm, total_bonus = 0.0, 0.0
+        for k in range(K):
+            flat = _run_one(rule, contexts[k]).ravel()
+            cm = sum(1 for i in range(4)
+                          if (int(flat[base_offset + i]) & 3) == target_cells[k][i])
+            total_cm += cm / 4.0
+            byte = ((int(flat[base_offset + 0]) & 3) << 6) \
+                 | ((int(flat[base_offset + 1]) & 3) << 4) \
+                 | ((int(flat[base_offset + 2]) & 3) << 2) \
+                 |  (int(flat[base_offset + 3]) & 3)
+            if byte == target_bytes[k]:
+                total_bonus += 1.0
+        return total_cm + total_bonus, total_bonus >= K  # (fit, all_matched)
+
+    # Seed the population.
+    pop = []
+    # The rule warm-start.
+    rule_seed_arr = None
+    if seed_rule is not None:
+        rl = len(seed_rule)
+        if rl == 16_384:
+            rule_seed_arr = upcast_7to1_to_cell8(seed_rule)
+        elif rl == LUT_SIZE_8:
+            rule_seed_arr = (np.frombuffer(seed_rule, dtype=np.uint8).copy()
+                                 if isinstance(seed_rule, (bytes, bytearray,
+                                                                 memoryview))
+                                 else np.asarray(seed_rule,
+                                                       dtype=np.uint8).copy()) & 3
+        else:
+            raise ValueError(f'seed_rule must be 16384 or {LUT_SIZE_8} B')
+    # Context seeds (e.g. K class-4 LUTs from mandelhunt) — if given,
+    # everyone in the initial pop starts with them; later mutations
+    # diverge.  Otherwise generate random K=4 noise per genome.
+    def _fresh_context(s):
+        from .primitives import lcg_bytes
+        return bytes(lcg_bytes(s, CONTEXT_LEN_256) & np.uint8(3))
+
+    for i in range(pop_size):
+        # Rule.
+        if rule_seed_arr is not None:
+            r = rule_seed_arr.copy()
+            if i > 0:
+                jit = random.Random(seed ^ (i * 31337))
+                for _ in range(max(1, int(0.001 * LUT_SIZE_8))):
+                    idx = jit.randrange(LUT_SIZE_8)
+                    cur = int(r[idx])
+                    new = jit.randint(0, 3)
+                    while new == cur: new = jit.randint(0, 3)
+                    r[idx] = new
+        else:
+            r = random_rule_table_8(seed ^ (i * 7919))
+        # Contexts.
+        ctxs = []
+        for k in range(K):
+            if seed_contexts and k < len(seed_contexts):
+                blob = seed_contexts[k][:CONTEXT_LEN_256]
+                if i > 0:
+                    # Small perturbation of the seed context.
+                    arr = bytearray(blob)
+                    jit = random.Random(seed ^ (i * 7) ^ (k * 91))
+                    for _ in range(max(1, int(0.001 * CONTEXT_LEN_256))):
+                        idx = jit.randrange(len(arr))
+                        arr[idx] = jit.randint(0, 3)
+                    blob = bytes(arr)
+                ctxs.append(blob)
+            else:
+                ctxs.append(_fresh_context(seed ^ (i * 33) ^ (k * 11) ^ 0xC1))
+        f, allm = _fitness((r, ctxs))
+        pop.append(((r, ctxs), f, allm))
+    pop.sort(key=lambda x: -x[1])
+    best_genome, best_fit, best_all = pop[0]
+    fire('init', {'best_fit': best_fit, 'all_matched': best_all,
+                    'K': K, 'elapsed_s': time.time() - t0})
+    if best_all:
+        return {'rule_table': best_genome[0],
+                'contexts':   [bytes(c) for c in best_genome[1]],
+                'matches':    [True] * K, 'all_matched': True,
+                'K': K, 'wall': time.time() - t0, 'phase': 'init'}
+
+    burst = 0
+    while time.time() - t0 < max_seconds and not best_all:
+        burst += 1
+        for _gen in range(generations_per_burst):
+            if time.time() - t0 >= max_seconds:
+                break
+            parent = pop[rng.randrange(max(1, len(pop) // 2))][0]
+            pr, pcs = parent
+            # Decide where the mutation lands: rule (expensive but
+            # high-leverage) vs one of the K contexts (cheaper).
+            # Weight toward rule mutations.
+            if rng.random() < 0.6:
+                # Rule mutation.
+                new_r = pr.copy()
+                n_flips = max(1, int(mutation_rate_rule * LUT_SIZE_8))
+                for _ in range(n_flips):
+                    idx = rng.randrange(LUT_SIZE_8)
+                    cur = int(new_r[idx])
+                    new = rng.randint(0, 3)
+                    while new == cur: new = rng.randint(0, 3)
+                    new_r[idx] = new
+                new_cs = [bytes(c) for c in pcs]
+                child = (new_r, new_cs)
+            else:
+                # Context mutation — pick one of K, flip a few cells.
+                k = rng.randrange(K)
+                new_c = bytearray(pcs[k])
+                n_flips = max(1, int(mutation_rate_ctx * CONTEXT_LEN_256))
+                for _ in range(n_flips):
+                    idx = rng.randrange(len(new_c))
+                    cur = int(new_c[idx])
+                    new = rng.randint(0, 3)
+                    while new == cur: new = rng.randint(0, 3)
+                    new_c[idx] = new
+                new_cs = [bytes(c) for c in pcs]
+                new_cs[k] = bytes(new_c)
+                child = (pr.copy(), new_cs)
+            cf, callm = _fitness(child)
+            worst_idx = min(range(len(pop)), key=lambda i: pop[i][1])
+            if cf > pop[worst_idx][1]:
+                pop[worst_idx] = (child, cf, callm)
+                if cf > best_fit:
+                    best_genome, best_fit, best_all = child, cf, callm
+                    fire('improved', {'burst': burst, 'best_fit': cf,
+                                          'all_matched': callm,
+                                          'elapsed_s': time.time() - t0})
+                    if best_all:
+                        break
+
+    rule_out, contexts_out = best_genome
+    # Per-context match check.
+    matches = []
+    for k in range(K):
+        flat = _run_one(rule_out, contexts_out[k]).ravel()
+        byte = ((int(flat[base_offset + 0]) & 3) << 6) \
+             | ((int(flat[base_offset + 1]) & 3) << 4) \
+             | ((int(flat[base_offset + 2]) & 3) << 2) \
+             |  (int(flat[base_offset + 3]) & 3)
+        matches.append(byte == target_bytes[k])
+
+    return {'rule_table': rule_out,
+            'contexts':   [bytes(c) for c in contexts_out],
+            'matches':    matches, 'all_matched': all(matches),
+            'K': K, 'wall': time.time() - t0,
+            'phase': 'matched' if all(matches) else 'budget_out'}
+
+
 def forward_byte_with_context(prompt: str, rule: np.ndarray,
                                      context_bytes: bytes, position: int, *,
                                      n_ticks: int = DEFAULT_N_TICKS_256,
