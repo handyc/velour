@@ -28,7 +28,8 @@ from django.core.management.base import BaseCommand
 
 
 GENERATOR_NAMES = ('random', 'mandelbrot', 'julia', 'burning_ship',
-                       'tricorn', 'banded', 'sparse', 'ltree')
+                       'tricorn', 'multibrot', 'newton', 'phoenix',
+                       'banded', 'sparse', 'ltree')
 
 
 class Command(BaseCommand):
@@ -46,7 +47,9 @@ class Command(BaseCommand):
     def handle(self, *, n, out, seed, top_save, **opts):
         from caformer.lut_generators import (gen_banded, gen_burning_ship,
                                                     gen_julia, gen_ltree,
-                                                    gen_mandelbrot, gen_random,
+                                                    gen_mandelbrot,
+                                                    gen_multibrot, gen_newton,
+                                                    gen_phoenix, gen_random,
                                                     gen_sparse_on_black,
                                                     gen_tricorn)
         from spoeqi.metachain import classify_rule, self_reproduce_score
@@ -58,6 +61,9 @@ class Command(BaseCommand):
             'julia':        lambda r: gen_julia(r),
             'burning_ship': lambda r: gen_burning_ship(r),
             'tricorn':      lambda r: gen_tricorn(r),
+            'multibrot':    lambda r: gen_multibrot(r),
+            'newton':       lambda r: gen_newton(r),
+            'phoenix':      lambda r: gen_phoenix(r),
             'banded':       lambda r: gen_banded(r),
             'sparse':       lambda r: gen_sparse_on_black(r),
             'ltree':        lambda r: gen_ltree(r),

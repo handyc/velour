@@ -138,10 +138,13 @@ after one tick.  Strict ouroboros = sr_strict 1.0 at every depth.</p>
       <div class="stat" style="margin-bottom:4px;">hunt mode:
         <select id="huntMode" style="background:#0a1a2a; color:#79c0ff;
                 border:1px solid #1a4a6a; padding:1px 4px; font:inherit;">
-          <option value="mandelbrot">Mandelbrot (18% c4)</option>
-          <option value="julia">Julia (73% c4)</option>
-          <option value="burning_ship">Burning Ship (37% c4)</option>
-          <option value="tricorn">Tricorn (47% c4)</option>
+          <option value="mandelbrot">Mandelbrot (15% c4)</option>
+          <option value="julia">Julia (77% c4)</option>
+          <option value="burning_ship">Burning Ship (33% c4)</option>
+          <option value="tricorn">Tricorn (45% c4)</option>
+          <option value="multibrot">Multibrot (48% c4)</option>
+          <option value="newton">Newton z³−1 (55% c4)</option>
+          <option value="phoenix">Phoenix (35% c4, mem)</option>
         </select>
       </div>
       <button id="btnHunt">▶ fractal search</button>
@@ -472,7 +475,9 @@ let huntState = { running: false, walkCx: -0.5, walkCy: 0.0,
                     holdUntil: 0, timer: null, mode: 'mandelbrot' };
 
 // Generic per-pixel escape iteration.  mode picks the recurrence.
-function escapeAt(zx0, zy0, cx, cy, iterCap, mode) {
+// For multibrot, `d` is passed via the params object on the grid
+// builder; default d=3.
+function escapeAt(zx0, zy0, cx, cy, iterCap, mode, d) {
     let zx = zx0, zy = zy0, i;
     for (i = 0; i < iterCap; i++) {
         if (zx*zx + zy*zy > 4.0) return i;
@@ -487,16 +492,102 @@ function escapeAt(zx0, zy0, cx, cy, iterCap, mode) {
         } else if (mode === 'tricorn') {
             nx = zx*zx - zy*zy + cx;
             ny = -2*zx*zy + cy;
+        } else if (mode === 'multibrot') {
+            // z^d via polar form, then + c.
+            const r = Math.sqrt(zx*zx + zy*zy);
+            const th = Math.atan2(zy, zx);
+            const rd = Math.pow(r, d);
+            nx = rd * Math.cos(d * th) + cx;
+            ny = rd * Math.sin(d * th) + cy;
         } else { return iterCap; }
         zx = nx; zy = ny;
     }
     return iterCap;
 }
+
+// Newton fractal for f(z) = z³ − 1.  Each pixel is a starting z; we
+// iterate Newton's step z' = 2z/3 + 1/(3z²) and classify by which
+// of the 3 roots we landed in.  Output is K=4 directly (no
+// posterise step needed): roots 0/1/2 + unconverged 3.
+const NEWTON_ROOTS = [
+    [1.0, 0.0],
+    [-0.5,  0.8660254],   // -1/2 + i√3/2
+    [-0.5, -0.8660254],
+];
+function newtonGrid(params, side) {
+    const px = params.span / side;
+    const half = params.span / 2;
+    const ox = params.cx - half;
+    const oy = params.cy - half;
+    const iters = 32;
+    const out = new Uint8Array(side * side);
+    for (let r = 0; r < side; r++) {
+        const y0 = oy + r * px;
+        for (let c = 0; c < side; c++) {
+            let zx = ox + c * px, zy = y0;
+            for (let it = 0; it < iters; it++) {
+                // 1/z² = conj(z²)/|z|⁴
+                const z2x = zx*zx - zy*zy;
+                const z2y = 2*zx*zy;
+                const denom = 3 * (z2x*z2x + z2y*z2y) + 1e-20;
+                const ix =  z2x / denom;
+                const iy = -z2y / denom;
+                zx = (2/3) * zx + ix;
+                zy = (2/3) * zy + iy;
+            }
+            // Closest root.
+            let best = 3, bd = 0.01;
+            for (let k = 0; k < 3; k++) {
+                const dx = zx - NEWTON_ROOTS[k][0];
+                const dy = zy - NEWTON_ROOTS[k][1];
+                const d2 = dx*dx + dy*dy;
+                if (d2 < bd) { bd = d2; best = k; }
+            }
+            out[r * side + c] = best;
+        }
+    }
+    return out;
+}
+
+// Phoenix fractal — z_{n+1} = z_n² + p_re + p_im · z_{n−1}.
+// Has memory; classic Phoenix is at (p_re=0.5667, p_im=-0.5).
+function phoenixGrid(params, side, iterCap) {
+    const px = params.span / side;
+    const half = params.span / 2;
+    const ox = params.cx - half;
+    const oy = params.cy - half;
+    const p_re = params.p_re, p_im = params.p_im;
+    const escape = new Int32Array(side * side);
+    for (let r = 0; r < side; r++) {
+        const y0 = oy + r * px;
+        for (let c = 0; c < side; c++) {
+            let zx = ox + c * px, zy = y0;
+            let pzx = 0, pzy = 0;
+            let i = 0, hit = iterCap;
+            for (i = 0; i < iterCap; i++) {
+                if (zx*zx + zy*zy > 4.0) { hit = i; break; }
+                const nx = zx*zx - zy*zy + p_re + p_im * pzx;
+                const ny = 2*zx*zy + p_im * pzy;
+                pzx = zx; pzy = zy;
+                zx = nx; zy = ny;
+            }
+            escape[r * side + c] = hit;
+        }
+    }
+    return escape;
+}
 function fractalGrid(params, side, mode) {
-    // params: for mandelbrot/burning_ship/tricorn → {cx,cy,span} (c is pixel coord)
-    //         for julia → {juliaCx, juliaCy, center_x, center_y, zoom}
+    // For modes that go through escape-time + posterise, returns
+    // { escape, iterCap }.  For newton (which produces K=4 directly),
+    // returns { directLut } and the caller skips posterise.
     let it = 192, s = params.span || params.zoom || 1.0;
     while (s < 1.0 && it < huntMaxIters) { it += 64; s *= 2; }
+    if (mode === 'newton') {
+        return { directLut: newtonGrid(params, side) };
+    }
+    if (mode === 'phoenix') {
+        return { escape: phoenixGrid(params, side, it), iterCap: it };
+    }
     const escape = new Int32Array(side * side);
     if (mode === 'julia') {
         const half = params.zoom / 2;
@@ -515,10 +606,11 @@ function fractalGrid(params, side, mode) {
         const px = params.span / side;
         const ox = params.cx - half;
         const oy = params.cy - half;
+        const d = params.d || 3;
         for (let r = 0; r < side; r++) {
             const y = oy + r * px;
             for (let c = 0; c < side; c++) {
-                escape[r * side + c] = escapeAt(0, 0, ox + c * px, y, it, mode);
+                escape[r * side + c] = escapeAt(0, 0, ox + c * px, y, it, mode, d);
             }
         }
     }
@@ -575,21 +667,38 @@ function nextHuntCoord() {
         huntState.stepsInWalk++;
         return;
     }
-    // Mandelbrot / burning_ship / tricorn — escape-time over c-space.
+    // Mandelbrot / burning_ship / tricorn / multibrot / newton /
+    // phoenix — escape-time (or newton-step) over a c/z-space patch.
     if (huntState.stepsInWalk >= 24 || huntState.walkSpan < 1e-9) {
         let seed;
         if (huntState.mode === 'burning_ship') {
             seed = [BSHIP_CENTER[0] + (Math.random()-0.5)*0.3,
                     BSHIP_CENTER[1] + (Math.random()-0.5)*0.3,
                     Math.pow(10, -2 + Math.random()*2.3)];
-        } else if (huntState.mode === 'tricorn') {
+        } else if (huntState.mode === 'tricorn' ||
+                   huntState.mode === 'multibrot' ||
+                   huntState.mode === 'phoenix') {
             seed = [(Math.random()-0.5)*2.0, (Math.random()-0.5)*2.0,
                     Math.pow(10, -1.5 + Math.random()*2)];
+        } else if (huntState.mode === 'newton') {
+            // Newton lives at the origin; bias smaller spans for the
+            // fractal-rich basin boundaries.
+            seed = [(Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5,
+                    Math.pow(10, -1.5 + Math.random()*2.1)];
         } else {
             seed = MANDEL_SEEDS[Math.floor(Math.random()*MANDEL_SEEDS.length)];
         }
         huntState.walkCx = seed[0]; huntState.walkCy = seed[1]; huntState.walkSpan = seed[2];
         huntState.stepsInWalk = 0;
+        if (huntState.mode === 'multibrot') {
+            // Pick a fresh d ∈ {3,4,5,6,7} per walk.
+            huntState.multibrotD = 3 + Math.floor(Math.random() * 5);
+        }
+        if (huntState.mode === 'phoenix') {
+            // Perturb around the classic Phoenix p.
+            huntState.p_re = 0.5667 + (Math.random()-0.5) * 0.4;
+            huntState.p_im = -0.5   + (Math.random()-0.5) * 0.4;
+        }
         return;
     }
     huntState.walkCx += (Math.random()*2 - 1) * 0.4 * huntState.walkSpan;
@@ -610,11 +719,22 @@ function huntOnce() {
     } else {
         params = { cx: huntState.walkCx, cy: huntState.walkCy,
                    span: huntState.walkSpan };
-        label = `${huntState.mode} · cx=${params.cx.toFixed(4)} ` +
-                `cy=${params.cy.toFixed(4)} span=${params.span.toExponential(2)}`;
+        if (huntState.mode === 'multibrot') {
+            params.d = huntState.multibrotD || 3;
+            label = `multibrot d=${params.d} · cx=${params.cx.toFixed(4)} ` +
+                    `cy=${params.cy.toFixed(4)} span=${params.span.toExponential(2)}`;
+        } else if (huntState.mode === 'phoenix') {
+            params.p_re = huntState.p_re; params.p_im = huntState.p_im;
+            label = `phoenix p=(${params.p_re.toFixed(3)},${params.p_im.toFixed(3)}) · ` +
+                    `cx=${params.cx.toFixed(3)} cy=${params.cy.toFixed(3)} ` +
+                    `span=${params.span.toExponential(2)}`;
+        } else {
+            label = `${huntState.mode} · cx=${params.cx.toFixed(4)} ` +
+                    `cy=${params.cy.toFixed(4)} span=${params.span.toExponential(2)}`;
+        }
     }
-    const { escape, iterCap } = fractalGrid(params, SIDE, huntState.mode);
-    const lut = posterise(escape, iterCap);
+    const g = fractalGrid(params, SIDE, huntState.mode);
+    const lut = g.directLut ? g.directLut : posterise(g.escape, g.iterCap);
     const sr  = srStrict(lut, 4);
     huntState.nScanned++;
     if (sr > huntState.bestSr) huntState.bestSr = sr;

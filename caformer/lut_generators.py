@@ -170,6 +170,128 @@ def gen_tricorn(rng: np.random.RandomState) -> np.ndarray:
     return _posterise_escape(escape, iter_cap)
 
 
+def gen_multibrot(rng: np.random.RandomState, *, d: int = None) -> np.ndarray:
+    """Multibrot — z = z^d + c for integer d ≥ 3.  d=2 is regular
+    Mandelbrot; higher d gives d-fold rotational symmetry and a
+    'pinched' bulb structure with more lobes."""
+    if d is None:
+        d = int(rng.choice([3, 4, 5, 6, 7]))
+    cx_c = (rng.uniform() - 0.5) * 2.0
+    cy_c = (rng.uniform() - 0.5) * 2.0
+    span = 10.0 ** rng.uniform(-2, 0.5)
+    half = span / 2.0
+    xs = np.linspace(cx_c - half, cx_c + half, SIDE)
+    ys = np.linspace(cy_c - half, cy_c + half, SIDE)
+    cx_grid, cy_grid = np.meshgrid(xs, ys)
+    zx = np.zeros_like(cx_grid)
+    zy = np.zeros_like(cy_grid)
+    iter_cap = 192
+    escape = np.full(zx.shape, iter_cap, dtype=np.int32)
+    mask = np.ones(zx.shape, dtype=bool)
+    for i in range(iter_cap):
+        # z^d via polar form: r^d, angle*d.
+        r2 = zx * zx + zy * zy
+        # Avoid log(0); when r==0, z^d = 0 too.
+        r = np.sqrt(r2)
+        theta = np.arctan2(zy, zx)
+        rd = r ** d
+        new_zx = rd * np.cos(d * theta) + cx_grid
+        new_zy = rd * np.sin(d * theta) + cy_grid
+        zx[mask] = new_zx[mask]
+        zy[mask] = new_zy[mask]
+        diverged = (zx * zx + zy * zy) > 4.0
+        new_escape = mask & diverged
+        escape[new_escape] = i
+        mask &= ~diverged
+        if not mask.any():
+            break
+    return _posterise_escape(escape, iter_cap)
+
+
+def gen_newton(rng: np.random.RandomState) -> np.ndarray:
+    """Newton fractal for f(z) = z³ − 1.  Each pixel is a starting z;
+    we iterate Newton's step z -= f(z)/f'(z) and colour by which of
+    the 3 roots we landed in (or 'didn't converge' for the 4th).
+
+    Topologically very different from escape-time fractals: basins
+    interlock at every scale instead of nesting in bulbs, so the
+    LUT structure has *different* spatial statistics."""
+    # The three cube roots of 1.
+    roots = np.array([[1.0, 0.0],
+                       [-0.5,  np.sqrt(3) / 2],
+                       [-0.5, -np.sqrt(3) / 2]])
+    cx_c = (rng.uniform() - 0.5) * 1.0
+    cy_c = (rng.uniform() - 0.5) * 1.0
+    span = 10.0 ** rng.uniform(-1.5, 0.6)
+    half = span / 2.0
+    xs = np.linspace(cx_c - half, cx_c + half, SIDE)
+    ys = np.linspace(cy_c - half, cy_c + half, SIDE)
+    zx, zy = np.meshgrid(xs, ys)
+    zx = zx.astype(np.float64); zy = zy.astype(np.float64)
+    iters = 32
+    for _ in range(iters):
+        # f(z) = z³ − 1
+        # f(z)/f'(z) = (z³ − 1) / (3z²) = z/3 − 1/(3z²)
+        # z' = z − f/f' = z − z/3 + 1/(3z²) = 2z/3 + 1/(3z²)
+        r2 = zx * zx + zy * zy
+        # 1/z² = conj(z²)/|z|⁴
+        z2x = zx * zx - zy * zy
+        z2y = 2 * zx * zy
+        denom = 3 * (z2x * z2x + z2y * z2y) + 1e-20
+        inv3z2_x =  z2x / denom
+        inv3z2_y = -z2y / denom
+        zx = (2.0 / 3.0) * zx + inv3z2_x
+        zy = (2.0 / 3.0) * zy + inv3z2_y
+    # Classify by nearest root.
+    out = np.zeros(zx.shape, dtype=np.uint8)
+    best_d = np.full(zx.shape, np.inf)
+    for k, (rx, ry) in enumerate(roots):
+        d2 = (zx - rx) ** 2 + (zy - ry) ** 2
+        closer = d2 < best_d
+        out = np.where(closer, k, out)
+        best_d = np.where(closer, d2, best_d)
+    # Unconverged → bucket 3.
+    out = np.where(best_d > 0.01, 3, out)
+    return out.astype(np.uint8).ravel()
+
+
+def gen_phoenix(rng: np.random.RandomState) -> np.ndarray:
+    """Phoenix fractal — z_{n+1} = z_n² + Re(c) + Im(c)·z_{n-1}.
+    Has memory (depends on previous z), so the iteration is NOT a
+    pure quadratic map.  Classic c = (0.5667, −0.5)."""
+    # The standard Phoenix lives near (-0.5, 0) in the z-plane with
+    # those c values; we randomise around it.
+    p_re = 0.5667 + (rng.uniform() - 0.5) * 0.4
+    p_im = -0.5 + (rng.uniform() - 0.5) * 0.4
+    cx_c = 0.0 + (rng.uniform() - 0.5) * 1.0
+    cy_c = 0.0 + (rng.uniform() - 0.5) * 1.0
+    span = 10.0 ** rng.uniform(-1.5, 0.4)
+    half = span / 2.0
+    xs = np.linspace(cx_c - half, cx_c + half, SIDE)
+    ys = np.linspace(cy_c - half, cy_c + half, SIDE)
+    zx, zy = np.meshgrid(xs, ys)
+    zx = zx.astype(np.float64); zy = zy.astype(np.float64)
+    # Previous-step z; start at 0.
+    pzx = np.zeros_like(zx); pzy = np.zeros_like(zy)
+    iter_cap = 192
+    escape = np.full(zx.shape, iter_cap, dtype=np.int32)
+    mask = np.ones(zx.shape, dtype=bool)
+    for i in range(iter_cap):
+        # z' = z² + p_re + p_im * z_prev
+        new_zx = zx * zx - zy * zy + p_re + p_im * pzx
+        new_zy = 2 * zx * zy + p_im * pzy
+        pzx, pzy = zx.copy(), zy.copy()
+        zx[mask] = new_zx[mask]
+        zy[mask] = new_zy[mask]
+        diverged = (zx * zx + zy * zy) > 4.0
+        new_escape = mask & diverged
+        escape[new_escape] = i
+        mask &= ~diverged
+        if not mask.any():
+            break
+    return _posterise_escape(escape, iter_cap)
+
+
 def gen_mandelbrot(rng: np.random.RandomState, *, cx=None, cy=None,
                        span=None) -> np.ndarray:
     """Random Mandelbrot region (cx, cy in the famous box, span in
