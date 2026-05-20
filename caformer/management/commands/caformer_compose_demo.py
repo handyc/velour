@@ -47,25 +47,48 @@ class Command(BaseCommand):
         from caformer.cell8 import hex_ca_step_cell8, broadcast_input
         from caformer.models import QRPair
 
-        pk_list = [int(x) for x in pks.split(',') if x.strip()]
+        # Entries can be either an integer pk (e.g. "2") or a
+        # "file:path.pkl" reference to a pre-trained pkl that isn't
+        # a DB-backed pair.  This lets us use the hi_ok / hi_sup
+        # rules trained at b256 even though those aren't QRPair rows.
+        pk_list = []
+        for x in pks.split(','):
+            x = x.strip()
+            if not x: continue
+            if x.startswith('file:'):
+                pk_list.append(x)
+            else:
+                pk_list.append(int(x))
         if len(pk_list) != 4:
-            raise CommandError(f'need exactly 4 pks, got {pk_list}')
+            raise CommandError(f'need exactly 4 entries, got {pk_list}')
 
         rules_dir_p = Path(rules_dir)
         pair_data = {}
-        for pk in pk_list:
-            pkl_path = rules_dir_p / f'pk{pk}_7to1_b256.pkl'
-            if not pkl_path.exists():
-                raise CommandError(
-                    f'missing {pkl_path}; train it first via '
-                    f'caformer.board256.train_pair_b256_7to1 and save')
-            with open(pkl_path, 'rb') as f:
-                d = pickle.load(f)
-            # Backfill metadata from DB if pkl is missing it.
-            db_pair = QRPair.objects.filter(pk=pk).first()
-            d.setdefault('prompt', db_pair.prompt if db_pair else '?')
-            d.setdefault('expected', db_pair.expected if db_pair else '?')
-            pair_data[pk] = d
+        for entry in pk_list:
+            if isinstance(entry, str) and entry.startswith('file:'):
+                pkl_path = Path(entry[len('file:'):])
+                if not pkl_path.exists():
+                    raise CommandError(f'missing {pkl_path}')
+                with open(pkl_path, 'rb') as f:
+                    d = pickle.load(f)
+                # Pkls saved by the b256 training script carry
+                # 'prompt' + 'expected' fields directly.
+                d.setdefault('prompt', '<file>')
+                d.setdefault('expected', '<file>')
+                pair_data[entry] = d
+            else:
+                pk = entry
+                pkl_path = rules_dir_p / f'pk{pk}_7to1_b256.pkl'
+                if not pkl_path.exists():
+                    raise CommandError(
+                        f'missing {pkl_path}; train it first via '
+                        f'caformer.board256.train_pair_b256_7to1 and save')
+                with open(pkl_path, 'rb') as f:
+                    d = pickle.load(f)
+                db_pair = QRPair.objects.filter(pk=pk).first()
+                d.setdefault('prompt', db_pair.prompt if db_pair else '?')
+                d.setdefault('expected', db_pair.expected if db_pair else '?')
+                pair_data[pk] = d
 
         def log(msg):
             sys.stdout.write(str(msg) + '\n'); sys.stdout.flush()
@@ -94,8 +117,8 @@ class Command(BaseCommand):
         for prompt in prompt_list:
             log(f'\n==== prompt={prompt!r} ====')
             for port in range(4):
-                target_pk = pk_list[port]
-                tp = pair_data[target_pk]
+                target_key = pk_list[port]
+                tp = pair_data[target_key]
                 out = bytearray()
                 for pos in range(n_max):
                     state = embed_prompt_256(prompt)
@@ -112,7 +135,11 @@ class Command(BaseCommand):
                 text_trim = text[:len(target_text)]
                 match = text_trim == target_text
                 mark = '✓ match' if match else f'≠ {target_text!r}'
-                log(f'  port={port} (pk={target_pk} '
+                # target_key is either an int pk or 'file:path/...'
+                key_label = (f'pk={target_key}'
+                                 if isinstance(target_key, int)
+                                 else target_key.replace('file:', '').split('/')[-1])
+                log(f'  port={port} ({key_label} '
                     f'{tp["prompt"]!r}→{target_text!r}):  '
                     f'produced={text!r}  trimmed={text_trim!r}  {mark}')
 
