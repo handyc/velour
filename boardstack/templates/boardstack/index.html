@@ -73,14 +73,394 @@ without fallout.
   <p class="lede">No runs yet.  Phase 1 GA command will populate this once written.</p>
 {% endif %}
 
-<h2>How to drive</h2>
+<h2>Browser playground</h2>
+<p class="lede">Pure-JS stack runner so you can poke at the architecture
+without spinning up Python. Generates a small pool of fractal-derived
+LUTs in-browser, builds the stack from your gene knobs, evaluates
+against the chosen test set.</p>
+
+<div style="background:#050a05; border:1px solid #1a3a1a; padding:10px;
+            font-family:ui-monospace,monospace; font-size:0.85rem;">
+  <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+    <label>n_boards: <input type="number" id="js-n" value="8" min="2" max="32" style="width:5em;"></label>
+    <label>board_side: <select id="js-side">
+        <option>16</option><option selected>32</option><option>64</option></select></label>
+    <label>stack_ticks: <input type="number" id="js-st" value="3" min="1" max="20" style="width:4em;"></label>
+    <label>pool_size: <input type="number" id="js-pool" value="32" min="4" max="128" style="width:4em;"></label>
+    <label>seed: <input type="number" id="js-seed" value="42" style="width:7em;"></label>
+    <label>seed_init: <select id="js-init">
+        <option value="random">random</option>
+        <option value="naive_pipeline" selected>naive_pipeline</option>
+        <option value="echo">echo</option></select></label>
+    <label>test_set: <select id="js-ts">
+        <option value="echo" selected>echo (b → b)</option>
+        <option value="incr">incr (b → b+1)</option>
+        <option value="v1">v1 (16 ASCII pairs)</option></select></label>
+    <button id="js-run" style="background:#0a2a0a; color:#aaffaa;
+            border:1px solid #2a6a2a; padding:4px 10px; cursor:pointer;
+            font:inherit;">▶ run</button>
+    <button id="js-evolve" style="background:#1a0a2a; color:#cca5ff;
+            border:1px solid #5a3a8a; padding:4px 10px; cursor:pointer;
+            font:inherit;">⟳ mini-GA (10 gens)</button>
+  </div>
+  <div id="js-status" style="margin-top:8px; color:#88aa88; font-size:0.78rem;"></div>
+  <div id="js-results" style="margin-top:8px; font-size:0.78rem;"></div>
+</div>
+
+<h2>CLI</h2>
 <pre style="background:#050a05; padding:8px; border-left:3px solid #2a6a2a;
             font-family:ui-monospace,monospace; font-size:0.78rem;">
 # Smoke (random gene, no GA):
-manage.py boardstack_smoke --seed 42 --n-boards 16 --board-side 64
+manage.py boardstack_smoke --seed 42 --n-boards 16 --board-side 32
 
-# (Phase 1 GA, not yet implemented:)
-manage.py boardstack_evolve --pop 16 --gens 50 --test-set v1
+# GA with hand-seeded init (the productive path):
+manage.py boardstack_evolve --pop 16 --gens 30 --test-set echo \
+    --seed-init naive_pipeline --persist
 </pre>
 </div>
+
+<script>
+// ── CA + fractal generators (lifted from caformer/lutview) ─────────
+function hexStep(state, rule, side) {
+  const out = new Uint8Array(side*side);
+  for (let r=0; r<side; r++) {
+    const even=(r&1)===0, up=(r-1+side)%side, dn=(r+1)%side;
+    for (let c=0; c<side; c++) {
+      const l=(c-1+side)%side, rc=(c+1)%side;
+      const self_=state[r*side+c], nL=state[r*side+l], nR=state[r*side+rc];
+      const nUpL=state[up*side+l], nUp_=state[up*side+c], nUpR=state[up*side+rc];
+      const nDnL=state[dn*side+l], nDn_=state[dn*side+c], nDnR=state[dn*side+rc];
+      const nNW=even?nUpL:nUp_, nNE=even?nUp_:nUpR;
+      const nSW=even?nDnL:nDn_, nSE=even?nDn_:nDnR;
+      const key=(self_<<12)|(nNW<<10)|(nNE<<8)|(nR<<6)|(nSE<<4)|(nSW<<2)|nL;
+      out[r*side+c]=rule[key];
+    }
+  }
+  return out;
+}
+// cell8 stepper: 8-cell key with `port` value in top 2 bits.
+// We can upcast a 7→1 LUT by tiling it 4 times to make a cell8
+// LUT that's port-agnostic; for the stack experiment we use that.
+function hexStepCell8(state, rule64k, portVal, side) {
+  const out = new Uint8Array(side*side);
+  for (let r=0; r<side; r++) {
+    const even=(r&1)===0, up=(r-1+side)%side, dn=(r+1)%side;
+    for (let c=0; c<side; c++) {
+      const l=(c-1+side)%side, rc=(c+1)%side;
+      const self_=state[r*side+c], nL=state[r*side+l], nR=state[r*side+rc];
+      const nUpL=state[up*side+l], nUp_=state[up*side+c], nUpR=state[up*side+rc];
+      const nDnL=state[dn*side+l], nDn_=state[dn*side+c], nDnR=state[dn*side+rc];
+      const nNW=even?nUpL:nUp_, nNE=even?nUp_:nUpR;
+      const nSW=even?nDnL:nDn_, nSE=even?nDn_:nDnR;
+      const key=((portVal&3)<<14)|(self_<<12)|(nNW<<10)|(nNE<<8)
+                |(nR<<6)|(nSE<<4)|(nSW<<2)|nL;
+      out[r*side+c]=rule64k[key];
+    }
+  }
+  return out;
+}
+function upcastTile(lut16k) {
+  const out = new Uint8Array(65536);
+  for (let i=0; i<4; i++) out.set(lut16k, i*16384);
+  return out;
+}
+// Fractal grid → posterised K=4 LUT.  Subset of lutview's generator:
+// Mandelbrot + Julia + Newton.
+function fractalLUT(seed) {
+  const SIDE=128, ITERS=192;
+  // mulberry32
+  let s = seed|0;
+  function rnd() {
+    s = (s + 0x6D2B79F5)|0;
+    let t = Math.imul(s ^ (s>>>15), s|1);
+    t ^= t + Math.imul(t ^ (t>>>7), t|61);
+    return ((t ^ (t>>>14))>>>0)/4294967296;
+  }
+  const modes = ['mandelbrot','julia','newton'];
+  const mode = modes[(rnd()*modes.length)|0];
+  // Center + span
+  const cx = (rnd()-0.5)*2.5, cy = (rnd()-0.5)*2.0;
+  const span = Math.pow(10, -1.5+rnd()*2);
+  const half = span/2, px = span/SIDE;
+  const escape = new Int32Array(SIDE*SIDE);
+  if (mode === 'newton') {
+    const ox = cx-half, oy = cy-half;
+    for (let r=0; r<SIDE; r++) {
+      const y0=oy+r*px;
+      for (let c=0; c<SIDE; c++) {
+        let zx=ox+c*px, zy=y0;
+        for (let it=0; it<32; it++) {
+          const z2x=zx*zx-zy*zy, z2y=2*zx*zy;
+          const denom=3*(z2x*z2x+z2y*z2y)+1e-20;
+          zx=(2/3)*zx+z2x/denom; zy=(2/3)*zy-z2y/denom;
+        }
+        let best=3, bd=0.01;
+        const roots=[[1,0],[-0.5,0.866],[-0.5,-0.866]];
+        for (let k=0; k<3; k++) {
+          const dx=zx-roots[k][0], dy=zy-roots[k][1];
+          const d2=dx*dx+dy*dy;
+          if (d2<bd){bd=d2; best=k;}
+        }
+        escape[r*SIDE+c] = best * 50 + 5;  // mock escape values
+      }
+    }
+  } else {
+    const juliaCx = (rnd()-0.5)*1.5, juliaCy = (rnd()-0.5)*1.5;
+    const ox = cx-half, oy = cy-half;
+    for (let r=0; r<SIDE; r++) {
+      const y=oy+r*px;
+      for (let c=0; c<SIDE; c++) {
+        let zx = mode==='julia'?ox+c*px:0, zy = mode==='julia'?y:0;
+        const ccx = mode==='julia'?juliaCx:ox+c*px;
+        const ccy = mode==='julia'?juliaCy:y;
+        let i=0;
+        for (; i<ITERS; i++) {
+          if (zx*zx+zy*zy>4) break;
+          const nx=zx*zx-zy*zy+ccx; const ny=2*zx*zy+ccy;
+          zx=nx; zy=ny;
+        }
+        escape[r*SIDE+c]=i;
+      }
+    }
+  }
+  // Posterise: tertile-bucket.
+  const finite=[];
+  for (let i=0; i<escape.length; i++) if (escape[i]<ITERS) finite.push(escape[i]);
+  let bin1, bin2;
+  if (finite.length<3) {bin1=ITERS/3; bin2=2*ITERS/3;}
+  else { finite.sort((a,b)=>a-b);
+         bin1=finite[(finite.length/3)|0]; bin2=finite[((2*finite.length/3)|0)];
+         if (bin2<=bin1) bin2=bin1+1; }
+  const lut = new Uint8Array(16384);
+  for (let i=0; i<escape.length; i++) {
+    const e=escape[i];
+    lut[i] = e>=ITERS?3 : (e<bin1?0 : (e<bin2?1:2));
+  }
+  return lut;
+}
+
+// ── Stack engine (JS port of boardstack.engine) ────────────────────
+function buildBoardState(side, promptByte) {
+  const s = new Uint8Array(side*side);
+  s[0]=(promptByte>>6)&3; s[1]=(promptByte>>4)&3;
+  s[2]=(promptByte>>2)&3; s[3]= promptByte    &3;
+  return s;
+}
+function portValueFor(boardIdx, wiring, promptByte, personality, boards, side) {
+  const [src, r, c] = wiring;
+  if (src === -1) return promptByte & 3;
+  if (src <= -2 && src >= -5) return (-src - 2) & 3;
+  if (src >= 0 && src < boardIdx) {
+    return boards[src][(r%side)*side + (c%side)] & 3;
+  }
+  return personality & 3;
+}
+function runStack(genome, promptByte, personality, lutCache) {
+  const {n_boards, board_side: side, stack_ticks: sticks,
+         rule_idx, ticks, wiring, output_cell} = genome;
+  let boards = [];
+  for (let k=0; k<n_boards; k++) boards.push(buildBoardState(side, promptByte));
+  for (let st=0; st<sticks; st++) {
+    const next = [];
+    for (let k=0; k<n_boards; k++) {
+      const idx = rule_idx[k];
+      if (!lutCache[idx]) lutCache[idx] = upcastTile(POOL[idx]);
+      const lut64k = lutCache[idx];
+      const portV = portValueFor(k, wiring[k], promptByte, personality, boards, side);
+      let s = boards[k];
+      for (let t=0; t<ticks[k]; t++) s = hexStepCell8(s, lut64k, portV, side);
+      next.push(s);
+    }
+    boards = next;
+  }
+  const final = boards[n_boards-1];
+  const [orow, ocol] = output_cell;
+  const r = orow % side;
+  const c0 = ocol % side, c1=(ocol+1)%side, c2=(ocol+2)%side, c3=(ocol+3)%side;
+  return ((final[r*side+c0]&3)<<6) | ((final[r*side+c1]&3)<<4)
+       | ((final[r*side+c2]&3)<<2) |  (final[r*side+c3]&3);
+}
+
+// ── Test sets ──────────────────────────────────────────────────────
+const TEST_SETS = {
+  echo: Array.from({length:32},(_,i)=>[(i*8)&0xff,(i*8)&0xff]),
+  incr: Array.from({length:32},(_,i)=>[(i*8)&0xff,((i*8)+1)&0xff]),
+  v1: [['a','b'],['b','c'],['h','i'],['i','j'],['1','2'],['2','3'],
+       ['A','Z'],['Z','A'],[' ','.'],['.',' '],['?','!'],['!','?'],
+       ['o','o'],['e','e'],['x','y'],['y','x']]
+      .map(([p,q])=>[p.charCodeAt(0), q.charCodeAt(0)])
+};
+function evaluate(genome, testSetId, personality, lutCache) {
+  const pairs = TEST_SETS[testSetId];
+  let nMatch=0, bitMatch=0;
+  const rows = [];
+  for (const [p,q] of pairs) {
+    const out = runStack(genome, p, personality, lutCache);
+    const match = out === q;
+    if (match) nMatch++;
+    const xor = out ^ q;
+    let bm = 8;
+    for (let b=0; b<8; b++) if ((xor>>b)&1) bm--;
+    bitMatch += bm;
+    rows.push({p, q, out, match, bm});
+  }
+  return {
+    byteMatch: nMatch, nPairs: pairs.length,
+    bitMatch, bitTotal: 8*pairs.length,
+    fitness: bitMatch/(8*pairs.length) + 0.1*(nMatch/pairs.length),
+    rows
+  };
+}
+
+// ── Gene constructors ─────────────────────────────────────────────
+function rngFn(seed) {
+  let s = seed|0;
+  return function() {
+    s = (s + 0x6D2B79F5)|0;
+    let t = Math.imul(s ^ (s>>>15), s|1);
+    t ^= t + Math.imul(t ^ (t>>>7), t|61);
+    return ((t ^ (t>>>14))>>>0)/4294967296;
+  };
+}
+function randomGenome(N, side, poolSize, stackTicks, seed) {
+  const rnd = rngFn(seed);
+  const wiring = [];
+  for (let k=0; k<N; k++) {
+    if (k===0) { wiring.push([-1,0,0]); continue; }
+    const r = rnd();
+    if (r<0.6) wiring.push([(rnd()*k)|0, (rnd()*side)|0, (rnd()*side)|0]);
+    else if (r<0.8) wiring.push([-1,0,0]);
+    else wiring.push([-(2+((rnd()*4)|0)), 0, 0]);
+  }
+  return {n_boards:N, board_side:side, stack_ticks:stackTicks,
+          rule_idx: Array.from({length:N},()=>(rnd()*poolSize)|0),
+          ticks:    Array.from({length:N},()=>1+((rnd()*6)|0)),
+          wiring,   output_cell: [(rnd()*side)|0, (rnd()*side)|0]};
+}
+function naiveGenome(N, side, poolSize, stackTicks, seed) {
+  const rnd = rngFn(seed);
+  const wiring = [];
+  for (let k=0; k<N; k++) wiring.push(k===0?[-1,0,0]:[k-1,0,0]);
+  return {n_boards:N, board_side:side, stack_ticks:stackTicks,
+          rule_idx: Array.from({length:N},()=>(rnd()*poolSize)|0),
+          ticks: Array(N).fill(1), wiring, output_cell:[0,0]};
+}
+function echoGenome(N, side, poolSize, stackTicks, seed) {
+  const rnd = rngFn(seed);
+  return {n_boards:N, board_side:side, stack_ticks:stackTicks,
+          rule_idx: Array.from({length:N},()=>(rnd()*poolSize)|0),
+          ticks: Array(N).fill(1),
+          wiring: Array(N).fill([-1,0,0]),
+          output_cell:[0,0]};
+}
+function mutate(g, mutRate, poolSize, seed) {
+  const rnd = rngFn(seed);
+  const out = JSON.parse(JSON.stringify(g));
+  for (let k=0; k<g.n_boards; k++) {
+    if (rnd()<mutRate) out.rule_idx[k] = (rnd()*poolSize)|0;
+    if (rnd()<mutRate) out.ticks[k]    = 1+((rnd()*6)|0);
+    if (rnd()<mutRate && k>0) {
+      const r=rnd();
+      if (r<0.6) out.wiring[k] = [(rnd()*k)|0,(rnd()*g.board_side)|0,(rnd()*g.board_side)|0];
+      else if (r<0.8) out.wiring[k] = [-1,0,0];
+      else out.wiring[k] = [-(2+((rnd()*4)|0)),0,0];
+    }
+  }
+  if (rnd()<mutRate) out.output_cell = [(rnd()*g.board_side)|0,(rnd()*g.board_side)|0];
+  return out;
+}
+
+// ── Pool (regen on demand from current seed) ───────────────────────
+let POOL = [];
+function regenPool(poolSize, seed) {
+  POOL = [];
+  for (let i=0; i<poolSize; i++) POOL.push(fractalLUT(seed + i*7919));
+}
+
+// ── UI wiring ──────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+function status(s) { $('js-status').textContent = s; }
+function renderResults(r) {
+  const html = [
+    `byte_match <b style="color:#aaffaa;">${r.byteMatch}/${r.nPairs}</b>`,
+    `bit_match <b style="color:#aaffaa;">${r.bitMatch}/${r.bitTotal}</b>`,
+    `(${(100*r.bitMatch/r.bitTotal).toFixed(1)}%)`,
+    `fitness <b style="color:#aaffaa;">${r.fitness.toFixed(4)}</b>`,
+  ].join(' &nbsp;·&nbsp; ');
+  let table = '<table style="border-collapse:collapse; margin-top:6px; width:100%; font-size:0.72rem;"><thead><tr><th align=left>p</th><th align=left>target q</th><th align=left>out</th><th align=right>match</th></tr></thead><tbody>';
+  for (const x of r.rows) {
+    const p = x.p>=32&&x.p<127?String.fromCharCode(x.p):'\\\\x'+x.p.toString(16).padStart(2,'0');
+    const q = x.q>=32&&x.q<127?String.fromCharCode(x.q):'\\\\x'+x.q.toString(16).padStart(2,'0');
+    const o = x.out>=32&&x.out<127?String.fromCharCode(x.out):'\\\\x'+x.out.toString(16).padStart(2,'0');
+    const mark = x.match?'<span style="color:#aaffaa;">✓</span>':x.bm+'/8';
+    table += `<tr><td>${p}</td><td>${q}</td><td>${o}</td><td align=right>${mark}</td></tr>`;
+  }
+  table += '</tbody></table>';
+  $('js-results').innerHTML = html + table;
+}
+
+function buildGenome() {
+  const N    = +$('js-n').value;
+  const side = +$('js-side').value;
+  const st   = +$('js-st').value;
+  const ps   = +$('js-pool').value;
+  const seed = +$('js-seed').value;
+  const init = $('js-init').value;
+  if (POOL.length !== ps) {
+    status(`Regenerating pool of ${ps} fractal LUTs...`);
+    regenPool(ps, seed);
+  }
+  const fn = init==='naive_pipeline'?naiveGenome : init==='echo'?echoGenome : randomGenome;
+  return fn(N, side, ps, st, seed);
+}
+
+$('js-run').addEventListener('click', () => {
+  status('Running stack…');
+  setTimeout(() => {
+    const g = buildGenome();
+    const lutCache = {};
+    const t0 = performance.now();
+    const r = evaluate(g, $('js-ts').value, 0, lutCache);
+    status(`Done in ${(performance.now()-t0).toFixed(0)} ms`);
+    renderResults(r);
+  }, 10);
+});
+
+$('js-evolve').addEventListener('click', () => {
+  status('Running 10-gen mini-GA…');
+  setTimeout(() => {
+    const ps  = +$('js-pool').value;
+    const t0  = performance.now();
+    const seed = +$('js-seed').value;
+    const lutCache = {};
+    const POP = 8;
+    let pop = [];
+    for (let i=0; i<POP; i++) {
+      const g = buildGenome();
+      // Slight per-i variation
+      g.rule_idx = g.rule_idx.map((_,k)=>(seed*7+i*13+k*31)%ps);
+      const r = evaluate(g, $('js-ts').value, 0, lutCache);
+      pop.push({g, fit:r.fitness, br:r});
+    }
+    pop.sort((a,b)=>b.fit-a.fit);
+    let best = pop[0];
+    for (let gen=0; gen<10; gen++) {
+      const elite = pop.slice(0, 2);
+      const next = elite.slice();
+      for (let k=0; k<POP-2; k++) {
+        const parent = pop[(Math.random()*POP/2)|0].g;
+        const child = mutate(parent, 0.15, ps, Math.floor(Math.random()*1e9));
+        const r = evaluate(child, $('js-ts').value, 0, lutCache);
+        next.push({g:child, fit:r.fitness, br:r});
+      }
+      next.sort((a,b)=>b.fit-a.fit);
+      pop = next;
+      if (pop[0].fit > best.fit) best = pop[0];
+      status(`mini-GA gen ${gen+1}/10 · best ${best.fit.toFixed(4)} · ${best.br.byteMatch}/${best.br.nPairs}`);
+    }
+    status(`Done in ${(performance.now()-t0).toFixed(0)} ms · best fitness ${best.fit.toFixed(4)}`);
+    renderResults(best.br);
+  }, 10);
+});
+</script>
 {% endblock %}
