@@ -247,6 +247,7 @@ HTML = r'''<!DOCTYPE html>
       </div>
       <div class="row">
         <button id="btn-music" title="8-voice CA-derived music (samples the current state every beat)">🔇 MUSIC</button>
+        <button id="btn-palette" title="Re-roll palette without changing channel">🎨 PALETTE</button>
       </div>
     </div>
     <div id="status">CA-TV · channel-surfing the edge of chaos</div>
@@ -729,30 +730,40 @@ function setAutosearch(on) {
   }
 }
 
+// Shared helpers so PLAY and AUTO can also turn music on.
+function musicSetOn(on) {
+  if (on && !musicOn) musicStart();
+  else if (!on && musicOn) musicStop();
+  const b = document.getElementById('btn-music');
+  b.textContent = musicOn ? '🔊 MUSIC' : '🔇 MUSIC';
+  b.classList.toggle('on', musicOn);
+}
+
 document.getElementById('ch-prev').addEventListener('click',
   () => loadChannel(currentChannel === 0 ? 99 : currentChannel - 1));
 document.getElementById('ch-next').addEventListener('click',
   () => loadChannel(currentChannel + 1));
-document.getElementById('ch-autosearch').addEventListener('click',
-  () => setAutosearch(!autosearch));
+document.getElementById('ch-autosearch').addEventListener('click', () => {
+  setAutosearch(!autosearch);
+  // Going from off → on also enables music (UX requested: TV "on"
+  // and auto-surfing means the speaker is on too).
+  if (autosearch) musicSetOn(true);
+});
 
 document.getElementById('btn-rew').addEventListener('click', rewindCurrent);
 document.getElementById('btn-pause').addEventListener('click', () => setPlaying(false));
-document.getElementById('btn-play').addEventListener('click', () => setPlaying(true));
+document.getElementById('btn-play').addEventListener('click', () => {
+  setPlaying(true);
+  // PLAY = TV fully on (picture + sound).
+  musicSetOn(true);
+});
 document.getElementById('btn-ff').addEventListener('click',
   () => setSpeed(speed === 1 ? 4 : (speed === 4 ? 8 : 1)));
-document.getElementById('btn-music').addEventListener('click', () => {
-  if (musicOn) {
-    musicStop();
-    const b = document.getElementById('btn-music');
-    b.textContent = '🔇 MUSIC';
-    b.classList.remove('on');
-  } else {
-    musicStart();
-    const b = document.getElementById('btn-music');
-    b.textContent = '🔊 MUSIC';
-    b.classList.add('on');
-  }
+document.getElementById('btn-music').addEventListener('click',
+  () => musicSetOn(!musicOn));
+document.getElementById('btn-palette').addEventListener('click', () => {
+  randomisePalette();
+  redraw();
 });
 
 // Keyboard shortcuts.
