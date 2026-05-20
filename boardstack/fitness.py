@@ -36,16 +36,18 @@ TEST_SETS = {
 
 
 def evaluate(genome: Dict, test_set_id: str = 'v1',
-                 personality: int = 0) -> dict:
+                 personality: int = 0,
+                 pool_cache: dict = None) -> dict:
     """Run the stack on every test pair, return per-pair results
-    + aggregate fitness."""
+    + aggregate fitness.  `pool_cache` is an optional cross-call
+    dict {pool_idx: upcasted_cell8_lut} — the GA threads one
+    through so successive genomes don't re-upcast shared LUTs."""
     pairs = TEST_SETS.get(test_set_id)
     if pairs is None:
         raise ValueError(f'unknown test set {test_set_id!r}; '
                             f'pick from {list(TEST_SETS)}')
-    # Cache upcasted LUTs across calls (saves work when GA
-    # evaluates many genomes that share rules).
-    pool_cache = {}
+    if pool_cache is None:
+        pool_cache = {}
     n_match = 0
     bits_match = 0
     results = []
