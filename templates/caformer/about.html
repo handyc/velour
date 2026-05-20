@@ -447,17 +447,55 @@ hi = 0x68 0x69 → cells:
   <h2>References in this codebase</h2>
 
   <ul>
-    <li><code>caformer/board128.py</code> — the 128×128 per-position
-        training and inference primitives</li>
+    <li><code>caformer/board128.py</code> — the 128×128 7→1 per-
+        position training and inference primitives</li>
+    <li><code>caformer/board256.py</code> — the 256×256 cell8 (8→1)
+        equivalent, plus <code>upcast_7to1_to_cell8</code>,
+        <code>compose_cell8_from_quarters</code>, and a class-4 GA
+        filter; pairs with the new <code>cell8_b256_rules_blob</code>
+        QRPair field (migration 0009)</li>
     <li><code>caformer/views.py</code> — chat dispatch + async queue
-        + DMN heartbeat</li>
+        + DMN heartbeat; supports <code>?engine=cell8</code>,
+        <code>?port=N</code>, and <code>?sample=pool|time|...</code>
+        for pool sampling and personality switching</li>
     <li><code>caformer/router.py</code> — the 4-way intent router</li>
-    <li><code>caformer/management/commands/caformer_train_board128.py</code>
-        — the CLI training command</li>
+    <li><code>caformer/io/rule_blob.py</code> — self-describing
+        on-disk format for the parallel-training pipeline
+        (per-record CRC32 + byte-matched flag)</li>
+    <li><code>caformer/corpora/shakespeare.py</code> — line / speaker /
+        speaker-continuation pair extractors for the Shakespeare
+        bundle (sonnets baked, plays via <code>--source-file</code>)</li>
+    <li><code>caformer/management/commands/caformer_train_board128.py</code>,
+        <code>caformer_train_cell8_b256.py</code>,
+        <code>caformer_train_b256_pool_context.py</code>,
+        <code>caformer_train_b256_conditional.py</code>,
+        <code>caformer_import_rules.py</code>,
+        <code>caformer_import_corpus.py</code>,
+        <code>alice_bundle_board128.py</code>,
+        <code>alice_bundle_cell8.py</code>,
+        <code>alice_ingest_*</code> — the full training and
+        parallel-import pipeline</li>
+    <li><code>conduit/alice/caformer_{board128,cell8}.py</code> —
+        self-contained ALICE bundle generators (vendor pure-numpy
+        modules, sbatch arrays, no Django runtime dep)</li>
     <li><code>spoeqi/metachain.py</code>,
         <code>spoeqi/l0_quine_search.py</code> — class-4 quine
         infrastructure (substrate for the amplification heads
         described above)</li>
+  </ul>
+
+  <h2>Demo pages added 2026-05-20</h2>
+  <ul>
+    <li><a href="{% url 'caformer:caformer_quarter_compose' %}">/caformer/quarter-compose/</a>
+        — pick 4 trained QRPairs, the system composes their
+        per-position rules into one cell8 LUT (4 stacked 7→1 rules)
+        and runs CA inference at all 4 port values; "distinct_bytes"
+        counter shows how many personalities the port switching
+        actually produces.  Visual proof that one cell8 LUT can
+        hold N rules.</li>
+    <li><a href="{% url 'caformer:caformer_engine_compare' %}">/caformer/engine-compare/</a>
+        — side-by-side board128 vs cell8+256 bench page.  Wall
+        time + byte-match for each, speed ratio in the footer.</li>
   </ul>
 
   <div class="nav-back" style="margin-top: 2rem;">
