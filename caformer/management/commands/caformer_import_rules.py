@@ -57,7 +57,7 @@ class Command(BaseCommand):
         log(f'  require-full: {require_complete}\n')
 
         # Bucket records by (pair_pk, shape, port_src), then by position.
-        # bucket[(pk, shape, port_src)] = {position: rule_blob}
+        # bucket[(pk, shape, port_src)] = {position: (rule_blob, byte_matched)}
         bucket = defaultdict(dict)
         n_records = 0
         n_files_read = 0
@@ -71,11 +71,11 @@ class Command(BaseCommand):
             for rec in read_records(p):
                 key = (rec.pair_pk, rec.rule_shape, rec.port_src)
                 prev = bucket[key].get(rec.position)
-                if prev is not None and prev != rec.rule_blob:
+                if prev is not None and prev[0] != rec.rule_blob:
                     log(f'  conflict {p.name}: pk={rec.pair_pk} '
                         f'pos={rec.position} shape={SHAPE_NAME[rec.rule_shape]} '
                         f'port={rec.port_src} (last-write-wins)')
-                bucket[key][rec.position] = rec.rule_blob
+                bucket[key][rec.position] = (rec.rule_blob, rec.byte_matched)
                 file_recs += 1
             n_records += file_recs
             log(f'  read {p.name}: {file_recs} records')
@@ -94,19 +94,24 @@ class Command(BaseCommand):
         # Plan + execute upserts.
         n_writes = 0
         n_exact = 0
-        for (pk, shape, port_src), pos_blobs in sorted(bucket.items()):
+        for (pk, shape, port_src), pos_info in sorted(bucket.items()):
             pair = pairs.get(pk)
             if pair is None:
                 log(f'  skip pk={pk}: no QRPair row')
                 continue
             expected_n = len(pair.expected.encode('utf-8'))
-            positions = sorted(pos_blobs.keys())
+            positions = sorted(pos_info.keys())
             have_n = len(positions)
-            complete = (positions == list(range(expected_n)))
+            present = (positions == list(range(expected_n)))
+            # True "exact" requires every position to be both present
+            # AND byte-matched (per-record byte_matched flag).  Older
+            # v1 records read with byte_matched=True (legacy default).
+            all_matched = all(pos_info[i][1] for i in positions)
+            exact = present and all_matched
             shape_name = SHAPE_NAME[shape]
             rule_len = SHAPE_LEN[shape]
 
-            if require_complete and not complete:
+            if require_complete and not present:
                 log(f'  skip pk={pk} shape={shape_name} port={port_src}: '
                     f'incomplete ({have_n}/{expected_n})')
                 continue
@@ -116,7 +121,7 @@ class Command(BaseCommand):
             # train and we're not requiring complete).
             max_pos = max(positions)
             zero_blob = bytes(rule_len)
-            concat = b''.join(pos_blobs.get(i, zero_blob)
+            concat = b''.join(pos_info.get(i, (zero_blob, False))[0]
                                   for i in range(max_pos + 1))
 
             if shape == SHAPE_CELL8:
@@ -127,22 +132,24 @@ class Command(BaseCommand):
                 log(f'  skip pk={pk}: unknown shape {shape}')
                 continue
 
+            matched_n = sum(1 for i in positions if pos_info[i][1])
             log(f'  pk={pk:4d} shape={shape_name:5s} port={port_src:9s} '
-                f'positions={have_n}/{expected_n}  '
-                f'{"COMPLETE ✓" if complete else "partial"}  '
+                f'positions={have_n}/{expected_n} present  '
+                f'{matched_n}/{have_n} byte-matched  '
+                f'{"EXACT ✓" if exact else "partial"}  '
                 f'blob={len(concat)} B')
 
             if dry_run:
                 continue
 
             setattr(pair, field, concat)
-            setattr(pair, exact_field, complete)
+            setattr(pair, exact_field, exact)
             if shape == SHAPE_CELL8:
                 pair.cell8_input_source = port_src
             pair.save(update_fields=[field, exact_field] +
                           (['cell8_input_source'] if shape == SHAPE_CELL8 else []))
             n_writes += 1
-            if complete:
+            if exact:
                 n_exact += 1
 
         log(f'\n=== done ===')

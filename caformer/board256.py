@@ -367,11 +367,30 @@ def train_position_board256(prompt: str, target_byte: int,
             break
         if time.time() - t0 >= max_seconds:
             break
+        # Cap polish trials by remaining budget — polish_genome doesn't
+        # check time mid-trial, and at 256×256 each fitness eval is
+        # ~0.3-0.5 s × 3 colours = ~1.5 s per trial.  Probe one eval
+        # to get a fresh estimate, then trim trials so polish can't
+        # overshoot the per-position budget.
         def _polish_fitness(g):
             return _fitness(g['output'])
+        probe_t0 = time.time()
+        _ = _fitness(best_rule)
+        per_eval_s   = max(0.01, time.time() - probe_t0)
+        per_trial_s  = 3.0 * per_eval_s            # polish tries 3 alt colours/trial
+        remaining_s  = max(0.0, max_seconds - (time.time() - t0))
+        # Reserve 1 trial worth of slack so we don't *exactly* hit budget.
+        budget_trials = int(remaining_s / per_trial_s) - 1
+        actual_trials = max(0, min(polish_trials, budget_trials))
+        if actual_trials < 3:
+            fire('polish_skip', {'burst': burst,
+                                       'remaining_s': remaining_s,
+                                       'per_trial_s': per_trial_s,
+                                       'elapsed_s':   time.time() - t0})
+            continue
         polished, polished_fit, n_imp = polish_genome(
             {'output': best_rule.copy()}, _polish_fitness,
-            trials=polish_trials,
+            trials=actual_trials,
             seed=seed ^ 0xC0FFEE ^ (burst * 31))
         if polished_fit > best_fit:
             best_rule = polished['output']
@@ -379,6 +398,7 @@ def train_position_board256(prompt: str, target_byte: int,
             matched = _byte_match(best_rule)
             fire('polish', {'burst': burst, 'best_fit': best_fit,
                                 'matched': matched, 'n_imp': n_imp,
+                                'actual_trials': actual_trials,
                                 'elapsed_s': time.time() - t0})
 
     return {'rule_table': best_rule, 'byte_match': matched,

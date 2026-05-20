@@ -165,7 +165,8 @@ class Command(BaseCommand):
                     n_ticks=n_ticks,
                     port_src='off',
                     rule_shape=SHAPE_CELL8,
-                    rule_blob=bytes(r['rule_table']))
+                    rule_blob=bytes(r['rule_table']),
+                    byte_matched=matched)
                 recs_for_pair.append(rec)
                 # Append immediately so a crash loses at most this
                 # position's work, not the whole pair.
