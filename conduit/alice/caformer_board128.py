@@ -213,7 +213,7 @@ if __name__ == '__main__':
 #SBATCH --error=outputs/slurm-%A_%a.err
 set -euo pipefail
 module load Python/3.11.5-GCCcore-13.2.0 || true
-cd "$(dirname "$0")"
+cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")}"
 python3 run_task.py "$SLURM_ARRAY_TASK_ID"
 '''
     _write_executable(out_dir / 'submit.sh', submit_sh)

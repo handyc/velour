@@ -701,7 +701,7 @@ set -euo pipefail
 # ALICE python module that ships numpy.
 module load Python/3.11.5-GCCcore-13.2.0 || true
 
-cd "$(dirname "$0")"
+cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")}"
 export PYTHONPATH="$(pwd)/scripts/lib"
 
 echo "[1/2] extracting pairs from corpus.txt..."
