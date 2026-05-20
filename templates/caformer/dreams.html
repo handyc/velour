@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}caformer dreams · class-4 LUTs from the DMN{% endblock %}
+{% block content %}
+<meta http-equiv="refresh" content="10">
+<style>
+  .dr { max-width: 90ch; margin: 1rem auto; padding: 0 1rem;
+        color: #cfe5cf; font-family: ui-sans-serif, system-ui, sans-serif;
+        line-height: 1.5; }
+  .dr h1 { color:#aaffaa; font-size:1.4rem;
+           border-bottom:1px solid #2a6a2a; padding-bottom:4px; }
+  .dr .lede { color:#88aa88; font-size:0.86rem; }
+  .dr code { color:#f0ff80; background:#0a1a0a; padding:1px 4px; }
+  .grid { display:grid;
+          grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+          gap: 10px; margin-top:14px; }
+  .dream { background:#050a05; border:1px solid #1a3a1a; padding:6px;
+           position:relative; }
+  .dream img { width:100%; aspect-ratio:1; image-rendering:pixelated;
+               image-rendering:crisp-edges; display:block; }
+  .dream .meta { font-family:ui-monospace,monospace; font-size:0.7rem;
+                 color:#88aa88; margin-top:4px; line-height:1.3; }
+  .dream .gen { color:#cca5ff; }
+  .dream .act { color:#79c0ff; }
+  .empty { color:#888; font-style:italic; padding:30px; text-align:center;
+           border:1px dashed #2a6a2a; }
+  pre { background:#050a05; padding:8px; border-left:3px solid #2a6a2a;
+        font-family:ui-monospace,monospace; font-size:0.78rem;
+        margin-top:14px; }
+</style>
+<div class="dr">
+<h1>caformer dreams</h1>
+<p class="lede">
+A continuously-running background process (<code>caformer_dmn_dream</code>)
+samples fractal regions, filters for class-4 dynamics, and stockpiles
+the survivors here.  This page auto-refreshes every 10 s — leave it
+open and watch new dreams arrive as the DMN runs.
+</p>
+<p class="lede">
+Pool: <code>{{ pool_dir }}</code> — currently {{ n_dreams }} dreams.
+Each entry is a 128×128 K=4 hex-CA rule LUT (16,384 bytes) whose
+post-transient activity lands in the class-4 band [0.02, 0.55].
+</p>
+
+{% if dreams %}
+  <div class="grid">
+    {% for d in dreams %}
+      <div class="dream">
+        {% if d.png %}
+          <img src="{% url 'caformer:caformer_dream_png' fname=d.name|slice:":-4" %}"
+               alt="{{ d.name }}"
+               title="{{ d.name }}">
+        {% else %}
+          <div class="meta" style="height:120px;">(no png)</div>
+        {% endif %}
+        <div class="meta">
+          <span class="gen">{{ d.gen }}</span>
+          · <span class="act">{{ d.activity }}</span>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="empty">
+    No dreams yet.  Start the generator:
+    <pre>manage.py caformer_dmn_dream</pre>
+    or for a single attempt:
+    <pre>manage.py caformer_dmn_dream --once</pre>
+  </div>
+{% endif %}
+
+<h2 style="color:#aaffaa; font-size:1rem; margin-top:1.5rem;
+           border-bottom:1px solid #1a3a1a; padding-bottom:2px;">
+  How it works</h2>
+<ul style="font-size:0.85rem;">
+  <li>Pick one of mandelbrot / julia / burning_ship / tricorn /
+      multibrot / newton / phoenix at random</li>
+  <li>Generate the K=4 LUT (16,384 bytes) for a random region</li>
+  <li>Run a fast class-4 probe: 12 ticks on a 32×32 random state,
+      4-tick transient, measure mean cells-changed-per-tick</li>
+  <li>Accept iff activity ∈ [0.02, 0.55] (the "edge of chaos" band)</li>
+  <li>Save as <code>.lut</code> + <code>.png</code> in the pool</li>
+  <li>When the pool exceeds <code>--max-pool</code>, oldest dreams
+      get culled</li>
+</ul>
+
+<p class="lede" style="margin-top:1rem;">
+Dreams from this pool can be loaded into
+<a href="{% url 'caformer:caformer_lutview' %}">/caformer/lutview/</a>
+to play with interactively, or composed into
+<a href="{% url 'caformer:caformer_quarter_compose' %}">/caformer/quarter-compose/</a>
+as cell8 personalities, or piped into the FTV's channel pool via
+<code>caformer_emit_tv --bake-corpus N</code> once we wire it to the
+dreams dir.
+</p>
+</div>
+{% endblock %}
