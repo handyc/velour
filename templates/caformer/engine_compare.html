@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}engine compare · caformer{% endblock %}
+{% block content %}
+<style>
+  .ec { max-width: 90ch; margin: 1rem auto; padding: 0 1rem;
+        color: #cfe5cf; font-family: ui-sans-serif, system-ui, sans-serif;
+        line-height: 1.55; }
+  .ec h1 { color: #aaffaa; font-size: 1.4rem;
+           border-bottom: 1px solid #2a6a2a; padding-bottom: 4px; }
+  .ec h2 { color: #aaffaa; font-size: 1rem; margin-top: 1.4rem;
+           border-bottom: 1px solid #1a3a1a; padding-bottom: 2px; }
+  .ec .lede { color: #88aa88; font-size: 0.88rem; }
+  .ec code { color: #f0ff80; background: #0a1a0a; padding: 1px 4px;
+             border-radius: 2px; font-family: ui-monospace, monospace; }
+  .ec .form-row { display: flex; gap: 10px; align-items: center;
+                  background: #050a05; border: 1px solid #1a3a1a;
+                  padding: 12px; margin: 14px 0; }
+  .ec input, .ec select { background: #0a1a0a; color: #cfe5cf;
+                           border: 1px solid #2a6a2a; padding: 4px 8px;
+                           font: inherit; font-family: ui-monospace, monospace;
+                           font-size: 0.85rem; }
+  .ec input[type=text] { min-width: 30ch; }
+  .ec button { background: #0a2a0a; color: #aaffaa;
+               border: 1px solid #2a6a2a; padding: 5px 14px;
+               font: inherit; cursor: pointer; }
+  .ec button:hover { background: #1a4a1a; }
+  .ec .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+              margin-top: 14px; }
+  .ec .panel { background: #050a05; border: 1px solid #1a3a1a;
+               padding: 12px; }
+  .ec .panel.b128 { border-left: 3px solid #79c0ff; }
+  .ec .panel.c8   { border-left: 3px solid #cca5ff; }
+  .ec .panel h3 { color: #aaffaa; font-size: 0.95rem; margin: 0 0 8px 0; }
+  .ec .panel.b128 h3 { color: #79c0ff; }
+  .ec .panel.c8   h3 { color: #cca5ff; }
+  .ec .panel .out { background: #0a1a0a; border: 1px solid #1a3a1a;
+                     padding: 8px; font-family: ui-monospace, monospace;
+                     font-size: 0.85rem; min-height: 1.6em;
+                     word-break: break-word; white-space: pre-wrap; }
+  .ec .panel .stat { font-family: ui-monospace, monospace;
+                      font-size: 0.78rem; color: #88aa88; margin-top: 6px; }
+  .ec .panel .stat b { color: #aaffaa; }
+  .ec .panel.missing { opacity: 0.5; }
+  .ec .panel.missing .out { color: #888; font-style: italic; }
+  .ec .compare-row { margin-top: 8px; font-size: 0.85rem;
+                      font-family: ui-monospace, monospace; color: #88aa88; }
+  .ec .compare-row b { color: #f0ff80; }
+  .ec .examples { margin-top: 18px; }
+  .ec .examples .chip { display:inline-block; background: #0a2a0a;
+                         color: #aaffaa; border: 1px solid #2a6a2a;
+                         padding: 2px 8px; margin: 2px 4px 2px 0;
+                         cursor: pointer; font-family: ui-monospace, monospace;
+                         font-size: 0.78rem; }
+  .ec .examples .chip:hover { background: #1a4a1a; }
+  .ec .examples .chip.b128only { border-color: #1a4a6a; color: #79c0ff;
+                                  background: #0a1a2a; }
+  .ec .examples .chip.both { border-color: #5a3a8a; color: #cca5ff;
+                              background: #1a0a2a; }
+</style>
+<div class="ec">
+<h1>engine compare</h1>
+<p class="lede">
+Run the same prompt through both <span style="color:#79c0ff">board128</span>
+(7→1, 128×128, fast) and <span style="color:#cca5ff">cell8+256</span>
+(8→1, 256×256, supports port-modulation) side by side.  Wall-time and
+byte-match diff shown for each.  Useful for telling whether cell8's
+extra capacity is paying for its extra compute on a given pair.
+</p>
+
+<div class="form-row">
+  <label>prompt: <input type="text" id="ec-prompt" value="hi"></label>
+  <label>port (cell8): <input type="number" id="ec-port" value="0" min="0" max="3" style="width:5em;"></label>
+  <button id="ec-run">▶ run both</button>
+  <span id="ec-status" style="color:#888; font-size:0.78rem;"></span>
+</div>
+
+<div class="grid">
+  <div class="panel b128" id="ec-b128-panel">
+    <h3>board128 (7→1, 128×128)</h3>
+    <div class="out" id="ec-b128-out">(no run yet)</div>
+    <div class="stat" id="ec-b128-stat"></div>
+  </div>
+  <div class="panel c8" id="ec-c8-panel">
+    <h3>cell8+256 (8→1, 256×256)</h3>
+    <div class="out" id="ec-c8-out">(no run yet)</div>
+    <div class="stat" id="ec-c8-stat"></div>
+  </div>
+</div>
+
+<div class="compare-row" id="ec-compare"></div>
+
+<div class="examples">
+  <h2>examples</h2>
+  <p class="lede">Click a chip to load its prompt.  <span style="color:#cca5ff">Purple</span> = both engines have rules
+    (the real comparison); <span style="color:#79c0ff">blue</span> = board128 only
+    (cell8 will report no-rules).</p>
+  <div>
+    {% for p in pairs_both %}
+      <span class="chip both" data-prompt="{{ p.prompt|escapejs }}">{{ p.label }}</span>
+    {% endfor %}
+  </div>
+  <div style="margin-top:6px;">
+    {% for p in pairs_b128_only %}
+      <span class="chip b128only" data-prompt="{{ p.prompt|escapejs }}">{{ p.label }}</span>
+    {% endfor %}
+  </div>
+</div>
+
+<h2>how to read the panels</h2>
+<ul style="font-size:0.85rem; line-height:1.7;">
+  <li><b>Match count</b>: how many bytes of the produced output exactly
+      equal the trained pair's <code>expected</code>.  N/N = full match
+      (the model "knows" the answer); 0/N = nothing matched
+      (untrained or budget-out).</li>
+  <li><b>Wall ms</b>: end-to-end inference latency.  board128 with
+      ?tier=auto is typically ~5-50 ms; cell8+256 is ~200-1000 ms
+      (4× larger LUT × 4× cells × 2× ticks).</li>
+  <li><b>Speed ratio</b>: board128 / cell8 wall.  A value of e.g.
+      "0.05×" means board128 is 20× faster than cell8 on this prompt.</li>
+</ul>
+</div>
+
+<script>
+(function () {
+  const run     = document.getElementById('ec-run');
+  const prompt  = document.getElementById('ec-prompt');
+  const port    = document.getElementById('ec-port');
+  const status  = document.getElementById('ec-status');
+  const b128Out = document.getElementById('ec-b128-out');
+  const b128Stat= document.getElementById('ec-b128-stat');
+  const c8Out   = document.getElementById('ec-c8-out');
+  const c8Stat  = document.getElementById('ec-c8-stat');
+  const b128Pan = document.getElementById('ec-b128-panel');
+  const c8Pan   = document.getElementById('ec-c8-panel');
+  const cmpRow  = document.getElementById('ec-compare');
+
+  function showPanel(panel, out, stat, data, label) {
+    panel.classList.remove('missing');
+    if (!data) {
+      panel.classList.add('missing');
+      out.textContent = `(no ${label} rules for this prompt)`;
+      stat.textContent = '';
+      return;
+    }
+    out.textContent = data.produced;
+    const m = data.byte_match_count;
+    const n = data.n_bytes;
+    const pct = (100 * m / Math.max(1, n)).toFixed(1);
+    const portStr = data.port_used !== undefined ? ` · port=${data.port_used}` : '';
+    stat.innerHTML = `pk=${data.pair_pk} · target=<b>${data.expected}</b> · `
+                   + `match <b>${m}/${n}</b> (${pct}%) · `
+                   + `<b>${data.wall_ms} ms</b>${portStr}`;
+  }
+
+  async function doRun() {
+    const fd = new FormData();
+    fd.append('prompt', prompt.value);
+    fd.append('port',   port.value);
+    const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+    status.textContent = 'running both engines…';
+    run.disabled = true;
+    try {
+      const r = await fetch("{% url 'caformer:caformer_engine_compare_run' %}", {
+        method: 'POST', body: fd, headers: {'X-CSRFToken': csrf},
+        credentials: 'same-origin'});
+      const j = await r.json();
+      if (j.error) { status.textContent = `error: ${j.error}`; return; }
+      showPanel(b128Pan, b128Out, b128Stat, j.board128, 'board128');
+      showPanel(c8Pan,   c8Out,   c8Stat,   j.cell8_b256, 'cell8');
+      if (j.speed_ratio !== null) {
+        cmpRow.innerHTML = `speed ratio (board128 wall ÷ cell8 wall): `
+                         + `<b>${j.speed_ratio.toFixed(3)}×</b> `
+                         + `(${j.speed_ratio < 1 ? 'cell8 slower' : 'cell8 faster'})`;
+      } else {
+        cmpRow.textContent = '';
+      }
+      status.textContent = '';
+    } catch (e) {
+      status.textContent = `error: ${e.message}`;
+    } finally {
+      run.disabled = false;
+    }
+  }
+  run.addEventListener('click', doRun);
+  prompt.addEventListener('keydown', e => { if (e.key === 'Enter') doRun(); });
+  document.querySelectorAll('.chip').forEach(c => {
+    c.addEventListener('click', () => {
+      prompt.value = c.dataset.prompt;
+      doRun();
+    });
+  });
+})();
+</script>
+{% endblock %}

@@ -4015,6 +4015,111 @@ def caformer_quarter_compose_run(request):
     })
 
 
+@login_required
+def caformer_engine_compare_view(request):
+    """Side-by-side bench: same prompt, both engines (board128 and
+    cell8+256), output + wall-time + byte-match shown for each.
+    Lets you see what cell8 actually buys versus the established
+    board128 baseline, prompt by prompt."""
+    from .models import QRPair
+    # Show only pairs where BOTH engines have rules — that's where
+    # the comparison is meaningful.
+    pairs = list(QRPair.objects
+                       .filter(board128_exact=True,
+                                 cell8_b256_rules_blob__isnull=False)
+                       .order_by('pk')
+                       .values('pk', 'prompt', 'expected'))
+    for p in pairs:
+        p['label'] = f"pk={p['pk']}  {p['prompt']!r} → {p['expected']!r}"
+    # Also list board128-only pairs (cell8 will fall through to board128).
+    board128_only = list(QRPair.objects
+                                  .filter(board128_exact=True,
+                                            cell8_b256_rules_blob__isnull=True)
+                                  .order_by('pk')[:30]
+                                  .values('pk', 'prompt', 'expected'))
+    for p in board128_only:
+        p['label'] = f"pk={p['pk']}  {p['prompt']!r} → {p['expected']!r}"
+    return render(request, 'caformer/engine_compare.html', {
+        'pairs_both':      pairs,
+        'pairs_b128_only': board128_only,
+    })
+
+
+@login_required
+def caformer_engine_compare_run(request):
+    """POST: {prompt} → run inference on BOTH engines, return both
+    outputs + per-engine wall times + byte-match diff."""
+    import time
+    import numpy as np
+    from .models import QRPair
+
+    if request.method != 'POST':
+        return _json_response({'error': 'POST only'})
+    prompt = (request.POST.get('prompt') or '').strip()
+    if not prompt:
+        return _json_response({'error': 'prompt required'})
+    port_value = int(request.POST.get('port') or 0) & 3
+
+    # board128 run.
+    pair_b128 = QRPair.objects.filter(prompt=prompt, board128_exact=True).first()
+    b128_result = None
+    if pair_b128 and pair_b128.is_board128():
+        from . import board128 as _b128
+        rules = pair_b128.board128_rules()
+        n_bytes = len(pair_b128.expected.encode('utf-8'))
+        t0 = time.time()
+        produced = _b128.forward_pair_board128_positional(
+            prompt, rules, n_bytes, n_ticks=128)
+        wall_ms = (time.time() - t0) * 1000.0
+        try: text = produced.decode('utf-8')
+        except UnicodeDecodeError: text = produced.decode('latin-1', errors='replace')
+        b128_result = {
+            'pair_pk':   pair_b128.pk,
+            'expected':  pair_b128.expected,
+            'produced':  text,
+            'byte_match_count': sum(1 for a, b in zip(
+                produced, pair_b128.expected.encode('utf-8')) if a == b),
+            'n_bytes':   n_bytes,
+            'wall_ms':   round(wall_ms, 1),
+        }
+
+    # cell8+256 run.
+    pair_c8 = QRPair.objects.filter(prompt=prompt,
+                                              cell8_b256_rules_blob__isnull=False).first()
+    cell8_result = None
+    if pair_c8 and pair_c8.is_cell8_b256():
+        from . import board256 as _b256
+        rules = pair_c8.cell8_b256_rules()
+        n_bytes = len(pair_c8.expected.encode('utf-8'))
+        t0 = time.time()
+        produced = _b256.forward_pair_board256_positional(
+            prompt, rules, n_bytes,
+            n_ticks=_b256.DEFAULT_N_TICKS_256, port_value=port_value)
+        wall_ms = (time.time() - t0) * 1000.0
+        try: text = produced.decode('utf-8')
+        except UnicodeDecodeError: text = produced.decode('latin-1', errors='replace')
+        cell8_result = {
+            'pair_pk':   pair_c8.pk,
+            'expected':  pair_c8.expected,
+            'produced':  text,
+            'byte_match_count': sum(1 for a, b in zip(
+                produced, pair_c8.expected.encode('utf-8')) if a == b),
+            'n_bytes':   n_bytes,
+            'wall_ms':   round(wall_ms, 1),
+            'port_used': port_value,
+        }
+
+    return _json_response({
+        'ok': True,
+        'prompt':     prompt,
+        'board128':   b128_result,
+        'cell8_b256': cell8_result,
+        'speed_ratio': (b128_result['wall_ms'] / cell8_result['wall_ms']
+                            if (b128_result and cell8_result and
+                                cell8_result['wall_ms'] > 0) else None),
+    })
+
+
 def caformer_about_view(request):
     """The 'about' page for caformer — explains the architecture to
     skeptical colleagues with live stats, math, and worked examples
