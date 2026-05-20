@@ -2878,63 +2878,91 @@ def funnel_chat_reply(request):
         engine      = (request.GET.get('engine') or 'board128').strip().lower()
         tier_pref = (request.GET.get('tier') or '').strip().lower()
 
-        # ?engine=cell8 — prefer cell8+256 rules over board128.  Opt-in
-        # via URL flag; default behaviour unchanged.  See migration 0009
-        # for the cell8_b256_* fields.  Falls through to board128 path
-        # below if no cell8 rules exist for this prompt.
+        # ?engine=cell8 — prefer cell8 rules over board128.  Opt-in
+        # via URL flag; default behaviour unchanged.  Migration 0009
+        # added cell8_b256_*; migration 0010 added cell8_b008..cell8_b128
+        # multires tiers.  With ?tier=auto, dispatch picks the cheapest
+        # cell8 tier whose *_exact is True (else falls through).
         if engine == 'cell8':
+            # Find a matching pair that has ANY cell8 tier exact.
+            from django.db.models import Q
+            cell8_q = QRPair.objects.filter(prompt=q).filter(
+                Q(cell8_b008_exact=True) | Q(cell8_b016_exact=True) |
+                Q(cell8_b032_exact=True) | Q(cell8_b064_exact=True) |
+                Q(cell8_b128_exact=True) | Q(cell8_b256_exact=True))
             c8_pair, c8_pool_pks = _pool_pick(
-                QRPair.objects.filter(cell8_b256_exact=True, prompt=q),
-                sample_mode, port_value=port_value)
-            if c8_pair is not None and c8_pair.is_cell8_b256():
+                cell8_q, sample_mode, port_value=port_value)
+            if c8_pair is not None:
                 import time
-                from . import board256 as _b256
-                rules = c8_pair.cell8_b256_rules()
-                n_bytes = len(c8_pair.expected.encode('utf-8'))
-                # Pick which port value to broadcast.  Default 0
-                # (no modulation).  When ?port=N supplied, broadcast
-                # that K=4 value across the board → port selects which
-                # quarter of the cell8 LUT fires (see compose_cell8_*).
-                inf_port = port_value & 3
-                t0 = time.time()
-                produced = _b256.forward_pair_board256_positional(
-                    q, rules, n_bytes,
-                    n_ticks=_b256.DEFAULT_N_TICKS_256,
-                    port_value=inf_port)
-                wall_ms = (time.time() - t0) * 1000.0
-                try:
-                    reply_text = produced.decode('utf-8')
-                except UnicodeDecodeError:
-                    reply_text = produced.decode('latin-1', errors='replace')
-                return _json_response({
-                    'layer':            'router',
-                    'category':         cat,
-                    'category_name':    cat_name,
-                    'category_colour':  colour,
-                    'sub_label':        (f'cell8+256 (port={inf_port}, '
-                                            f'{len(rules)}×64KB rules, '
-                                            f'{wall_ms:.0f} ms)'),
-                    'reply':            reply_text,
-                    'pure_ca':          True,
-                    'external_used':    False,
-                    'external_provider': '',
-                    'external_model':    '',
-                    'external_warning': '',
-                    'words':            reply_text.split(),
-                    'per_slot':         [],
-                    'unk_count':        0,
-                    'meta_replies':     {},
-                    'sub_dirs_used':    {cat_name: f'qrpair-cell8:{c8_pair.pk}'},
-                    'loop_trace':       [],
-                    'qrpair_id':        c8_pair.pk,
-                    'qrpair_expected':  c8_pair.expected,
-                    'engine':           'cell8',
-                    'port_value':       inf_port,
-                    'pool_pks':         c8_pool_pks,
-                    'pool_size':        len(c8_pool_pks),
-                    'sample_mode':      sample_mode,
-                    'cell8_wall_ms':    round(wall_ms, 1),
-                })
+                # Tier choice: ?tier=auto picks cheapest exact cell8
+                # tier; otherwise default to b256.
+                chosen_tier = (c8_pair.best_cell8_tier()
+                                   if tier_pref == 'auto' else None)
+                if chosen_tier is None:
+                    chosen_tier = 'b256' if c8_pair.is_cell8_b256() else None
+                rules = c8_pair.cell8_rules_at_tier(chosen_tier) if chosen_tier else None
+                if rules is None:
+                    # Shouldn't hit — query already required *_exact —
+                    # but fall through if it does.
+                    pass
+                else:
+                    from .cell8_multires import (forward_pair_cell8_at_side,
+                                                       TIER_SIDES,
+                                                       cell8_tier_geometry)
+                    from . import board256 as _b256
+                    n_bytes = len(c8_pair.expected.encode('utf-8'))
+                    inf_port = port_value & 3
+                    if chosen_tier == 'b256':
+                        side = 256
+                        n_ticks = _b256.DEFAULT_N_TICKS_256
+                        t0 = time.time()
+                        produced = _b256.forward_pair_board256_positional(
+                            q, rules, n_bytes,
+                            n_ticks=n_ticks, port_value=inf_port)
+                    else:
+                        side = TIER_SIDES[chosen_tier]
+                        n_ticks = cell8_tier_geometry(side)['n_ticks_default']
+                        t0 = time.time()
+                        produced = forward_pair_cell8_at_side(
+                            q, rules, n_bytes, side,
+                            n_ticks=n_ticks, port_value=inf_port)
+                    wall_ms = (time.time() - t0) * 1000.0
+                    try:
+                        reply_text = produced.decode('utf-8')
+                    except UnicodeDecodeError:
+                        reply_text = produced.decode('latin-1', errors='replace')
+                    return _json_response({
+                        'layer':            'router',
+                        'category':         cat,
+                        'category_name':    cat_name,
+                        'category_colour':  colour,
+                        'sub_label':        (f'cell8/{chosen_tier} '
+                                                f'(port={inf_port}, '
+                                                f'{len(rules)}×64KB rules, '
+                                                f'side={side}, '
+                                                f'{wall_ms:.0f} ms)'),
+                        'reply':            reply_text,
+                        'pure_ca':          True,
+                        'external_used':    False,
+                        'external_provider': '',
+                        'external_model':    '',
+                        'external_warning': '',
+                        'words':            reply_text.split(),
+                        'per_slot':         [],
+                        'unk_count':        0,
+                        'meta_replies':     {},
+                        'sub_dirs_used':    {cat_name: f'qrpair-cell8:{c8_pair.pk}'},
+                        'loop_trace':       [],
+                        'qrpair_id':        c8_pair.pk,
+                        'qrpair_expected':  c8_pair.expected,
+                        'engine':           'cell8',
+                        'cell8_tier':       chosen_tier,
+                        'port_value':       inf_port,
+                        'pool_pks':         c8_pool_pks,
+                        'pool_size':        len(c8_pool_pks),
+                        'sample_mode':      sample_mode,
+                        'cell8_wall_ms':    round(wall_ms, 1),
+                    })
             # No cell8 rules for this prompt — fall through to board128.
 
         b128_pair, b128_pool_pks = _pool_pick(

@@ -378,6 +378,23 @@ class QRPair(models.Model):
                  ('router',    'router 2-bit category'),
                  ('prev_byte', 'previous chain output cell')])
 
+    # Cell8 multi-resolution storage hierarchy.  Same shape as the
+    # 7→1 multires (b008..b064 in this model) but for cell8 rules.
+    # Each blob is N per-position 65,536-byte cell8 LUTs at the
+    # specified board side.  Used for fast cell8 inference dispatch:
+    # tier-auto picks the smallest tier with cell8_*_exact = True.
+    # See caformer/cell8_multires.py.
+    cell8_b008_rules_blob = models.BinaryField(null=True, blank=True)
+    cell8_b008_exact      = models.BooleanField(default=False)
+    cell8_b016_rules_blob = models.BinaryField(null=True, blank=True)
+    cell8_b016_exact      = models.BooleanField(default=False)
+    cell8_b032_rules_blob = models.BinaryField(null=True, blank=True)
+    cell8_b032_exact      = models.BooleanField(default=False)
+    cell8_b064_rules_blob = models.BinaryField(null=True, blank=True)
+    cell8_b064_exact      = models.BooleanField(default=False)
+    cell8_b128_rules_blob = models.BinaryField(null=True, blank=True)
+    cell8_b128_exact      = models.BooleanField(default=False)
+
     last_queried_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -459,3 +476,28 @@ class QRPair(models.Model):
         return [np.frombuffer(blob[i * 65_536:(i + 1) * 65_536],
                                   dtype=np.uint8).copy()
                 for i in range(n)]
+
+    def cell8_rules_at_tier(self, tier: str):
+        """Yield this pair's cell8 per-position rules at the requested
+        multires tier ('b008', 'b016', 'b032', 'b064', 'b128', 'b256').
+        Returns None if that tier isn't populated."""
+        field = f'cell8_{tier}_rules_blob'
+        if not hasattr(self, field):
+            return None
+        blob = getattr(self, field)
+        if not blob or len(bytes(blob)) < 65_536:
+            return None
+        import numpy as np
+        blob = bytes(blob)
+        n = len(blob) // 65_536
+        return [np.frombuffer(blob[i * 65_536:(i + 1) * 65_536],
+                                  dtype=np.uint8).copy()
+                for i in range(n)]
+
+    def best_cell8_tier(self):
+        """Cheapest cell8 tier with _exact=True, or None if no cell8
+        tier is exact.  Used by ?engine=cell8&tier=auto dispatch."""
+        for tier in ('b008', 'b016', 'b032', 'b064', 'b128', 'b256'):
+            if getattr(self, f'cell8_{tier}_exact', False):
+                return tier
+        return None
