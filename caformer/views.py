@@ -3837,6 +3837,123 @@ def caformer_cell8_view(request):
     })
 
 
+@login_required
+def caformer_quarter_compose_view(request):
+    """Quarter-composition demo: pick 4 trained QRPairs, the system
+    composes their per-position rules into ONE cell8 LUT (each
+    quarter = one rule), runs all 4 port values on a 256×256 board,
+    shows how the same LUT produces 4 distinct outputs.  Visual
+    proof of the architectural insight that a cell8 rule IS four
+    stacked 7→1 rules — port selects which fires."""
+    from .models import QRPair
+    pairs = list(QRPair.objects.filter(board128_exact=True)
+                       .order_by('prompt', 'pk')
+                       .values('pk', 'prompt', 'expected'))
+    for p in pairs:
+        p['n_pos'] = len(p['expected'].encode('utf-8'))
+        p['label'] = f"pk={p['pk']}  {p['prompt']!r} → {p['expected']!r}"
+    return render(request, 'caformer/quarter_compose.html', {
+        'pairs':   pairs,
+        'n_pairs': len(pairs),
+    })
+
+
+@login_required
+def caformer_quarter_compose_run(request):
+    """POST: {pk0, pk1, pk2, pk3, position, prompt?} → run inference
+    at all 4 port values with the composed cell8 LUT.  Returns the
+    decoded byte at `position` for each port + per-port wall time."""
+    import time
+    import numpy as np
+    from .models import QRPair
+    from .board256 import (compose_cell8_from_quarters,
+                                  embed_prompt_256,
+                                  decode_byte_at_position_256,
+                                  BOARD_SIDE_256, DEFAULT_N_TICKS_256)
+    from .cell8 import hex_ca_step_cell8, broadcast_input
+
+    if request.method != 'POST':
+        return _json_response({'error': 'POST only'})
+    try:
+        pks = [int(request.POST.get(f'pk{i}', 0)) for i in range(4)]
+    except (TypeError, ValueError):
+        return _json_response({'error': 'pk0..pk3 must be ints'})
+    position = max(0, int(request.POST.get('position', 0)))
+    prompt_override = (request.POST.get('prompt') or '').strip()
+
+    pair_rows = {p.pk: p for p in QRPair.objects.filter(pk__in=set(pks))}
+    quarters_meta = []
+    quarter_blobs = []
+    for i, pk in enumerate(pks):
+        p = pair_rows.get(pk)
+        if p is None or not p.board128_rules_blob:
+            return _json_response({'error':
+                f'quarter {i}: pair pk={pk} has no board128_rules_blob'})
+        exp_len = len(p.expected.encode('utf-8'))
+        if position >= exp_len:
+            return _json_response({'error':
+                f'quarter {i}: position {position} out of range for '
+                f'pair pk={pk} (n_pos={exp_len})'})
+        blob = bytes(p.board128_rules_blob)
+        rule_bytes = blob[position*16384:(position+1)*16384]
+        if len(rule_bytes) != 16_384:
+            return _json_response({'error':
+                f'quarter {i}: pair pk={pk} position-{position} rule '
+                f'is {len(rule_bytes)} B (need 16384)'})
+        quarter_blobs.append(rule_bytes)
+        target_byte = p.expected.encode('utf-8')[position]
+        quarters_meta.append({
+            'pk':       pk,
+            'prompt':   p.prompt,
+            'expected': p.expected,
+            'position': position,
+            'target_byte': target_byte,
+            'target_char': (chr(target_byte) if 32 <= target_byte < 127
+                              else f'\\x{target_byte:02x}'),
+        })
+
+    # Compose.
+    cell8_lut = compose_cell8_from_quarters(quarter_blobs)
+    prompt = prompt_override or quarters_meta[0]['prompt']
+
+    # Run inference at each port value.
+    inference_results = []
+    for port in range(4):
+        t0 = time.time()
+        state = embed_prompt_256(prompt)
+        inp = broadcast_input(BOARD_SIDE_256, port)
+        for _ in range(DEFAULT_N_TICKS_256):
+            state = hex_ca_step_cell8(state, inp, cell8_lut)
+        b = decode_byte_at_position_256(state, position)
+        wall_ms = (time.time() - t0) * 1000.0
+        inference_results.append({
+            'port':         port,
+            'byte':         int(b),
+            'char':         chr(b) if 32 <= b < 127 else f'\\x{b:02x}',
+            'wall_ms':      round(wall_ms, 1),
+            'matches_target': (b == quarters_meta[port]['target_byte']),
+        })
+
+    # Quick port-diversity check: how many DISTINCT bytes did the 4
+    # ports produce?  4 = full personality switching; 1 = port-agnostic.
+    distinct_bytes = len({r['byte'] for r in inference_results})
+
+    return _json_response({
+        'ok':              True,
+        'prompt':          prompt,
+        'position':        position,
+        'quarters':        quarters_meta,
+        'inference':       inference_results,
+        'cell8_lut_bytes': len(cell8_lut),
+        'distinct_bytes':  distinct_bytes,
+        'note':            ('Bytes may not match the original target chars '
+                              'because rules trained at board128 produce '
+                              'different bytes when run on board256. The '
+                              'PORT MECHANISM (different output per port) is '
+                              'what we are validating here.'),
+    })
+
+
 def caformer_about_view(request):
     """The 'about' page for caformer — explains the architecture to
     skeptical colleagues with live stats, math, and worked examples

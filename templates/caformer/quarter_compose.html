@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}quarter compose · cell8 · caformer{% endblock %}
+{% block content %}
+<style>
+  .qc { max-width: 80ch; margin: 1rem auto; padding: 0 1rem;
+        color: #cfe5cf; font-family: ui-sans-serif, system-ui, sans-serif;
+        line-height: 1.55; }
+  .qc h1, .qc h2 { color: #aaffaa; letter-spacing: 0.02em; }
+  .qc h1 { font-size: 1.4rem; border-bottom: 1px solid #2a6a2a;
+           padding-bottom: 4px; }
+  .qc h2 { font-size: 1rem; margin-top: 1.4rem;
+           border-bottom: 1px solid #1a3a1a; padding-bottom: 2px; }
+  .qc a  { color: #79c0ff; }
+  .qc code { color: #f0ff80; background: #0a1a0a; padding: 1px 4px;
+             border-radius: 2px; font-family: ui-monospace, monospace; }
+  .qc .lede { color: #88aa88; font-size: 0.88rem; }
+  .qc-form { display: grid; grid-template-columns: max-content 1fr;
+             gap: 6px 12px; align-items: center;
+             background: #050a05; border: 1px solid #1a3a1a;
+             padding: 12px; margin: 14px 0; }
+  .qc-form label { color: #aaffaa; font-size: 0.85rem;
+                   font-family: ui-monospace, monospace; }
+  .qc-form select, .qc-form input {
+    background: #0a1a0a; color: #cfe5cf; border: 1px solid #2a6a2a;
+    padding: 4px 6px; font: inherit; font-family: ui-monospace, monospace;
+    font-size: 0.85rem; min-width: 38ch; }
+  .qc-form .row-controls { display: flex; gap: 10px; align-items: center; }
+  .qc button { background: #0a2a0a; color: #aaffaa;
+               border: 1px solid #2a6a2a; padding: 6px 14px;
+               font: inherit; cursor: pointer; margin: 2px 6px 2px 0; }
+  .qc button:hover { background: #1a4a1a; }
+  .qc-results { background: #050a05; border: 1px solid #1a3a1a;
+                padding: 12px; margin: 14px 0; }
+  .qc-table { width: 100%; border-collapse: collapse;
+              font-family: ui-monospace, monospace; font-size: 0.85rem; }
+  .qc-table th { color: #aaffaa; text-align: left; padding: 4px 8px;
+                 border-bottom: 1px solid #2a6a2a; }
+  .qc-table td { padding: 4px 8px; border-bottom: 1px dotted #1a3a1a; }
+  .qc-table td.port { color: #f0ff80; width: 4ch; }
+  .qc-table td.byte { color: #79c0ff; width: 6ch; }
+  .qc-table td.char { width: 8ch; }
+  .qc-table tr.match td.char b { color: #aaffaa; }
+  .qc-table tr.miss  td.char b { color: #ffaaaa; }
+  .qc-diversity { font-size: 0.85rem; color: #88aa88; margin-top: 8px; }
+  .qc-diversity b { color: #aaffaa; }
+  .qc-note { font-size: 0.78rem; color: #888; font-style: italic;
+             margin-top: 10px; }
+  .err { color: #ffaaaa; }
+</style>
+<div class="qc">
+<h1>quarter compose · cell8</h1>
+<p class="lede">
+A <code>cell8</code> rule (65,536-byte LUT) is structurally <b>four
+stacked 7→1 rules</b> (16,384 bytes each), one per port value.  Pick
+four trained QRPairs, the system slices out each pair's rule at the
+chosen position, stacks them into one cell8 LUT, then runs CA inference
+at all 4 port values on a 256×256 board.  Same LUT, different port,
+<i>different output</i>.  Demonstrates pool-as-personality without any
+new training.
+</p>
+
+<div class="qc-form">
+  <label for="pk0">quarter 0 (port=0):</label>
+  <select id="pk0"></select>
+  <label for="pk1">quarter 1 (port=1):</label>
+  <select id="pk1"></select>
+  <label for="pk2">quarter 2 (port=2):</label>
+  <select id="pk2"></select>
+  <label for="pk3">quarter 3 (port=3):</label>
+  <select id="pk3"></select>
+  <label for="position">position:</label>
+  <div class="row-controls">
+    <input id="position" type="number" value="0" min="0" max="100" style="min-width: 6ch;">
+    <span style="color:#888; font-size:0.78rem;">byte index in each pair's response</span>
+  </div>
+  <label for="prompt">prompt:</label>
+  <div class="row-controls">
+    <input id="prompt" type="text" placeholder="(uses quarter 0's prompt if blank)">
+  </div>
+  <label></label>
+  <div class="row-controls">
+    <button id="qc-run">▶ compose + run all 4 ports</button>
+    <span id="qc-status" style="color:#888; font-size:0.78rem;"></span>
+  </div>
+</div>
+
+<div class="qc-results" id="qc-results" style="display:none;">
+  <h2>inference results</h2>
+  <p style="font-size:0.85rem; color:#88aa88; margin: 4px 0 10px;">
+    prompt = <code id="qc-out-prompt"></code>,
+    position = <code id="qc-out-pos"></code>,
+    cell8 LUT = <code id="qc-out-bytes"></code> bytes (4×16,384 quarters)
+  </p>
+  <table class="qc-table">
+    <thead><tr><th>port</th><th>quarter</th><th>byte</th><th>char</th><th>target</th><th>wall</th></tr></thead>
+    <tbody id="qc-out-tbody"></tbody>
+  </table>
+  <div class="qc-diversity" id="qc-diversity"></div>
+  <div class="qc-note" id="qc-note"></div>
+</div>
+
+<h2>what this proves</h2>
+<ul style="font-size:0.85rem; line-height:1.7;">
+  <li><b>Mechanism:</b> port value selects which of 4 stacked rules fires.
+      If all 4 quarters were the same rule (special case), all 4 port outputs
+      would be identical — that's the <code>upcast_7to1_to_cell8</code> case.</li>
+  <li><b>Diversity count:</b> shows how many <i>distinct</i> bytes the 4 ports
+      produced.  4 = full personality switching; 1 = port-agnostic (or rules
+      happen to converge).</li>
+  <li><b>Why bytes may not match target chars:</b> the underlying 7→1 rules
+      were trained on a <i>128×128</i> board with different geometry; running
+      them as cell8 quarters on a <i>256×256</i> board produces stable but
+      different bytes.  Real production use requires retraining 7→1 rules at
+      board256 first (the ALICE bundle pipeline handles this).</li>
+</ul>
+
+<h2>related</h2>
+<ul style="font-size:0.85rem; line-height:1.7;">
+  <li><a href="{% url 'caformer:caformer_cell8' %}">cell8 primitive</a> — the
+      underlying 8→1 hex CA</li>
+  <li><a href="{% url 'caformer:caformer_lutview' %}">LUT viewer</a> — see
+      what each quarter looks like as a 128×128 image</li>
+  <li><a href="{% url 'caformer:caformer_ruleset_zoo' %}">ruleset zoo</a> —
+      every K→1 primitive on one page</li>
+</ul>
+</div>
+
+{{ pairs|json_script:"qc-pairs-data" }}
+<script>
+(function () {
+  const PAIRS = JSON.parse(document.getElementById('qc-pairs-data').textContent);
+  const SELS = ['pk0','pk1','pk2','pk3'].map(id => document.getElementById(id));
+  const NAMES = ['hello quarter','hey quarter','third quarter','fourth quarter'];
+
+  // Populate each <select> with the same pair options.
+  function buildOptions(sel, defaultPk) {
+    sel.innerHTML = '';
+    for (const p of PAIRS) {
+      const opt = document.createElement('option');
+      opt.value = String(p.pk);
+      opt.textContent = `pk=${p.pk}  ${JSON.stringify(p.prompt)} → ${JSON.stringify(p.expected)}  (n_pos=${p.n_pos})`;
+      sel.appendChild(opt);
+    }
+    if (defaultPk) sel.value = String(defaultPk);
+  }
+  // Sensible defaults: 4 pairs sharing the prompt 'hi' if available.
+  const hiPks = PAIRS.filter(p => p.prompt === 'hi').map(p => p.pk);
+  const defaults = [
+    hiPks[0] || (PAIRS[0] && PAIRS[0].pk),
+    hiPks[1] || (PAIRS[1] && PAIRS[1].pk),
+    hiPks[2] || (PAIRS[2] && PAIRS[2].pk),
+    hiPks[3] || (PAIRS[3] && PAIRS[3].pk),
+  ];
+  SELS.forEach((s, i) => buildOptions(s, defaults[i]));
+
+  const runBtn  = document.getElementById('qc-run');
+  const status  = document.getElementById('qc-status');
+  const results = document.getElementById('qc-results');
+  const tbody   = document.getElementById('qc-out-tbody');
+
+  runBtn.addEventListener('click', async () => {
+    const fd = new FormData();
+    SELS.forEach((s, i) => fd.append(`pk${i}`, s.value));
+    fd.append('position', document.getElementById('position').value || '0');
+    fd.append('prompt',   document.getElementById('prompt').value || '');
+    const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+    status.textContent = 'running 4 × 256-tick inferences…';
+    runBtn.disabled = true;
+    try {
+      const r = await fetch("{% url 'caformer:caformer_quarter_compose_run' %}", {
+        method: 'POST', body: fd, headers: {'X-CSRFToken': csrf},
+        credentials: 'same-origin' });
+      const j = await r.json();
+      if (j.error) {
+        status.innerHTML = `<span class="err">error: ${j.error}</span>`;
+        return;
+      }
+      document.getElementById('qc-out-prompt').textContent = j.prompt;
+      document.getElementById('qc-out-pos').textContent = j.position;
+      document.getElementById('qc-out-bytes').textContent = j.cell8_lut_bytes.toLocaleString();
+      tbody.innerHTML = '';
+      j.inference.forEach((row, i) => {
+        const q = j.quarters[i];
+        const tr = document.createElement('tr');
+        tr.className = row.matches_target ? 'match' : 'miss';
+        const tgt = q.target_char === q.target_byte ? '' : `${q.target_char} (${q.target_byte})`;
+        tr.innerHTML =
+          `<td class="port">${row.port}</td>` +
+          `<td>${NAMES[i]} (pk=${q.pk}: ${JSON.stringify(q.prompt)} → ${JSON.stringify(q.expected)})</td>` +
+          `<td class="byte">${row.byte}</td>` +
+          `<td class="char"><b>${row.char}</b></td>` +
+          `<td>${q.target_char} (${q.target_byte})</td>` +
+          `<td>${row.wall_ms} ms</td>`;
+        tbody.appendChild(tr);
+      });
+      const diversity = j.distinct_bytes;
+      document.getElementById('qc-diversity').innerHTML =
+        `4 ports produced <b>${diversity} distinct byte${diversity === 1 ? '' : 's'}</b>` +
+        (diversity === 1
+          ? ' — all quarters converged on the same output (port-agnostic this run)'
+          : diversity === 4
+          ? ' — full personality switching (each port has its own byte) ✓'
+          : ` — partial diversity`);
+      document.getElementById('qc-note').textContent = j.note || '';
+      results.style.display = 'block';
+      status.textContent = '';
+    } catch (e) {
+      status.innerHTML = `<span class="err">${e.message}</span>`;
+    } finally {
+      runBtn.disabled = false;
+    }
+  });
+})();
+</script>
+{% endblock %}
