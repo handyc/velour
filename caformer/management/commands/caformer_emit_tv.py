@@ -245,6 +245,9 @@ HTML = r'''<!DOCTYPE html>
         <span class="label">TICK:</span>
         <span id="tick-readout">0</span>
       </div>
+      <div class="row">
+        <button id="btn-music" title="8-voice CA-derived music (samples the current state every beat)">🔇 MUSIC</button>
+      </div>
     </div>
     <div id="status">CA-TV · channel-surfing the edge of chaos</div>
   </div>
@@ -277,6 +280,87 @@ function _randColour() {
           Math.round((g + m) * 255),
           Math.round((b + m) * 255)];
 }
+// ── Music: 8-voice scheduled audio derived from the CA state ───────
+//
+// Adapted from officerpghiresev86's wavetable+meta-CA conductor:
+// every beat, sample 8 cells from a fixed row of the current CA
+// state; map cell value to a semitone offset; schedule note events
+// via AudioContext look-ahead.  Voice fundamental rises by
+// `MUSIC_VOICE_OCTAVE_SPREAD` semitones per voice so the 8 voices
+// span ~3 octaves.  Each channel change brings a new rule + new
+// initial state, so the music shifts noticeably across channels.
+
+const MUSIC_BEAT_DUR_S       = 0.18;
+const MUSIC_LOOK_AHEAD_S     = 1.5;
+const MUSIC_SCHED_MS         = 80;
+const MUSIC_VOICES           = 8;
+const MUSIC_BASE_FREQ        = 196.00;     // G3
+const MUSIC_VOICE_OCTAVE_SPREAD = 5;        // semitones between voices
+const MUSIC_CELL_TO_SEMI     = [null, 0, 5, 7]; // null = rest, else root/4th/5th
+const MUSIC_VOICE_ROW        = 96;          // row to sample (mid-low on 128)
+
+let audioCtx       = null;
+let musicMaster    = null;
+let musicOn        = false;
+let musicNextBeatT = 0;
+let musicSchedTimer = null;
+
+function musicEnsureCtx() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  musicMaster = audioCtx.createGain();
+  musicMaster.gain.value = 0.18;            // headroom for 8 voices
+  musicMaster.connect(audioCtx.destination);
+}
+
+function musicScheduleBeat(t) {
+  if (!state) return;
+  const row = MUSIC_VOICE_ROW % SIDE;
+  for (let v = 0; v < MUSIC_VOICES; v++) {
+    const col = (v * SIDE / MUSIC_VOICES) | 0;
+    const cellVal = state[row * SIDE + col] & 3;
+    const semi = MUSIC_CELL_TO_SEMI[cellVal];
+    if (semi === null) continue;
+    const totalSemi = semi + v * MUSIC_VOICE_OCTAVE_SPREAD;
+    const freq = MUSIC_BASE_FREQ * Math.pow(2, totalSemi / 12);
+    // Per-voice oscillator with quick envelope.
+    const osc = audioCtx.createOscillator();
+    const g   = audioCtx.createGain();
+    // Triangle for low voices, sine for high → less harshness.
+    osc.type = v < 3 ? 'triangle' : 'sine';
+    osc.frequency.setValueAtTime(freq, t);
+    const peak = 0.16;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(peak, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.001, t + MUSIC_BEAT_DUR_S * 0.9);
+    osc.connect(g).connect(musicMaster);
+    osc.start(t);
+    osc.stop(t + MUSIC_BEAT_DUR_S);
+  }
+}
+
+function musicSchedulerTick() {
+  if (!musicOn || !audioCtx) return;
+  while (musicNextBeatT < audioCtx.currentTime + MUSIC_LOOK_AHEAD_S) {
+    musicScheduleBeat(musicNextBeatT);
+    musicNextBeatT += MUSIC_BEAT_DUR_S;
+  }
+}
+
+function musicStart() {
+  if (musicOn) return;
+  musicEnsureCtx();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  musicOn = true;
+  musicNextBeatT = audioCtx.currentTime + 0.05;
+  musicSchedTimer = setInterval(musicSchedulerTick, MUSIC_SCHED_MS);
+}
+
+function musicStop() {
+  musicOn = false;
+  if (musicSchedTimer) { clearInterval(musicSchedTimer); musicSchedTimer = null; }
+}
+
 function randomisePalette() {
   // Cell 0 stays dark so the response region's zeros read as
   // background; cells 1/2/3 get fresh hues.
@@ -657,6 +741,19 @@ document.getElementById('btn-pause').addEventListener('click', () => setPlaying(
 document.getElementById('btn-play').addEventListener('click', () => setPlaying(true));
 document.getElementById('btn-ff').addEventListener('click',
   () => setSpeed(speed === 1 ? 4 : (speed === 4 ? 8 : 1)));
+document.getElementById('btn-music').addEventListener('click', () => {
+  if (musicOn) {
+    musicStop();
+    const b = document.getElementById('btn-music');
+    b.textContent = '🔇 MUSIC';
+    b.classList.remove('on');
+  } else {
+    musicStart();
+    const b = document.getElementById('btn-music');
+    b.textContent = '🔊 MUSIC';
+    b.classList.add('on');
+  }
+});
 
 // Keyboard shortcuts.
 document.addEventListener('keydown', (e) => {
