@@ -254,7 +254,34 @@ HTML = r'''<!DOCTYPE html>
 // ── CA primitives (same as lutview) ────────────────────────────────
 const SIDE = 128;
 const CELLS = SIDE * SIDE;
-const PALETTE = [[0,0,0], [60,150,220], [240,180,60], [250,245,240]];
+// PALETTE = the 4 colours mapped to K=4 cell values 0..3.  Mutated
+// on every channel change for variety — see randomisePalette().
+let PALETTE = [[0,0,0], [60,150,220], [240,180,60], [250,245,240]];
+
+// Pick a vibrant random RGB via HSL with bounded saturation + lightness.
+function _randColour() {
+  const h = Math.random() * 360;
+  const s = 55 + Math.random() * 40;        // 55..95% saturation
+  const l = 22 + Math.random() * 60;        // 22..82% lightness
+  const c = (1 - Math.abs(2 * l/100 - 1)) * s / 100;
+  const x = c * (1 - Math.abs(((h/60) % 2) - 1));
+  const m = l/100 - c/2;
+  let r = 0, g = 0, b = 0;
+  if      (h <  60) { r = c; g = x; }
+  else if (h < 120) { r = x; g = c; }
+  else if (h < 180) {         g = c; b = x; }
+  else if (h < 240) {         g = x; b = c; }
+  else if (h < 300) { r = x;         b = c; }
+  else              { r = c;         b = x; }
+  return [Math.round((r + m) * 255),
+          Math.round((g + m) * 255),
+          Math.round((b + m) * 255)];
+}
+function randomisePalette() {
+  // Cell 0 stays dark so the response region's zeros read as
+  // background; cells 1/2/3 get fresh hues.
+  PALETTE = [[0, 0, 0], _randColour(), _randColour(), _randColour()];
+}
 
 function hexStep(state, rule, side) {
   const out = new Uint8Array(side * side);
@@ -551,13 +578,17 @@ function loadChannel(chId, opts={}) {
   state = new Uint8Array(rule);
   label = ch.label;
   tick = 0;
+  // Fresh palette per channel — sells the "different rule = different
+  // signal" vibe more than reusing the same 4 colours.  rewindCurrent()
+  // passes {keepPalette: true} so the rewind button doesn't reroll.
+  if (!opts.keepPalette) randomisePalette();
   document.getElementById('ch-display').textContent =
     'CH ' + String(chId+1).padStart(2,'0');
   document.getElementById('status').textContent = label;
   redraw();
 }
 
-function rewindCurrent() { loadChannel(currentChannel); }
+function rewindCurrent() { loadChannel(currentChannel, {keepPalette: true}); }
 
 function redraw() {
   const data = imageData.data;
