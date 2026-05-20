@@ -406,6 +406,214 @@ def train_position_board256(prompt: str, target_byte: int,
             'phase': 'matched' if matched else 'budget_out'}
 
 
+# ── 7→1 trainer at board256 (for clean quarter-composition) ────────
+#
+# Same per-position GA as train_position_board256, but uses the 7→1
+# stepper (hex_ca_step from caformer.primitives) on a 256×256 board.
+# Produces a 16,384-byte LUT, NOT a 65,536-byte cell8 LUT.  Why:
+# compose_cell8_from_quarters() stacks 4 of these into one cell8 LUT
+# where port=K fires the K-th 7→1 rule.  If we want each port to
+# produce its trained target byte on the 256×256 board, the
+# underlying 7→1 rules must be TRAINED at b256 (not at b128 with
+# wrong geometry).
+#
+# This unlocks the "4 personalities in one cell8 LUT" production
+# path: train 4 different (prompt, target) pairs as 7→1 rules at
+# b256, stack them, and at inference port=K selects which one fires.
+
+def train_position_b256_7to1(prompt: str, target_byte: int,
+                                    position: int, *,
+                                    n_ticks: int = DEFAULT_N_TICKS_256,
+                                    max_seconds: float = 120.0,
+                                    pop_size: int = 8,
+                                    generations_per_burst: int = 8,
+                                    polish_trials: int = 80,
+                                    mutation_rate: float = 0.005,
+                                    seed: int = 0xB256B7B7,
+                                    seed_rule=None,
+                                    on_event=None) -> dict:
+    """Train one 7→1 rule for a (prompt, byte-at-position) target on
+    a 256×256 board.  Output is a 16,384-byte LUT runnable via the
+    standard 7→1 stepper (caformer.primitives.hex_ca_step).
+
+    `seed_rule` must be 16,384 bytes (the 7→1 size) — does NOT accept
+    cell8 LUTs since this trainer's output IS 7→1.
+
+    Returns {'rule_table' (np.ndarray of 16,384 uint8), 'byte_match',
+             'wall', 'phase'}."""
+    import random
+    import time
+    from .primitives import hex_ca_step, random_rule_table
+    from .ga import polish_genome
+
+    fire = on_event or (lambda *_a, **_kw: None)
+    t0 = time.time()
+    rng = random.Random(seed)
+
+    def _run(rule, prm, ticks):
+        st = embed_prompt_256(prm)
+        for _ in range(ticks):
+            st = hex_ca_step(st, rule)
+        return st
+
+    def _byte_match(rule):
+        b = decode_byte_at_position_256(_run(rule, prompt, n_ticks), position)
+        return b == target_byte
+
+    def _fitness(rule):
+        # cell_match: fraction of the 4 target cells at `position`
+        # that equal the embedded target byte after n_ticks.
+        st = _run(rule, prompt, n_ticks)
+        flat = st.ravel()
+        base = RESPONSE_CELLS_START_256 + position * 4
+        cells = [(target_byte >> (6 - 2 * i)) & 3 for i in range(4)]
+        cf = sum(1 for i in range(4)
+                       if (int(flat[base + i]) & 3) == cells[i]) / 4.0
+        bonus = 1.0 if _byte_match(rule) else 0.0
+        return cf + bonus
+
+    # Initial population with optional 7→1 warm-start.
+    pop = []
+    seed_arr = None
+    if seed_rule is not None:
+        if len(seed_rule) != 16_384:
+            raise ValueError(
+                f'seed_rule must be 16,384 bytes (7→1); got {len(seed_rule)}')
+        seed_arr = np.frombuffer(seed_rule, dtype=np.uint8).copy() & 3
+    for i in range(pop_size):
+        if seed_arr is not None and i < (pop_size + 1) // 2:
+            r = seed_arr.copy()
+            if i > 0:
+                jit_rng = random.Random(seed ^ (i * 31337))
+                n_flips = max(1, int(0.001 * 16_384))
+                for _ in range(n_flips):
+                    idx = jit_rng.randrange(16_384)
+                    cur = int(r[idx])
+                    new = jit_rng.randint(0, 3)
+                    while new == cur: new = jit_rng.randint(0, 3)
+                    r[idx] = new
+        else:
+            r = random_rule_table(seed ^ (i * 7919))
+        pop.append((r, _fitness(r)))
+    pop.sort(key=lambda rf: -rf[1])
+    best_rule, best_fit = pop[0]
+    matched = _byte_match(best_rule)
+    fire('init', {'best_fit': best_fit, 'matched': matched,
+                    'elapsed_s': time.time() - t0})
+    if matched:
+        return {'rule_table': best_rule, 'byte_match': True,
+                'wall': time.time() - t0, 'phase': 'init'}
+
+    burst = 0
+    while time.time() - t0 < max_seconds and not matched:
+        burst += 1
+        for _gen in range(generations_per_burst):
+            if time.time() - t0 >= max_seconds:
+                break
+            parent = pop[rng.randrange(max(1, len(pop) // 2))][0]
+            child = parent.copy()
+            n_flips = max(1, int(mutation_rate * 16_384))
+            for _ in range(n_flips):
+                idx = rng.randrange(16_384)
+                cur = int(child[idx])
+                new = rng.randint(0, 3)
+                while new == cur: new = rng.randint(0, 3)
+                child[idx] = new
+            cf = _fitness(child)
+            worst_idx = min(range(len(pop)), key=lambda i: pop[i][1])
+            if cf > pop[worst_idx][1]:
+                pop[worst_idx] = (child, cf)
+                if cf > best_fit:
+                    best_rule, best_fit = child, cf
+                    matched = _byte_match(best_rule)
+                    fire('improved', {'burst': burst, 'best_fit': cf,
+                                          'matched': matched,
+                                          'elapsed_s': time.time() - t0})
+                    if matched:
+                        break
+        if matched:
+            break
+        if time.time() - t0 >= max_seconds:
+            break
+        # Polish, budget-capped like the cell8 trainer's polish.
+        def _polish_fitness(g):
+            return _fitness(g['output'])
+        probe_t0 = time.time()
+        _ = _fitness(best_rule)
+        per_eval_s   = max(0.01, time.time() - probe_t0)
+        per_trial_s  = 3.0 * per_eval_s
+        remaining_s  = max(0.0, max_seconds - (time.time() - t0))
+        budget_trials = int(remaining_s / per_trial_s) - 1
+        actual_trials = max(0, min(polish_trials, budget_trials))
+        if actual_trials < 3:
+            continue
+        polished, polished_fit, n_imp = polish_genome(
+            {'output': best_rule.copy()}, _polish_fitness,
+            trials=actual_trials,
+            seed=seed ^ 0xC0FFEE ^ (burst * 31))
+        if polished_fit > best_fit:
+            best_rule = polished['output']
+            best_fit = polished_fit
+            matched = _byte_match(best_rule)
+            fire('polish', {'burst': burst, 'best_fit': best_fit,
+                                'matched': matched, 'n_imp': n_imp,
+                                'actual_trials': actual_trials,
+                                'elapsed_s': time.time() - t0})
+
+    return {'rule_table': best_rule, 'byte_match': matched,
+            'wall': time.time() - t0,
+            'phase': 'matched' if matched else 'budget_out'}
+
+
+def train_pair_b256_7to1(prompt: str, expected: str, *,
+                                 n_ticks: int = DEFAULT_N_TICKS_256,
+                                 per_position_seconds: float = 120.0,
+                                 seed: int = 0xB256B7B7,
+                                 on_event=None) -> dict:
+    """Train N 7→1 rules at b256, one per response byte."""
+    import time
+    fire = on_event or (lambda *_a, **_kw: None)
+    target_bytes = expected.encode('utf-8')[:RESPONSE_BYTES_MAX_256]
+    t0 = time.time()
+    rules, matches = [], []
+    for pos, tb in enumerate(target_bytes):
+        fire('position_start', {'pos': pos, 'target_byte': tb,
+                                    'elapsed_s': time.time() - t0})
+        r = train_position_b256_7to1(
+            prompt, tb, pos,
+            n_ticks=n_ticks,
+            max_seconds=per_position_seconds,
+            seed=seed ^ (pos * 4099),
+            on_event=lambda k, p, _pos=pos: fire(f'pos{_pos}_{k}', p))
+        rules.append(r['rule_table'])
+        matches.append(bool(r['byte_match']))
+        fire('position_done', {'pos': pos,
+                                    'matched': r['byte_match'],
+                                    'phase': r['phase'],
+                                    'pos_wall': r['wall'],
+                                    'elapsed_s': time.time() - t0})
+    return {'rules': rules, 'matches': matches,
+            'exact': all(matches),
+            'wall': time.time() - t0}
+
+
+def forward_pair_b256_7to1_positional(prompt: str, rules,
+                                              n_bytes: int, *,
+                                              n_ticks: int = DEFAULT_N_TICKS_256) -> bytes:
+    """Inference: each per-position 7→1 rule runs on its own embedded
+    prompt board for n_ticks ticks, decode the byte."""
+    from .primitives import hex_ca_step
+    out = bytearray()
+    base_board = embed_prompt_256(prompt)
+    for pos in range(min(n_bytes, len(rules))):
+        state = base_board.copy()
+        rule = rules[pos]
+        for _ in range(n_ticks):
+            state = hex_ca_step(state, rule)
+        out.append(decode_byte_at_position_256(state, pos))
+    return bytes(out)
+
+
 def train_pair_board256(prompt: str, expected: str, *,
                               n_ticks: int = DEFAULT_N_TICKS_256,
                               per_position_seconds: float = 120.0,
