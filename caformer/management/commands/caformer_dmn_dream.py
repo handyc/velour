@@ -27,21 +27,23 @@ from django.core.management.base import BaseCommand
 
 # Class-4 activity band: cells changed per tick should land between
 # these fractions of total cells.  Below = class 1/2 (dies/fixed),
-# above = class 3 (chaotic).
-ACTIVITY_MIN = 0.02
-ACTIVITY_MAX = 0.55
-PROBE_SIDE   = 32
-PROBE_TICKS  = 12
+# above = class 3 (chaotic).  Loosened 2026-05-21 from [0.02, 0.55]
+# to catch more genuine class-4 rules the tight band was rejecting.
+ACTIVITY_MIN = 0.01
+ACTIVITY_MAX = 0.65
+PROBE_SIDE   = 64        # bumped from 32 — gives rules room to develop
+PROBE_TICKS  = 16        # bumped from 12 — slightly longer post-transient
 PROBE_TRANSIENT = 4
+PROBE_SEEDS  = (0xC1A554, 0xDEADBEEF, 0xCAFEBABE)   # quorum 2/3
 
 
-def is_class4(rule_table: np.ndarray, *,
-                  side: int = PROBE_SIDE, ticks: int = PROBE_TICKS,
-                  transient: int = PROBE_TRANSIENT) -> tuple:
-    """Cheap class-4 probe for a 7→1 hex rule.  Same band as
-    is_class4_cell8.  Returns (is_class4: bool, mean_activity: float)."""
+def _probe_one(rule_table: np.ndarray, side: int, ticks: int,
+                    transient: int, seed: int) -> float:
+    """Run rule_table on a random (side, side) state seeded from
+    `seed`; return post-transient mean activity (fraction of cells
+    changed per tick)."""
     from caformer.primitives import hex_ca_step
-    rng = np.random.RandomState(0xC1A554)
+    rng = np.random.RandomState(seed)
     state = rng.randint(0, 4, size=(side, side)).astype(np.uint8)
     for _ in range(transient):
         state = hex_ca_step(state, rule_table)
@@ -52,8 +54,26 @@ def is_class4(rule_table: np.ndarray, *,
         new = hex_ca_step(state, rule_table)
         total += int((new != state).sum()) / n_cells
         state = new
-    mean_act = total / measured
-    return (ACTIVITY_MIN <= mean_act <= ACTIVITY_MAX), mean_act
+    return total / measured
+
+
+def is_class4(rule_table: np.ndarray, *,
+                  side: int = PROBE_SIDE, ticks: int = PROBE_TICKS,
+                  transient: int = PROBE_TRANSIENT,
+                  seeds: tuple = PROBE_SEEDS,
+                  quorum: int = 2) -> tuple:
+    """Class-4 probe with multi-seed quorum.  Runs the rule on
+    `len(seeds)` independent random initial states; accepts iff at
+    least `quorum` of them land their mean activity in the band.
+    Returns (is_class4: bool, mean_activity_across_seeds: float).
+
+    Robust to a single unlucky basin: a real class-4 rule that has
+    one quiet attractor among its many basins still passes."""
+    activities = [_probe_one(rule_table, side, ticks, transient, s)
+                       for s in seeds]
+    in_band = sum(1 for a in activities
+                       if ACTIVITY_MIN <= a <= ACTIVITY_MAX)
+    return (in_band >= quorum, sum(activities) / len(activities))
 
 
 def render_lut_png(lut: np.ndarray, out_path: Path):
@@ -96,13 +116,21 @@ class Command(BaseCommand):
         from datetime import datetime
         import secrets
 
-        gens = [('mandel',   gen_mandelbrot),
-                ('julia',    gen_julia),
-                ('bship',    gen_burning_ship),
-                ('tricorn',  gen_tricorn),
-                ('multi',    gen_multibrot),
-                ('newton',   gen_newton),
-                ('phoenix',  gen_phoenix)]
+        # Weighted by observed class-4 hit rate (caformer_generator_compare):
+        # julia 73%, newton 55%, multi 48%, tricorn 47%, bship 37%,
+        # phoenix 35%, mandel 18%.  Weights are integer copy-counts so
+        # secrets.choice() handles the bias without needing an RNG.
+        gens_with_weight = [
+            ('mandel',   gen_mandelbrot,   1),
+            ('julia',    gen_julia,        4),
+            ('bship',    gen_burning_ship, 2),
+            ('tricorn',  gen_tricorn,      3),
+            ('multi',    gen_multibrot,    3),
+            ('newton',   gen_newton,       3),
+            ('phoenix',  gen_phoenix,      2),
+        ]
+        gens = [(n, fn) for n, fn, w in gens_with_weight for _ in range(w)]
+        gen_names_unique = [n for n, _, _ in gens_with_weight]
 
         base = Path(settings.BASE_DIR)
         pool = (base / pool_dir) if not Path(pool_dir).is_absolute() \
@@ -116,7 +144,12 @@ class Command(BaseCommand):
         log(f'  interval:    {interval_sec}s')
         log(f'  max_pool:    {max_pool}')
         log(f'  once:        {once}')
-        log(f'  generators:  {[n for n, _ in gens]}\n')
+        log(f'  generators:  {gen_names_unique}')
+        weights = {n: w for n, _, w in gens_with_weight}
+        log(f'  weights:     {weights}')
+        log(f'  band:        [{ACTIVITY_MIN}, {ACTIVITY_MAX}]')
+        log(f'  probe:       {PROBE_SIDE}×{PROBE_SIDE}, {PROBE_TICKS}t '
+            f'({PROBE_TRANSIENT}t transient), {len(PROBE_SEEDS)} seeds quorum 2/3\n')
 
         n_tries = 0
         n_kept  = 0

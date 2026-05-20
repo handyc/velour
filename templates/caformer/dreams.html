@@ -52,7 +52,8 @@ open and watch new dreams arrive as the DMN runs.
 <p class="lede">
 Pool: <code>{{ pool_dir }}</code> — currently {{ n_dreams }} dreams.
 Each entry is a 128×128 K=4 hex-CA rule LUT (16,384 bytes) whose
-post-transient activity lands in the class-4 band [0.02, 0.55].
+post-transient activity lands in the class-4 band [0.01, 0.65]
+on at least 2 of 3 independent random seeds.
 </p>
 
 <div class="ctrl">
@@ -103,11 +104,14 @@ post-transient activity lands in the class-4 band [0.02, 0.55].
   How it works</h2>
 <ul style="font-size:0.85rem;">
   <li>Pick one of mandelbrot / julia / burning_ship / tricorn /
-      multibrot / newton / phoenix at random</li>
+      multibrot / newton / phoenix — <b>weighted by observed class-4
+      hit rate</b> (julia ×4, newton/multi/tricorn ×3, bship/phoenix
+      ×2, mandel ×1)</li>
   <li>Generate the K=4 LUT (16,384 bytes) for a random region</li>
-  <li>Run a fast class-4 probe: 12 ticks on a 32×32 random state,
-      4-tick transient, measure mean cells-changed-per-tick</li>
-  <li>Accept iff activity ∈ [0.02, 0.55] (the "edge of chaos" band)</li>
+  <li>Run a class-4 probe: 16 ticks on a 64×64 random state,
+      4-tick transient, measure mean cells-changed-per-tick.  Repeat
+      on 3 independent seeds, accept iff at least 2/3 land in band</li>
+  <li>Accept iff activity ∈ [0.01, 0.65] (the "edge of chaos" band)</li>
   <li>Save as <code>.lut</code> + <code>.png</code> in the pool</li>
   <li>When the pool exceeds <code>--max-pool</code>, oldest dreams
       get culled</li>
