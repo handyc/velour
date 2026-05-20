@@ -51,8 +51,8 @@ class BundleParams:
     time_limit:           str = '04:00:00'
     mem_per_task:         str = '2G'
     cpus_per_task:        int = 1
-    ssh_host:             str = 'login1.alice.universiteitleiden.nl'
-    ssh_user:             str = 'handy'
+    ssh_host:             str = 'alice'
+    ssh_user:             str = 'handyca'
     remote_dir:           str = DEFAULT_REMOTE_DIR
 
 
@@ -223,6 +223,9 @@ python3 run_task.py "$SLURM_ARRAY_TASK_ID"
     _write_executable(out_dir / 'push.sh', f'''#!/usr/bin/env bash
 set -euo pipefail
 BUNDLE="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+# rsync only auto-creates the leaf directory; pre-mkdir so deep
+# parents (~/velour-dev/.alice_bundles/) are guaranteed to exist.
+ssh "{host}" "mkdir -p {remote}"
 rsync -av --exclude='outputs/*.rules' --exclude='outputs/*.log' \\
     --exclude='outputs/slurm-*' \\
     "$BUNDLE/" "{host}:{remote}/"

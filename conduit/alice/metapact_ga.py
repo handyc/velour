@@ -58,7 +58,7 @@ class BundleParams:
     time_limit: str            = '00:30:00'  # 30 min per task; 6× safety vs ~5 min expected
     mem_per_task: str          = '2G'
     cpus_per_task: int         = 1
-    ssh_host: str              = 'login1.alice.universiteitleiden.nl'
+    ssh_host: str              = 'alice'
     ssh_user: str              = 'username'  # operator overrides at gen time
     remote_dir: str            = DEFAULT_REMOTE_DIR
 

@@ -65,7 +65,7 @@ class Command(BaseCommand):
         parser.add_argument('--ssh-user', type=str, default='username',
                             help='operator overrides this at gen time')
         parser.add_argument('--ssh-host', type=str,
-                            default='login1.alice.universiteitleiden.nl')
+                            default='alice')
 
     def handle(self, **opts):
         from conduit.alice.qrpair_vocab import (BundleParams,

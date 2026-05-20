@@ -67,8 +67,8 @@ class BundleParams:
     time_limit:           str = '04:00:00'
     mem_per_task:         str = '4G'
     cpus_per_task:        int = 1
-    ssh_host:             str = 'login1.alice.universiteitleiden.nl'
-    ssh_user:             str = 'handy'
+    ssh_host:             str = 'alice'
+    ssh_user:             str = 'handyca'
     remote_dir:           str = DEFAULT_REMOTE_DIR
 
 
@@ -272,6 +272,11 @@ python3 run_task.py "$SLURM_ARRAY_TASK_ID"
     push_sh = f'''#!/usr/bin/env bash
 set -euo pipefail
 BUNDLE="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+# Ensure the remote bundle dir exists before rsync — rsync only
+# auto-creates the LEAF directory, not deep parents like
+# ~/velour-dev/.alice_bundles/.  Pre-mkdir avoids "no such file
+# or directory" errors on a fresh ALICE account.
+ssh "{host}" "mkdir -p {remote}"
 rsync -av --exclude='outputs/*.rules' --exclude='outputs/*.log' \\
     --exclude='outputs/slurm-*' \\
     "$BUNDLE/" "{host}:{remote}/"

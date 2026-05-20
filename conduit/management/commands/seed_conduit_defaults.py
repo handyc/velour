@@ -20,7 +20,7 @@ DEFAULTS = [
         slug='alice-manual',
         name='ALICE (Leiden HPC, manual submit)',
         kind='slurm_manual',
-        host='login1.alice.universiteitleiden.nl',
+        host='alice',
         priority=5,
         config={
             'ssh_user':          'username',

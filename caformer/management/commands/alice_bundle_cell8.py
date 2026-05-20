@@ -53,8 +53,8 @@ class Command(BaseCommand):
         parser.add_argument('--time-limit', type=str, default='04:00:00')
         parser.add_argument('--mem-per-task', type=str, default='4G')
         parser.add_argument('--ssh-host', type=str,
-                              default='login1.alice.universiteitleiden.nl')
-        parser.add_argument('--ssh-user', type=str, default='handy')
+                              default='alice')
+        parser.add_argument('--ssh-user', type=str, default='handyca')
 
     def handle(self, *, slug, pair_pks, array_size, max_seconds_per_pos,
                  n_ticks, no_warm_start, time_limit, mem_per_task,

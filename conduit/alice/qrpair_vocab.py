@@ -113,7 +113,7 @@ class BundleParams:
     mem_per_task: str     = '2G'
     cpus_per_task: int    = 1
     seed_base:  int       = 0xCA1B5E11
-    ssh_host:   str       = 'login1.alice.universiteitleiden.nl'
+    ssh_host:   str       = 'alice'
     ssh_user:   str       = 'username'
     remote_dir: str       = DEFAULT_REMOTE_DIR
 

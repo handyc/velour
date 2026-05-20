@@ -641,7 +641,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KIT="$(dirname "$HERE")"
 
 CORPUS="${1:?usage: push-to-alice.sh <corpus.txt> [user@host] [remote_dir]}"
-SSH_TARGET="${2:-handy@login1.alice.universiteitleiden.nl}"
+SSH_TARGET="${2:-handyca@alice}"
 REMOTE_DIR="${3:-~/caformer-kit-jobs/$(date +%Y%m%d_%H%M%S)}"
 
 echo "Pushing corpus + scripts to $SSH_TARGET:$REMOTE_DIR ..."
@@ -901,7 +901,7 @@ ssh <user>@<host>                                # then submit:
 ```
 
 Edit `alice/push-to-alice.sh`'s SSH target if you're not on Leiden's
-ALICE cluster (defaults to `handy@login1.alice.universiteitleiden.nl`).
+ALICE cluster (defaults to `handyca@alice`).
 
 ## Embed in your Django site
 
