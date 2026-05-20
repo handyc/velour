@@ -153,6 +153,15 @@ def train_position_cell8_at_side(prompt: str, target_byte: int,
     rng = random.Random(seed)
     g = cell8_tier_geometry(side)
     base_offset = g['response_cells_start'] + position * 4
+    # Bail early if the position doesn't fit on this tier's board —
+    # caller should pick a larger tier.  Returns a "too_small" phase
+    # so corpus scripts can pivot without crashing.
+    if base_offset + 4 > g['cells']:
+        return {'rule_table': None, 'byte_match': False,
+                'side': side, 'wall': 0.0,
+                'phase': 'too_small',
+                'reason': (f'position {position} needs cell {base_offset + 3}'
+                              f' but board only has {g["cells"]}')}
     target_cells = [(target_byte >> (6 - 2 * i)) & 3 for i in range(4)]
     inp = broadcast_input(side, port_value)
 
