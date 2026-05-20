@@ -128,6 +128,46 @@
                      cursor:pointer; font-family:inherit;
                      font-size:0.72rem;">auto</button>
     </span>
+    <span style="margin-left:12px; color:#cca5ff;"
+          title="Rule engine: board128 (default, 7→1 LUT, fast) or cell8+256
+                 (8→1 LUT with input port, allows personality switching via
+                 ?port — requires cell8_b256_exact pairs in DB).">
+      ⚙ engine:
+      <select id="fc-engine-sel"
+              style="background:#1a0a2a; color:#cca5ff;
+                     border:1px solid #5a3a8a; padding:1px 4px;
+                     font-family:inherit; font-size:0.72rem;">
+        <option value="board128" selected>board128</option>
+        <option value="cell8">cell8</option>
+      </select>
+    </span>
+    <span style="margin-left:8px; color:#cca5ff;"
+          title="Cell8 port value (K=4: 0..3).  When the loaded cell8 LUT
+                 was built via quarter-composition, port selects which
+                 quarter (personality) fires.  Has no effect with engine=board128.">
+      port:
+      <input type="number" id="fc-port-inp" value="0" min="0" max="3"
+             style="background:#1a0a2a; color:#cca5ff;
+                    border:1px solid #5a3a8a; padding:1px 4px;
+                    width:3em; font-family:inherit; font-size:0.72rem;">
+    </span>
+    <span style="margin-left:8px; color:#f0ff80;"
+          title="Multi-response pool sampling.  When K trained QRPairs share
+                 a prompt (e.g. 'hi' has 4 variants), pick which one
+                 fires.  first = deterministic; pool = random; time = varies
+                 per second; rotate = per call; port = uses ?port value.">
+      sample:
+      <select id="fc-sample-sel"
+              style="background:#2a2a0a; color:#f0ff80;
+                     border:1px solid #6a6a1a; padding:1px 4px;
+                     font-family:inherit; font-size:0.72rem;">
+        <option value="first" selected>first</option>
+        <option value="pool">pool (random)</option>
+        <option value="time">time</option>
+        <option value="rotate">rotate</option>
+        <option value="port">port-indexed</option>
+      </select>
+    </span>
     <a href="{% url 'caformer:caformer_about' %}"
        style="color:#79c0ff; text-decoration:none;
               border:1px solid #1a4a6a; padding:2px 8px;
@@ -286,10 +326,20 @@
     const t0 = performance.now();
     try {
       const tierParam = _tierOn ? '&tier=auto' : '';
+      // Read engine + port + sample controls (added 2026-05-20).
+      const engineSel = document.getElementById('fc-engine-sel');
+      const portInp   = document.getElementById('fc-port-inp');
+      const sampleSel = document.getElementById('fc-sample-sel');
+      const engineParam = (engineSel && engineSel.value !== 'board128')
+                              ? `&engine=${encodeURIComponent(engineSel.value)}` : '';
+      const portParam   = (portInp && Number(portInp.value) > 0)
+                              ? `&port=${encodeURIComponent(portInp.value)}` : '';
+      const sampleParam = (sampleSel && sampleSel.value !== 'first')
+                              ? `&sample=${encodeURIComponent(sampleSel.value)}` : '';
       const r = await fetch('/caformer/funnel-chat/reply/?q='
                             + encodeURIComponent(q)
                             + '&layer=' + layer
-                            + tierParam);
+                            + tierParam + engineParam + portParam + sampleParam);
       const j = await r.json();
       const ms = Math.round(performance.now() - t0);
       if (j.error) {
