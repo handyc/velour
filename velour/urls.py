@@ -99,6 +99,7 @@ urlpatterns = [
     path('caframe/',     include('caframe.urls')),
     path('ouroboros/',   include('ouroboros.urls')),
     path('cahier/',      include('cahier.urls')),
+    path('boardstack/',  include('boardstack.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

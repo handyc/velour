@@ -167,6 +167,7 @@ INSTALLED_APPS = [
     'caframe',
     'ouroboros',
     'cahier',
+    'boardstack',
 ]
 
 MIDDLEWARE = [

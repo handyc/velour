@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}boardstack — stack-of-CAs experiment{% endblock %}
+{% block content %}
+<style>
+  .bs { max-width:80ch; margin:1.5rem auto; padding:0 1rem;
+        color:#cfe5cf; font-family:ui-sans-serif,system-ui,sans-serif;
+        line-height:1.55; }
+  .bs h1 { color:#aaffaa; border-bottom:1px solid #2a6a2a;
+           padding-bottom:4px; font-size:1.3rem; }
+  .bs h2 { color:#aaffaa; font-size:1rem; margin-top:1.4rem;
+           border-bottom:1px solid #1a3a1a; padding-bottom:2px; }
+  .bs .lede { color:#88aa88; font-size:0.88rem; }
+  .bs code { color:#f0ff80; background:#0a1a0a; padding:1px 4px; }
+  .bs table { border-collapse:collapse; width:100%;
+              font-family:ui-monospace,monospace; font-size:0.85rem;
+              margin:8px 0; }
+  .bs th, .bs td { padding:4px 8px; border-bottom:1px solid #1a3a1a; }
+  .bs th { color:#aaffaa; text-align:left; }
+</style>
+<div class="bs">
+<h1>boardstack — stack-of-CAs experiment</h1>
+<p class="lede">
+Experimental app.  Builds a stack of N class-4 CA boards (each a
+cell8 LUT upcasted from a mandelhunt-derived 7→1 rule), runs them
+with variable per-board rates and gene-encoded inter-board wiring,
+and asks whether the resulting stack can transform an input byte
+into a target byte for arbitrary (p, q) test pairs <i>without
+per-pair training</i>.
+</p>
+<p class="lede">
+Isolated from caformer's production paths — no QRPair writes, no
+chat dispatch interception.  If it underperforms we delete the app
+without fallout.
+</p>
+
+<h2>Pool</h2>
+<p>Pool size: <code>{{ pool_size }}</code> class-4 LUTs.</p>
+<p>Pool dirs: {% for d in pool_dirs %}<code>{{ d }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+
+<h2>Top genomes by fitness</h2>
+{% if genomes %}
+  <table>
+    <thead><tr><th>slug</th><th>n×side</th><th>fitness</th>
+        <th>test set</th><th>created</th></tr></thead>
+    <tbody>
+    {% for g in genomes %}
+      <tr><td>{{ g.slug }}</td><td>{{ g.n_boards }}×{{ g.board_side }}</td>
+          <td>{{ g.fitness|floatformat:4 }}</td>
+          <td>{{ g.test_set_id }}</td>
+          <td>{{ g.created_at|date:"Y-m-d H:i" }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="lede">No genomes yet.  Run <code>manage.py boardstack_smoke --seed 0</code>
+  to score a random gene.</p>
+{% endif %}
+
+<h2>Evolution runs</h2>
+{% if runs %}
+  <table>
+    <thead><tr><th>slug</th><th>started</th><th>gens</th><th>evals</th>
+        <th>best</th></tr></thead>
+    <tbody>
+    {% for r in runs %}
+      <tr><td>{{ r.slug }}</td><td>{{ r.started_at|date:"Y-m-d H:i" }}</td>
+          <td>{{ r.n_generations }}</td><td>{{ r.n_evals }}</td>
+          <td>{% if r.best_genome %}{{ r.best_genome.slug }} ({{ r.best_genome.fitness|floatformat:3 }}){% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="lede">No runs yet.  Phase 1 GA command will populate this once written.</p>
+{% endif %}
+
+<h2>How to drive</h2>
+<pre style="background:#050a05; padding:8px; border-left:3px solid #2a6a2a;
+            font-family:ui-monospace,monospace; font-size:0.78rem;">
+# Smoke (random gene, no GA):
+manage.py boardstack_smoke --seed 42 --n-boards 16 --board-side 64
+
+# (Phase 1 GA, not yet implemented:)
+manage.py boardstack_evolve --pop 16 --gens 50 --test-set v1
+</pre>
+</div>
+{% endblock %}
