@@ -75,15 +75,37 @@ extra capacity is paying for its extra compute on a given pair.
 </div>
 
 <div class="grid">
-  <div class="panel b128" id="ec-b128-panel">
-    <h3>board128 (7→1, 128×128)</h3>
-    <div class="out" id="ec-b128-out">(no run yet)</div>
-    <div class="stat" id="ec-b128-stat"></div>
+  <div class="panel b128">
+    <h3>7→1 multires (board128 family)</h3>
+    <table class="qc-table" style="width:100%; border-collapse: collapse;
+                                     font-family: ui-monospace, monospace;
+                                     font-size: 0.78rem;">
+      <thead><tr style="color:#79c0ff;">
+        <th align="left" style="border-bottom:1px solid #1a4a6a;">tier</th>
+        <th align="left" style="border-bottom:1px solid #1a4a6a;">produced</th>
+        <th align="right" style="border-bottom:1px solid #1a4a6a;">match</th>
+        <th align="right" style="border-bottom:1px solid #1a4a6a;">wall</th>
+      </tr></thead>
+      <tbody id="ec-b128-tbody">
+        <tr><td colspan="4" style="color:#888; font-style:italic; padding:8px;">(no run yet)</td></tr>
+      </tbody>
+    </table>
   </div>
-  <div class="panel c8" id="ec-c8-panel">
-    <h3>cell8+256 (8→1, 256×256)</h3>
-    <div class="out" id="ec-c8-out">(no run yet)</div>
-    <div class="stat" id="ec-c8-stat"></div>
+  <div class="panel c8">
+    <h3>cell8 multires (8→1)</h3>
+    <table class="qc-table" style="width:100%; border-collapse: collapse;
+                                     font-family: ui-monospace, monospace;
+                                     font-size: 0.78rem;">
+      <thead><tr style="color:#cca5ff;">
+        <th align="left" style="border-bottom:1px solid #5a3a8a;">tier</th>
+        <th align="left" style="border-bottom:1px solid #5a3a8a;">produced</th>
+        <th align="right" style="border-bottom:1px solid #5a3a8a;">match</th>
+        <th align="right" style="border-bottom:1px solid #5a3a8a;">wall</th>
+      </tr></thead>
+      <tbody id="ec-c8-tbody">
+        <tr><td colspan="4" style="color:#888; font-style:italic; padding:8px;">(no run yet)</td></tr>
+      </tbody>
+    </table>
   </div>
 </div>
 
@@ -134,22 +156,26 @@ extra capacity is paying for its extra compute on a given pair.
   const c8Pan   = document.getElementById('ec-c8-panel');
   const cmpRow  = document.getElementById('ec-compare');
 
-  function showPanel(panel, out, stat, data, label) {
-    panel.classList.remove('missing');
-    if (!data) {
-      panel.classList.add('missing');
-      out.textContent = `(no ${label} rules for this prompt)`;
-      stat.textContent = '';
+  function fillTbody(tbody, tiers) {
+    tbody.innerHTML = '';
+    if (!tiers || tiers.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:#888; font-style:italic; padding:8px;">(no tiers populated for this prompt)</td></tr>';
       return;
     }
-    out.textContent = data.produced;
-    const m = data.byte_match_count;
-    const n = data.n_bytes;
-    const pct = (100 * m / Math.max(1, n)).toFixed(1);
-    const portStr = data.port_used !== undefined ? ` · port=${data.port_used}` : '';
-    stat.innerHTML = `pk=${data.pair_pk} · target=<b>${data.expected}</b> · `
-                   + `match <b>${m}/${n}</b> (${pct}%) · `
-                   + `<b>${data.wall_ms} ms</b>${portStr}`;
+    for (const t of tiers) {
+      const tr = document.createElement('tr');
+      const exactMark = t.exact ? ' ✓' : '';
+      const matchPct  = t.n_bytes > 0 ? (100*t.byte_match_count/t.n_bytes).toFixed(0) : '?';
+      tr.innerHTML =
+        `<td style="padding:3px 8px;"><b>${t.tier}</b><span style="color:#5fc55f;">${exactMark}</span></td>` +
+        `<td style="padding:3px 8px; max-width:18ch; word-break:break-word;">${escapeHtml(t.produced)}</td>` +
+        `<td align="right" style="padding:3px 8px;">${t.byte_match_count}/${t.n_bytes} <span style="color:#888;">(${matchPct}%)</span></td>` +
+        `<td align="right" style="padding:3px 8px;">${t.wall_ms} ms</td>`;
+      tbody.appendChild(tr);
+    }
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   }
 
   async function doRun() {
@@ -165,14 +191,22 @@ extra capacity is paying for its extra compute on a given pair.
         credentials: 'same-origin'});
       const j = await r.json();
       if (j.error) { status.textContent = `error: ${j.error}`; return; }
-      showPanel(b128Pan, b128Out, b128Stat, j.board128, 'board128');
-      showPanel(c8Pan,   c8Out,   c8Stat,   j.cell8_b256, 'cell8');
-      if (j.speed_ratio !== null) {
-        cmpRow.innerHTML = `speed ratio (board128 wall ÷ cell8 wall): `
-                         + `<b>${j.speed_ratio.toFixed(3)}×</b> `
-                         + `(${j.speed_ratio < 1 ? 'cell8 slower' : 'cell8 faster'})`;
+      const b128Tbody = document.getElementById('ec-b128-tbody');
+      const c8Tbody   = document.getElementById('ec-c8-tbody');
+      fillTbody(b128Tbody, j.board128_tiers);
+      fillTbody(c8Tbody,   j.cell8_tiers);
+      // Compare fastest exact tier of each.
+      const bf = (j.board128_tiers || []).filter(t => t.exact).sort((a,b)=>a.wall_ms-b.wall_ms)[0];
+      const cf = (j.cell8_tiers || []).filter(t => t.exact).sort((a,b)=>a.wall_ms-b.wall_ms)[0];
+      if (bf && cf) {
+        const ratio = bf.wall_ms / cf.wall_ms;
+        cmpRow.innerHTML = `fastest exact: board128 <b>${bf.tier}</b> ${bf.wall_ms}ms `
+                         + `· cell8 <b>${cf.tier}</b> ${cf.wall_ms}ms `
+                         + `· ratio <b>${ratio.toFixed(2)}×</b>`;
       } else {
-        cmpRow.textContent = '';
+        cmpRow.innerHTML = (j.pair_pk
+          ? `pk=${j.pair_pk} · target <b>${escapeHtml(j.expected || '')}</b> · port=${j.port_used}`
+          : '');
       }
       status.textContent = '';
     } catch (e) {

@@ -4075,8 +4075,10 @@ def caformer_engine_compare_view(request):
 
 @login_required
 def caformer_engine_compare_run(request):
-    """POST: {prompt} → run inference on BOTH engines, return both
-    outputs + per-engine wall times + byte-match diff."""
+    """POST: {prompt} → run inference on EVERY available tier of BOTH
+    engines (7→1 b008..b128 + cell8 b008..b256), report per-tier
+    produced output + wall_ms + byte_match for each.  Lets the user
+    see where each engine sits on the (latency, quality) plane."""
     import time
     import numpy as np
     from .models import QRPair
@@ -4088,63 +4090,105 @@ def caformer_engine_compare_run(request):
         return _json_response({'error': 'prompt required'})
     port_value = int(request.POST.get('port') or 0) & 3
 
-    # board128 run.
-    pair_b128 = QRPair.objects.filter(prompt=prompt, board128_exact=True).first()
-    b128_result = None
-    if pair_b128 and pair_b128.is_board128():
-        from . import board128 as _b128
-        rules = pair_b128.board128_rules()
-        n_bytes = len(pair_b128.expected.encode('utf-8'))
-        t0 = time.time()
-        produced = _b128.forward_pair_board128_positional(
-            prompt, rules, n_bytes, n_ticks=128)
-        wall_ms = (time.time() - t0) * 1000.0
-        try: text = produced.decode('utf-8')
-        except UnicodeDecodeError: text = produced.decode('latin-1', errors='replace')
-        b128_result = {
-            'pair_pk':   pair_b128.pk,
-            'expected':  pair_b128.expected,
-            'produced':  text,
-            'byte_match_count': sum(1 for a, b in zip(
-                produced, pair_b128.expected.encode('utf-8')) if a == b),
-            'n_bytes':   n_bytes,
-            'wall_ms':   round(wall_ms, 1),
-        }
+    # Find any pair matching the prompt (one row → many tier blobs).
+    pair = QRPair.objects.filter(prompt=prompt).first()
+    if pair is None:
+        return _json_response({'ok': True, 'prompt': prompt,
+                                 'board128': [], 'cell8': []})
+    expected_bytes = pair.expected.encode('utf-8')
+    n_bytes = len(expected_bytes)
+    pair_pk = pair.pk
+    expected_text = pair.expected
 
-    # cell8+256 run.
-    pair_c8 = QRPair.objects.filter(prompt=prompt,
-                                              cell8_b256_rules_blob__isnull=False).first()
-    cell8_result = None
-    if pair_c8 and pair_c8.is_cell8_b256():
-        from . import board256 as _b256
-        rules = pair_c8.cell8_b256_rules()
-        n_bytes = len(pair_c8.expected.encode('utf-8'))
+    def _run_b128_at_tier(side):
+        """Run 7→1 multires at the given side (8/16/32/64/128).
+        Inline forward because board_multires has training helpers but
+        no packaged multi-position inference."""
+        from .board_multires import (embed_prompt_tier,
+                                            decode_byte_at_position_tier,
+                                            tier_geometry)
+        from .primitives import hex_ca_step
+        field = 'board128_rules_blob' if side == 128 else f'b{side:03d}_rules_blob'
+        if not hasattr(pair, field): return None
+        blob = getattr(pair, field)
+        if not blob: return None
+        blob = bytes(blob)
+        rule_n = 16384
+        n_pos = len(blob) // rule_n
+        rules = [np.frombuffer(blob[i*rule_n:(i+1)*rule_n], dtype=np.uint8).copy()
+                 for i in range(n_pos)]
+        if not rules: return None
+        n_ticks = tier_geometry(side)['n_ticks_default'] if side != 128 else 128
         t0 = time.time()
-        produced = _b256.forward_pair_board256_positional(
-            prompt, rules, n_bytes,
-            n_ticks=_b256.DEFAULT_N_TICKS_256, port_value=port_value)
+        out = bytearray()
+        base_board = embed_prompt_tier(prompt, side) if side != 128 else None
+        # 128 uses board128.embed_prompt
+        if side == 128:
+            from .board128 import (embed_prompt as _ep128,
+                                          decode_byte_at_position as _db128)
+            for pos in range(min(n_bytes, len(rules))):
+                st = _ep128(prompt)
+                for _ in range(n_ticks):
+                    st = hex_ca_step(st, rules[pos])
+                out.append(_db128(st, pos))
+        else:
+            for pos in range(min(n_bytes, len(rules))):
+                st = base_board.copy()
+                for _ in range(n_ticks):
+                    st = hex_ca_step(st, rules[pos])
+                out.append(decode_byte_at_position_tier(st, pos, side))
+        wall_ms = (time.time() - t0) * 1000.0
+        try: text = bytes(out).decode('utf-8')
+        except UnicodeDecodeError: text = bytes(out).decode('latin-1', errors='replace')
+        match = sum(1 for a, b in zip(bytes(out), expected_bytes) if a == b)
+        return {'tier': f'b{side:03d}' if side != 128 else 'b128',
+                'side': side, 'produced': text, 'wall_ms': round(wall_ms, 1),
+                'byte_match_count': match, 'n_bytes': n_bytes,
+                'exact': bool(getattr(pair, f'{("board128" if side==128 else f"b{side:03d}")}_exact', False))}
+
+    def _run_cell8_at_tier(side):
+        """Run cell8 multires at the given side (8/16/32/64/128/256)."""
+        from .cell8_multires import (forward_pair_cell8_at_side,
+                                            cell8_tier_geometry)
+        from . import board256 as _b256
+        rules = pair.cell8_rules_at_tier(f'b{side:03d}')
+        if rules is None: return None
+        if side == 256:
+            n_ticks = _b256.DEFAULT_N_TICKS_256
+            t0 = time.time()
+            produced = _b256.forward_pair_board256_positional(
+                prompt, rules, n_bytes,
+                n_ticks=n_ticks, port_value=port_value)
+        else:
+            n_ticks = cell8_tier_geometry(side)['n_ticks_default']
+            t0 = time.time()
+            produced = forward_pair_cell8_at_side(
+                prompt, rules, n_bytes, side,
+                n_ticks=n_ticks, port_value=port_value)
         wall_ms = (time.time() - t0) * 1000.0
         try: text = produced.decode('utf-8')
         except UnicodeDecodeError: text = produced.decode('latin-1', errors='replace')
-        cell8_result = {
-            'pair_pk':   pair_c8.pk,
-            'expected':  pair_c8.expected,
-            'produced':  text,
-            'byte_match_count': sum(1 for a, b in zip(
-                produced, pair_c8.expected.encode('utf-8')) if a == b),
-            'n_bytes':   n_bytes,
-            'wall_ms':   round(wall_ms, 1),
-            'port_used': port_value,
-        }
+        match = sum(1 for a, b in zip(produced, expected_bytes) if a == b)
+        return {'tier': f'b{side:03d}', 'side': side, 'produced': text,
+                'wall_ms': round(wall_ms, 1),
+                'byte_match_count': match, 'n_bytes': n_bytes,
+                'exact': bool(getattr(pair, f'cell8_b{side:03d}_exact', False))}
+
+    board128_tiers = []
+    for side in (8, 16, 32, 64, 128):
+        r = _run_b128_at_tier(side)
+        if r is not None: board128_tiers.append(r)
+    cell8_tiers = []
+    for side in (8, 16, 32, 64, 128, 256):
+        r = _run_cell8_at_tier(side)
+        if r is not None: cell8_tiers.append(r)
 
     return _json_response({
-        'ok': True,
-        'prompt':     prompt,
-        'board128':   b128_result,
-        'cell8_b256': cell8_result,
-        'speed_ratio': (b128_result['wall_ms'] / cell8_result['wall_ms']
-                            if (b128_result and cell8_result and
-                                cell8_result['wall_ms'] > 0) else None),
+        'ok': True, 'prompt': prompt,
+        'pair_pk': pair_pk, 'expected': expected_text, 'n_bytes': n_bytes,
+        'port_used': port_value,
+        'board128_tiers': board128_tiers,
+        'cell8_tiers':    cell8_tiers,
     })
 
 
