@@ -440,3 +440,22 @@ class QRPair(models.Model):
         return [np.frombuffer(blob[i * 16_384:(i + 1) * 16_384],
                                   dtype=np.uint8).copy()
                 for i in range(n)]
+
+    def is_cell8_b256(self):
+        """True when this pair has cell8+256 per-position rules
+        stored.  Dispatch may prefer these (when ?engine=cell8) but
+        defaults to board128 since cell8 corpus retrain is gradual."""
+        blob = self.cell8_b256_rules_blob
+        return bool(blob) and len(bytes(blob)) >= 65_536
+
+    def cell8_b256_rules(self):
+        """Yield the N cell8 per-position rules (65,536 bytes each).
+        None if cell8 rules not stored."""
+        if not self.is_cell8_b256():
+            return None
+        import numpy as np
+        blob = bytes(self.cell8_b256_rules_blob)
+        n = len(blob) // 65_536
+        return [np.frombuffer(blob[i * 65_536:(i + 1) * 65_536],
+                                  dtype=np.uint8).copy()
+                for i in range(n)]
