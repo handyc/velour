@@ -43,11 +43,9 @@ class Command(BaseCommand):
                               help='output directory (must not already exist '
                                      'or must be empty)')
         parser.add_argument('--tier', type=int, default=16,
-                              help='multires tier to bake into the beano '
-                                     'chatbot.html (16 is the sweet spot — '
-                                     'small files, fast inference)')
+                              help='multires tier for ALL beano variants')
         parser.add_argument('--max-bytes-mb', type=float, default=8.0,
-                              help='cap on the beano chatbot.html size')
+                              help='cap on each variant chatbot.html size')
 
     def handle(self, *, out, tier, max_bytes_mb, **opts):
         out_p = Path(out).resolve()
@@ -63,29 +61,87 @@ class Command(BaseCommand):
         log(f'  out:  {out_p}')
         log(f'  tier: {tier} (beano model)\n')
 
-        # -------- 1. The beano model: pre-built chatbot.html --------
-        log('  building beano/chatbot.html (pre-trained 71-pair model)...')
-        from caformer.management.commands.caformer_emit_standalone \
-            import build_standalone_html
-        beano_dir = out_p / 'beano'
-        beano_dir.mkdir(exist_ok=True)
-        html = build_standalone_html(pair_ids=None, tier=tier,
-                                              max_bytes_mb=max_bytes_mb)
-        (beano_dir / 'chatbot.html').write_text(html, encoding='utf-8')
-        log(f'    wrote {beano_dir / "chatbot.html"} '
-            f'({(beano_dir / "chatbot.html").stat().st_size} B)')
-
-        # Also include a JSON snapshot of the corpus so the researcher
-        # can see what pairs are baked in.
+        # -------- 1. The beano models: multi-variant pre-built --------
+        # Each variant is (slug, label, description, pair_id_list_or_None).
+        # pair_ids=None means "use every board128_exact pair".
         import json
         from caformer.models import QRPair
+        from caformer.management.commands.caformer_emit_standalone \
+            import build_standalone_html
+
+        # Curate the variants from what's actually trained.  Stable
+        # selection: filter by prompt text.
+        all_exact_pks = list(
+            QRPair.objects.filter(board128_exact=True)
+                              .order_by('pk').values_list('pk', flat=True))
+        hi_variant_pks = list(
+            QRPair.objects.filter(board128_exact=True, prompt='hi')
+                              .order_by('pk').values_list('pk', flat=True))
+        # "tiny" = 10 of the shortest-response trained pairs, for a
+        # snappy demo. Stable across runs (sorted by pk after filter).
+        short_pks = list(
+            QRPair.objects.filter(board128_exact=True)
+                              .extra(select={'rl': 'LENGTH(expected)'})
+                              .order_by('rl', 'pk')
+                              .values_list('pk', flat=True)[:10])
+
+        variants = [
+            ('micro',
+              'micro · 3 "hi" variants',
+              'Tiny demo proving multi-response sampling — same '
+              'prompt, three trained responses.',
+              hi_variant_pks),
+            ('tiny',
+              'tiny · 10 shortest pairs',
+              'Quick-load demo with the 10 shortest trained pairs.',
+              short_pks),
+            ('chat',
+              'chat · full 71-pair corpus',
+              'The complete trained chat corpus.  Larger file (~5 MB) '
+              'but full breadth.',
+              None),
+        ]
+
+        beano_dir = out_p / 'beano'
+        beano_dir.mkdir(exist_ok=True)
+        variant_results = []   # for the index + the kit's template default
+
+        log('  building beano variants...')
+        for slug, label, description, pks in variants:
+            v_dir = beano_dir / slug
+            v_dir.mkdir(exist_ok=True)
+            v_html = build_standalone_html(
+                pair_ids=pks, tier=tier, max_bytes_mb=max_bytes_mb)
+            (v_dir / 'chatbot.html').write_text(v_html, encoding='utf-8')
+            # corpus.json for this variant
+            qs = (QRPair.objects.filter(pk__in=pks)
+                      if pks else QRPair.objects.filter(board128_exact=True))
+            v_pairs = [{'pk': p.pk, 'prompt': p.prompt, 'expected': p.expected}
+                          for p in qs.order_by('pk')]
+            (v_dir / 'corpus.json').write_text(
+                json.dumps(v_pairs, indent=2, ensure_ascii=False))
+            size_kb = (v_dir / 'chatbot.html').stat().st_size // 1024
+            log(f'    {slug:7s}: {len(v_pairs)} pairs, {size_kb} KB')
+            variant_results.append({
+                'slug': slug, 'label': label, 'description': description,
+                'n_pairs': len(v_pairs), 'size_kb': size_kb,
+            })
+
+        # Generate beano/index.html — the landing page that lists all
+        # the variants with sizes and links.
+        (beano_dir / 'index.html').write_text(
+            _build_beano_index_html(variant_results, tier))
+        log(f'    wrote beano/index.html (variant selector)')
+
+        # The kit's chatbot template (used by make-chatbot.sh as the
+        # base for user-trained chatbots) = the 'chat' variant.
+        template_html = (beano_dir / 'chat' / 'chatbot.html').read_text(
+            encoding='utf-8')
+        # Names kept for downstream messaging.
+        chatbot_size_kb = (beano_dir / 'chat' / 'chatbot.html').stat().st_size // 1024
         pairs_json = [
-            {'prompt': p.prompt, 'expected': p.expected,
-              'pk':     p.pk}
+            {'pk': p.pk, 'prompt': p.prompt, 'expected': p.expected}
             for p in QRPair.objects.filter(board128_exact=True).order_by('pk')]
-        (beano_dir / 'corpus.json').write_text(
-            json.dumps(pairs_json, indent=2, ensure_ascii=False))
-        log(f'    wrote {beano_dir / "corpus.json"} ({len(pairs_json)} pairs)')
 
         # -------- 2. Vendored Python modules + shell scripts -------
         log('\n  vendoring trainer modules into scripts/lib/...')
@@ -119,12 +175,11 @@ class Command(BaseCommand):
         (scripts_dir / 'build_chatbot.py').write_text(_BUILD_CHATBOT_PY)
         log('    wrote extract_pairs.py, train_pairs.py, build_chatbot.py')
 
-        # Embed the chatbot HTML *template* into build_chatbot.py as
-        # a base64 string — the kit then doesn't need any
-        # network/asset fetch.  We can store it side-by-side as a
-        # data file.
+        # Embed the chatbot HTML *template* into scripts/ — it's the
+        # same standalone HTML as beano/chat/chatbot.html. build_chatbot.py
+        # rewrites its BLOB_B64 with the user's trained pairs.
         (scripts_dir / 'chatbot_template.html').write_text(
-            html, encoding='utf-8')
+            template_html, encoding='utf-8')
         log('    wrote chatbot_template.html')
 
         make_sh = out_p / 'make-chatbot.sh'
@@ -158,14 +213,73 @@ class Command(BaseCommand):
         from django.utils.timezone import now
         (out_p / 'README.md').write_text(_README.format(
             n_pairs=len(pairs_json), tier=tier,
-            chatbot_size_kb=(beano_dir / 'chatbot.html').stat().st_size // 1024,
+            chatbot_size_kb=chatbot_size_kb,
             built_at=now().isoformat()))
         log(f'\n=== kit written to {out_p} ===')
-        log(f'  beano model:       {len(pairs_json)} pairs, tier={tier}')
-        log(f'  chatbot.html size: {(beano_dir / "chatbot.html").stat().st_size//1024} KB')
+        log(f'  beano variants:    {len(variant_results)}')
+        for v in variant_results:
+            log(f'    {v["slug"]:7s}: {v["n_pairs"]:3d} pairs, {v["size_kb"]:5d} KB')
         log(f'  total kit size:    {sum(p.stat().st_size for p in out_p.rglob("*") if p.is_file())//1024} KB')
-        log(f'\n  Try it:   open {beano_dir / "chatbot.html"} in any browser')
+        log(f'\n  Try it:   open {beano_dir / "index.html"} in any browser')
         log(f'  Bundle:   tar -czf caformer-kit.tar.gz -C {out_p.parent} {out_p.name}')
+
+
+# ============================================================
+# Beano variant index page builder.
+# ============================================================
+
+def _build_beano_index_html(variants, tier):
+    """A tiny landing page listing every beano variant + size +
+    link.  No deps, opens straight in any browser."""
+    rows = []
+    for v in variants:
+        rows.append(
+            f'<tr>'
+            f'<td><a href="{v["slug"]}/chatbot.html">{v["label"]}</a></td>'
+            f'<td>{v["n_pairs"]}</td>'
+            f'<td>{v["size_kb"]} KB</td>'
+            f'<td>{v["description"]}</td>'
+            f'<td><a href="{v["slug"]}/corpus.json">corpus.json</a></td>'
+            f'</tr>')
+    return f'''<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>caformer-kit beano models</title>
+<style>
+  body {{ background:#0a0e0a; color:#cfe5cf; max-width:800px;
+          margin:1.5rem auto; padding:0 1rem; line-height:1.55;
+          font-family: ui-sans-serif, system-ui, sans-serif; }}
+  h1 {{ color:#aaffaa; border-bottom:1px solid #2a6a2a; padding-bottom:4px; }}
+  table {{ border-collapse:collapse; width:100%; margin:1rem 0; }}
+  th, td {{ padding:8px 12px; border-bottom:1px solid #1a3a1a; text-align:left; }}
+  th {{ color:#aaffaa; background:#050a05; }}
+  a {{ color:#79c0ff; text-decoration:none; }}
+  a:hover {{ text-decoration:underline; }}
+  .lede {{ color:#88aa88; font-size:0.92rem; }}
+  code {{ color:#f0ff80; background:#0a1a0a; padding:1px 4px; }}
+</style>
+</head>
+<body>
+<h1>caformer-kit · beano models</h1>
+<p class="lede">
+Pre-trained demo chatbots.  Each is one self-contained HTML file
+(no server, no internet).  All variants are baked at multires tier
+{tier}.  Pick one by file size + breadth:
+</p>
+<table>
+  <thead><tr><th>Variant</th><th># pairs</th><th>Size</th><th>What</th><th>Corpus</th></tr></thead>
+  <tbody>
+    {''.join(rows)}
+  </tbody>
+</table>
+<p class="lede">
+To make your own: <code>./make-chatbot.sh path/to/corpus.txt</code>
+from the kit root.  See <code>../README.md</code>.
+</p>
+</body>
+</html>
+'''
 
 
 # ============================================================
@@ -373,13 +487,46 @@ print(f'\\n  {n_pos_matched}/{n_pos_total} positions matched; '
 
 _BUILD_CHATBOT_PY = '''#!/usr/bin/env python3
 """Bundle (pairs.json, rules.bin) into a single self-contained
-chatbot.html.  Reuses the chatbot_template.html that was baked into
-the kit at emit time — that template already has the inference
-engine + UI; we just substitute in the new pairs + rules."""
-import argparse, json, base64, sys
+chatbot.html by REPLACING the BLOB_B64 line in the chatbot
+template with the user's trained model.
+
+The template ships pre-baked with the kit's "chat" variant (the
+71-pair beano demo); this script overwrites that data so the
+output file contains ONLY the user's pairs — no leftover demo
+chatter mixed in."""
+import argparse, base64, json, re, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
-from caformer.io.rule_blob import read_records, SHAPE_7TO1
+from caformer.io.rule_blob import read_records
+
+RULE_BYTES = 16384
+
+
+def pack_caformer_blob(pair_dicts):
+    """Pack [{prompt, expected, side, ticks, rules: bytes}, ...] into
+    the binary format the standalone chatbot template parses:
+
+        CAFORMER (8B magic) | version u8 | n_pairs u32 LE
+        per pair: side u8, ticks u8, plen u16, prompt, elen u16,
+                  expected, n_rules u16, rules (n_rules * 16384 B)
+    """
+    buf = bytearray(b'CAFORMER')
+    buf.append(1)
+    buf += len(pair_dicts).to_bytes(4, 'little')
+    for e in pair_dicts:
+        p = e['prompt'].encode('utf-8')
+        r = e['expected'].encode('utf-8')
+        n_rules = len(e['rules']) // RULE_BYTES
+        buf.append(e['side'])
+        buf.append(e['ticks'])
+        buf += len(p).to_bytes(2, 'little')
+        buf += p
+        buf += len(r).to_bytes(2, 'little')
+        buf += r
+        buf += n_rules.to_bytes(2, 'little')
+        buf += e['rules']
+    return bytes(buf)
+
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--pairs', required=True)
@@ -387,62 +534,56 @@ ap.add_argument('--rules', required=True)
 ap.add_argument('--template', required=True,
                 help='chatbot_template.html in the kit')
 ap.add_argument('--out', required=True)
+ap.add_argument('--side', type=int, default=16,
+                help='board side for the trained pairs (must match '
+                     'whatever train_pairs.py used — default 16)')
+ap.add_argument('--ticks', type=int, default=0,
+                help='ticks count (default = side)')
 args = ap.parse_args()
 
 pairs = json.loads(Path(args.pairs).read_text())
+ticks = args.ticks or args.side
+
 # Read rule records, collect per-pair concatenated rule blobs.
 by_pair = {}
 for rec in read_records(Path(args.rules)):
     by_pair.setdefault(rec.pair_pk, {})[rec.position] = rec.rule_blob
 
-# Build the in-memory model blob: per-pair, per-position rules,
-# concatenated.  The template's runtime understands this format.
-import struct
 out_pairs = []
-rules_concat = bytearray()
-offset = 0
 for i, pair in enumerate(pairs):
     positions = by_pair.get(i, {})
     if not positions: continue
     n_positions = max(positions.keys()) + 1
-    blob = b''.join(positions.get(p, bytes(16384)) for p in range(n_positions))
+    rules_blob = b''.join(
+        positions.get(p, bytes(RULE_BYTES)) for p in range(n_positions))
     out_pairs.append({
-        'prompt': pair['prompt'],
+        'prompt':   pair['prompt'],
         'expected': pair['expected'],
-        'rules_offset': offset,
-        'rules_len': len(blob),
-        'n_positions': n_positions,
+        'side':     args.side,
+        'ticks':    ticks,
+        'rules':    rules_blob,
     })
-    rules_concat.extend(blob)
-    offset += len(blob)
+
+if not out_pairs:
+    print(f'no trained pairs found in {args.rules}; nothing to write')
+    sys.exit(1)
+
+blob = pack_caformer_blob(out_pairs)
+blob_b64 = base64.b64encode(blob).decode('ascii')
 
 template = Path(args.template).read_text(encoding='utf-8')
-# The standalone template has a __PAIRS_JSON__ + __RULES_B64__
-# pattern.  If it doesn't, we just append a script tag injecting
-# the model — keeps this script template-agnostic.
-import re
-pairs_json = json.dumps(out_pairs, ensure_ascii=False)
-rules_b64 = base64.b64encode(bytes(rules_concat)).decode()
+# Replace the const BLOB_B64 = "..."; line with our payload.
+new_html, n_subs = re.subn(
+    r'const\\s+BLOB_B64\\s*=\\s*"[A-Za-z0-9+/=]*"\\s*;',
+    f'const BLOB_B64 = "{blob_b64}";',
+    template, count=1)
+if n_subs == 0:
+    print('ERROR: template has no const BLOB_B64 = "..."; line to replace')
+    sys.exit(2)
 
-if '__KIT_PAIRS_JSON__' in template:
-    out = template.replace('__KIT_PAIRS_JSON__', pairs_json)
-    out = out.replace('__KIT_RULES_B64__', rules_b64)
-else:
-    # Inject as a payload before </body>; the existing JS will find
-    # window.__kit_pairs and window.__kit_rules_b64 if it's looking,
-    # otherwise we just leave the template's own bundled model in
-    # place (so the chatbot still works with the kit's beano model).
-    injection = (
-        '<script>'
-        f'window.__kit_pairs = {pairs_json};'
-        f'window.__kit_rules_b64 = "{rules_b64}";'
-        f'console.log("Loaded kit model: " + window.__kit_pairs.length + " pairs");'
-        '</script>')
-    out = template.replace('</body>', injection + '</body>')
-
-Path(args.out).write_text(out, encoding='utf-8')
-print(f'wrote {args.out} ({len(out)} chars, {len(out_pairs)} pairs, '
-      f'{len(rules_concat)} B rules)')
+Path(args.out).write_text(new_html, encoding='utf-8')
+print(f'wrote {args.out} ({len(new_html):,} chars, {len(out_pairs)} pairs, '
+      f'{len(blob):,} B blob, {len(blob_b64):,} B b64)')
 '''
 
 
@@ -656,18 +797,24 @@ A turnkey researcher distribution: drop a text file in, get a
 self-contained HTML chatbot out.
 
 **Built {built_at}**
-**Beano model:** {n_pairs} pairs, multires tier {tier}, chatbot.html ≈ {chatbot_size_kb} KB
+**Beano demos:** multiple sizes at multires tier {tier}
+**Full corpus:** {n_pairs} pairs, ~{chatbot_size_kb} KB
 
-## Try the beano demo (no training needed)
+## Try the beano demos (no training needed)
 
 ```
-open beano/chatbot.html
+open beano/index.html
 ```
 
-That's a fully working chatbot with {n_pairs} pre-trained
-prompt→response pairs.  No server.  No internet.  No model
-download.  The entire model is baked into the HTML file (~{chatbot_size_kb} KB
-total).
+Lists all bundled demo chatbots with sizes; pick one to open.
+Each is a fully self-contained HTML file (no server, no internet,
+no model download) with its trained model baked in:
+
+| Variant | What |
+|---|---|
+| `beano/micro/chatbot.html` | 3 "hi" variants — proves multi-response sampling |
+| `beano/tiny/chatbot.html`  | 10 shortest pairs — fastest load |
+| `beano/chat/chatbot.html`  | full 71-pair corpus, complete breadth |
 
 ## Train your own (one command)
 
@@ -739,8 +886,10 @@ caformer-kit/
 ├── README.md             ← this file
 ├── make-chatbot.sh       ← text -> chatbot.html one-shot
 ├── beano/
-│   ├── chatbot.html      ← pre-trained demo, open this first
-│   └── corpus.json       ← the pairs that were baked in
+│   ├── index.html        ← variant selector, open this first
+│   ├── micro/chatbot.html + corpus.json
+│   ├── tiny/chatbot.html  + corpus.json
+│   └── chat/chatbot.html  + corpus.json  (the full demo)
 ├── scripts/
 │   ├── extract_pairs.py
 │   ├── train_pairs.py
