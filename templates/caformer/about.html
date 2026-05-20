@@ -484,6 +484,188 @@ hi = 0x68 0x69 → cells:
         described above)</li>
   </ul>
 
+  <h2>How the model evolved — a version history</h2>
+  <p>The architecture didn't arrive whole. Each row is a discrete
+  step that solved a specific problem the previous step couldn't.
+  The "scale" column refers to how many cells/board the inference
+  pass touches; the storage column is per-pair.</p>
+
+  <table style="border-collapse: collapse; width:100%; font-size:0.86rem;">
+    <thead>
+      <tr style="background:#0a1a0a; color:#aaffaa; text-align:left;">
+        <th style="padding:6px;">Era</th>
+        <th style="padding:6px;">What was new</th>
+        <th style="padding:6px;">Why it was needed</th>
+        <th style="padding:6px;">Storage/pair</th>
+      </tr>
+    </thead>
+    <tbody style="font-family: ui-monospace, monospace; line-height:1.6;">
+      <tr style="border-bottom:1px solid #1a3a1a;">
+        <td style="padding:6px;"><b>per-byte chains</b><br><span style="color:#888;">(original)</span></td>
+        <td style="padding:6px;">N positional chains, each running the full transformer-shaped CA stack over a growing context</td>
+        <td style="padding:6px;">First proof a CA could fit text. Cost O(N²) in response length — topped out around 5-byte responses on long prompts.</td>
+        <td style="padding:6px;">~160 KB</td>
+      </tr>
+      <tr style="border-bottom:1px solid #1a3a1a;">
+        <td style="padding:6px;"><b>per-position rules</b><br><span style="color:#888;">(2026-05-18)</span></td>
+        <td style="padding:6px;">One CA rule per output byte. Each rule trained independently against a single-byte target.</td>
+        <td style="padding:6px;">Joint multi-byte training plateaus; decomposing to N single-byte problems lets every position converge.</td>
+        <td style="padding:6px;">N × 16 KB</td>
+      </tr>
+      <tr style="border-bottom:1px solid #1a3a1a;">
+        <td style="padding:6px;"><b>board128 single-board</b><br><span style="color:#888;">(2026-05-18)</span></td>
+        <td style="padding:6px;">128×128 K=4 hex grid; prompt+response embedded as 4 cells/byte; one rule per output position.</td>
+        <td style="padding:6px;">Old N-chain inference ran a full stack per position. board128 runs ONE CA per position on the embedded prompt — same algorithm, much bigger context window (4096 chars total).</td>
+        <td style="padding:6px;">N × 16 KB (same)</td>
+      </tr>
+      <tr style="border-bottom:1px solid #1a3a1a;">
+        <td style="padding:6px;"><b>multires tiers</b><br><span style="color:#888;">(2026-05-19)</span></td>
+        <td style="padding:6px;">Smaller boards (8×8, 16×16, 32×32, 64×64) trained alongside the 128×128 version.</td>
+        <td style="padding:6px;">Most prompts byte-match at tier 16. Dispatch tries cheapest tier first — wall time drops ~30× on 96% of corpus.</td>
+        <td style="padding:6px;">+8% over board128</td>
+      </tr>
+      <tr style="border-bottom:1px solid #1a3a1a;">
+        <td style="padding:6px;"><b>cell8 primitive</b><br><span style="color:#888;">(2026-05-16)</span></td>
+        <td style="padding:6px;">8→1 hex CA rule (65,536-entry LUT). 7 hex neighbors + 1 external "input port".</td>
+        <td style="padding:6px;">Lets the rule's output depend on a per-tick external value (heartbeat, router, prev byte). Same prompt can produce different responses depending on the port.</td>
+        <td style="padding:6px;">N × 64 KB</td>
+      </tr>
+      <tr style="border-bottom:1px solid #1a3a1a;">
+        <td style="padding:6px;"><b>cell8+256 + multires</b><br><span style="color:#888;">(2026-05-19/20)</span></td>
+        <td style="padding:6px;">Cell8 paired with a 256×256 board (so the LUT and the board match cell-for-cell — preserves the ouroboros symmetry that 128×128 broke).</td>
+        <td style="padding:6px;">The "LUT-as-image" trick (running a rule on its own LUT) needs cell count = LUT entry count. Cell8+256 brings it back at the new scale.</td>
+        <td style="padding:6px;">N × 64 KB × tier</td>
+      </tr>
+      <tr>
+        <td style="padding:6px;"><b>quarter-composition</b><br><span style="color:#888;">(2026-05-20)</span></td>
+        <td style="padding:6px;">A cell8 LUT IS structurally 4 stacked 7→1 LUTs. Stack 4 differently-trained rules; port selects which fires.</td>
+        <td style="padding:6px;">"Personality MoE in one LUT" — same prompt, 4 byte-exact distinct responses depending on port value. No retraining at inference, no temperature, no sampling.</td>
+        <td style="padding:6px;">N × 64 KB (no change)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>How training actually works</h2>
+
+  <p>One trained model = N rules, one per output byte. To train ONE
+  rule for one byte position:</p>
+
+  <ol>
+    <li><b>Build a starting population.</b> 8 candidate rules,
+    each a random 16,384-byte LUT (or warm-started from an existing
+    rule if one's available).</li>
+
+    <li><b>Score every candidate.</b> Embed the prompt into a 128×128
+    K=4 board (4 cells per byte). Run the CA for 128 ticks. Look at
+    the 4 cells at the target byte's response position. Score =
+    fraction of those 4 cells that match the target byte's bits,
+    plus a bonus of 1.0 if the decoded byte matches exactly.</li>
+
+    <li><b>GA loop until exact-match or budget exhausted.</b>
+      <ul style="line-height:1.5;">
+        <li>Pick a parent from the top half of the population</li>
+        <li>Copy it; flip 0.5% of LUT entries to random new values</li>
+        <li>Score the child</li>
+        <li>If child &gt; worst in population, replace worst</li>
+        <li>Repeat 8× per "burst"</li>
+      </ul>
+    </li>
+
+    <li><b>Polish.</b> Between bursts, run coordinate descent on
+    single LUT entries: pick one random entry, try each of the 4
+    possible values, keep whichever maximizes fitness. Often the
+    last byte-match difference is one specific entry.</li>
+
+    <li><b>Exit when exact.</b> The moment any candidate produces
+    the target byte, that rule wins.</li>
+  </ol>
+
+  <p>Per-position budget: 30–90 seconds at board128. Most positions
+  exact-match in 5-30 seconds; only a few hit the budget cap. The
+  resulting rule is one 16,384-byte LUT. Storage per pair = N rules
+  × 16,384 bytes.</p>
+
+  <p><b>What's actually being learned:</b> the LUT is literally a
+  function table — given any 7-cell neighborhood configuration
+  (14 bits), what 2-bit output to write. The GA searches the space
+  of all 4^16384 possible such tables for one whose dynamics
+  happen to produce the target byte at the target position after
+  N ticks of forward simulation. Almost all of the 4^16384 functions
+  produce noise; the GA's job is to find one that doesn't.</p>
+
+  <h2>How a byte flows through inference</h2>
+
+  <p>For a worked example: prompt = "hi", trained for response "hello",
+  asking for byte at position 2 (the first 'l'):</p>
+
+  <ol style="line-height:1.7;">
+    <li><b>Embed.</b> "hi" = bytes [0x68, 0x69] = cells
+    [1,2,2,0, 1,2,2,1] in the top-left of a 128×128 grid (4 cells
+    per byte, MSB first). All other cells = 0.</li>
+
+    <li><b>Look up rule.</b> For position 2 ('l' = 0x6c), load
+    that pair's <code>rules[2]</code> — a 16,384-byte LUT trained
+    specifically for "byte at position 2 of response to prompt 'hi'
+    must equal 0x6c".</li>
+
+    <li><b>Run CA for 128 ticks.</b> Each tick, every cell looks at
+    its 7-cell neighborhood (self + 6 hex neighbors), packs that
+    into a 14-bit key, looks up the new value in the LUT, writes
+    it. 16,384 cells × 128 ticks = 2.1M lookups.</li>
+
+    <li><b>Read out.</b> Look at the 4 cells at byte position 2 of
+    the response region (cells [8200..8203]). Pack them as 2 bits
+    each into one byte. By construction (because the rule was
+    trained for this) those 4 cells now hold [1,2,3,0] =
+    bits 01_10_11_00 = 0x6c = 'l'.</li>
+  </ol>
+
+  <p>Repeat for every position, in parallel (the rules don't depend
+  on each other). The full response "hello" emerges from 5
+  independent CAs each producing one byte.</p>
+
+  <h2>What's actually encoded in a trained model</h2>
+
+  <p>A rule LUT is 16,384 bytes. If you treat those bytes as
+  the 16,384 cells of a 128×128 K=4 image (the "Ouroboros view"),
+  you can SEE what each trained rule looks like. Open
+  <a href="{% url 'caformer:caformer_lutview' %}">/caformer/lutview/</a>
+  to visualize any trained rule as a picture.</p>
+
+  <p>Almost all rules look like noise. The ones that produce
+  meaningful CA dynamics (Wolfram class 4 — "the edge of chaos")
+  tend to look structured: stripes, sparse-on-black patterns,
+  fractal-like shapes. The <a href="https://en.wikipedia.org/wiki/Mandelbrot_set">Mandelbrot set</a>'s
+  posterized escape times happen to land in class 4 about 18% of
+  the time; Julia sets land there 77% of the time. We use this in
+  <a href="{% url 'caformer:caformer_lutview' %}">lutview</a>'s
+  "fractal hunter" mode and as warm-start seeds for the GA.</p>
+
+  <h2>The kit (handout-able researcher distribution)</h2>
+
+  <p>Everything above can be packaged into a self-contained
+  <code>caformer-kit/</code> directory researchers can hand to
+  colleagues. Generate one from this server with:</p>
+
+  <pre>manage.py caformer_emit_kit --out /path/to/caformer-kit</pre>
+
+  <p>The kit includes:</p>
+  <ul>
+    <li><b>beano demos</b> — 4 pre-built chatbots from this server's
+    trained corpus (micro / tiny / chat) plus
+    <code>beano/ftv.html</code> — a 1970s television that
+    channel-surfs through 30 real corpus rules + fractal-generated
+    rules at 30 fps.</li>
+    <li><b>make-chatbot.sh</b> — one-shot text-file → chatbot.html
+    pipeline (extracts pairs, trains at tier 16, bundles into
+    a self-contained HTML). Only needs python3 + numpy.</li>
+    <li><b>alice/</b> — Slurm wrappers for training big corpora on
+    Leiden's HPC.</li>
+    <li><b>django-bootstrap/</b> — minimal Django scaffold that
+    serves the chatbot as a TemplateView landing page. No models,
+    no migrations.</li>
+  </ul>
+
   <h2>Demo pages added 2026-05-20</h2>
   <ul>
     <li><a href="{% url 'caformer:caformer_quarter_compose' %}">/caformer/quarter-compose/</a>
