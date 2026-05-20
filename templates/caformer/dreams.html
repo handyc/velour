@@ -1,8 +1,22 @@
 {% extends "base.html" %}
 {% block title %}caformer dreams · class-4 LUTs from the DMN{% endblock %}
 {% block content %}
-<meta http-equiv="refresh" content="10">
 <style>
+  .ctrl { display:flex; gap:10px; align-items:center; margin:10px 0;
+          background:#050a05; border:1px solid #1a3a1a; padding:10px;
+          font-family:ui-monospace,monospace; font-size:0.85rem; }
+  .ctrl button { background:#0a2a0a; color:#aaffaa;
+                  border:1px solid #2a6a2a; padding:5px 14px; cursor:pointer;
+                  font:inherit; font-weight:bold; }
+  .ctrl button:hover { background:#1a4a1a; }
+  .ctrl button.on { background:#c2912a; color:#1a0f06;
+                     box-shadow: inset 0 0 6px #000; }
+  .ctrl .stat { color:#88aa88; }
+  .ctrl .stat b { color:#aaffaa; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%;
+         background:#555; margin-right:6px; vertical-align:middle; }
+  .dot.on { background:#5fc55f; box-shadow:0 0 6px #5fc55f; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 50% { opacity:0.4; } }
   .dr { max-width: 90ch; margin: 1rem auto; padding: 0 1rem;
         color: #cfe5cf; font-family: ui-sans-serif, system-ui, sans-serif;
         line-height: 1.5; }
@@ -40,6 +54,22 @@ Pool: <code>{{ pool_dir }}</code> — currently {{ n_dreams }} dreams.
 Each entry is a 128×128 K=4 hex-CA rule LUT (16,384 bytes) whose
 post-transient activity lands in the class-4 band [0.02, 0.55].
 </p>
+
+<div class="ctrl">
+  <span class="dot {% if daemon_state.running %}on{% endif %}" id="d-dot"></span>
+  <button id="d-btn">{% if daemon_state.running %}❚❚ STOP{% else %}▶ START{% endif %}</button>
+  <span class="stat" id="d-stat">
+    {% if daemon_state.running %}
+      running · attempts <b>{{ daemon_state.attempts }}</b> ·
+      kept <b>{{ daemon_state.kept }}</b> ·
+      reject <b>{{ daemon_state.rejected_c1c3 }}</b>
+    {% else %}stopped{% endif %}
+  </span>
+  <span class="stat" style="margin-left:auto;">interval
+    <input type="number" id="d-int" value="3" min="0.5" max="60" step="0.5"
+           style="width:5em; background:#0a1a0a; color:#aaffaa;
+                  border:1px solid #2a6a2a; font:inherit; font-size:0.85rem;">s</span>
+</div>
 
 {% if dreams %}
   <div class="grid">
@@ -93,4 +123,60 @@ as cell8 personalities, or piped into the FTV's channel pool via
 dreams dir.
 </p>
 </div>
+
+<script>
+(function(){
+  const btn = document.getElementById('d-btn');
+  const dot = document.getElementById('d-dot');
+  const stat = document.getElementById('d-stat');
+  const intInput = document.getElementById('d-int');
+  let running = {{ daemon_state.running|yesno:"true,false" }};
+  let lastKept = {{ daemon_state.kept|default:0 }};
+
+  function renderState(s) {
+    running = s.running;
+    btn.textContent = running ? '❚❚ STOP' : '▶ START';
+    dot.classList.toggle('on', running);
+    if (running) {
+      stat.innerHTML =
+        `running · attempts <b>${s.attempts}</b> · ` +
+        `kept <b>${s.kept}</b> · reject <b>${s.rejected_c1c3}</b>`;
+    } else {
+      stat.textContent = 'stopped';
+    }
+    // If a new dream landed, reload the page to show it
+    // (cheap; the page is short and we already have the latest
+    // status, the dream grid below it is server-rendered).
+    if (s.kept > lastKept) {
+      lastKept = s.kept;
+      setTimeout(() => location.reload(), 200);
+    }
+  }
+
+  async function toggle() {
+    const fd = new FormData();
+    fd.append('interval_sec', intInput.value);
+    fd.append('max_pool', '200');
+    const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+    const r = await fetch("{% url 'caformer:caformer_dreams_toggle' %}", {
+      method: 'POST', body: fd, headers: {'X-CSRFToken': csrf},
+      credentials: 'same-origin'});
+    const j = await r.json();
+    if (j.state) renderState(j.state);
+  }
+  btn.addEventListener('click', toggle);
+
+  // Poll status every 2s while page is visible.
+  async function poll() {
+    if (document.hidden) return;
+    try {
+      const r = await fetch("{% url 'caformer:caformer_dreams_status' %}",
+                            {credentials: 'same-origin'});
+      const j = await r.json();
+      if (j.state) renderState(j.state);
+    } catch (e) { /* swallow */ }
+  }
+  setInterval(poll, 2000);
+})();
+</script>
 {% endblock %}
