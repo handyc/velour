@@ -314,25 +314,42 @@ from the kit root.  See <code>../README.md</code>.
 _MAKE_CHATBOT_SH = '''#!/usr/bin/env bash
 # make-chatbot.sh -- text-file -> trained chatbot.html, one shot.
 #
-# Usage: ./make-chatbot.sh <corpus.txt> [output.html] [strategy]
+# Usage: ./make-chatbot.sh <corpus.txt> [output.html] [strategy] [work_dir]
 #   corpus.txt -- UTF-8 text file (a play, novel, conversation log…)
 #   output.html (default: chatbot.html)
 #   strategy   -- "continuation" (default) | "speaker" | "all"
+#   work_dir   -- where to keep pairs.json/rules.bin
+#                 (default: ./work-<output-basename>)
+#
+# INTERRUPT-SAFE: train_pairs.py appends one record per finished
+# position to rules.bin.  Ctrl-C any time; the work dir is
+# PRESERVED so you can resume or partially bundle.  To resume just
+# re-run the same command — extract is idempotent, training will
+# overwrite rules.bin from scratch (a future kit version will add
+# resume-from-position, see SCOPE in this file).
+#
+# To bundle whatever's in the work dir right now (partial or full):
+#   python3 scripts/build_chatbot.py \\
+#       --pairs <work_dir>/pairs.json \\
+#       --rules <work_dir>/rules.bin \\
+#       --template scripts/chatbot_template.html \\
+#       --out partial.html
 #
 # Requires: python3 + numpy on PATH.  No Django, no internet.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INPUT="${1:?usage: make-chatbot.sh <corpus.txt> [output.html] [strategy]}"
+INPUT="${1:?usage: make-chatbot.sh <corpus.txt> [output.html] [strategy] [work_dir]}"
 OUTPUT="${2:-chatbot.html}"
 STRATEGY="${3:-continuation}"
+WORK="${4:-./work-$(basename "$OUTPUT" .html)}"
 
 [ -f "$INPUT" ] || { echo "no file: $INPUT"; exit 1; }
 command -v python3 >/dev/null || { echo "python3 required"; exit 1; }
 python3 -c 'import numpy' 2>/dev/null \
   || { echo "numpy required (pip install numpy)"; exit 1; }
 
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+mkdir -p "$WORK"
+echo "work dir (preserved on interrupt): $WORK"
 export PYTHONPATH="$HERE/scripts/lib"
 
 echo "[1/3] extracting pairs from $INPUT (strategy=$STRATEGY)..."
@@ -343,6 +360,7 @@ N_PAIRS=$(python3 -c "import json; print(len(json.load(open('$WORK/pairs.json'))
 echo "       $N_PAIRS pairs"
 
 echo "[2/3] training $N_PAIRS pairs at tier-16 (board16) ..."
+echo "       (safe to Ctrl-C — partial rules.bin stays in $WORK)"
 python3 "$HERE/scripts/train_pairs.py" \
     --pairs "$WORK/pairs.json" \
     --rules "$WORK/rules.bin" \
@@ -357,6 +375,7 @@ python3 "$HERE/scripts/build_chatbot.py" \
 
 echo
 echo "Done.  Open $OUTPUT in any browser."
+echo "Work files retained in $WORK (delete manually if you don't need them)."
 '''
 
 
