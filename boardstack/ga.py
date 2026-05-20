@@ -21,8 +21,16 @@ import time
 from typing import Dict, List
 
 from .fitness import evaluate
-from .genome import random_genome, mutate_genome
+from .genome import (random_genome, mutate_genome,
+                          naive_pipeline_genome, echo_seed_genome)
 from .population import pool_size
+
+
+SEED_INIT_FNS = {
+    'random':         random_genome,
+    'naive_pipeline': naive_pipeline_genome,
+    'echo':           echo_seed_genome,
+}
 
 
 def evolve_stack(*,
@@ -36,6 +44,7 @@ def evolve_stack(*,
                      generations: int = 30,
                      mutation_rate: float = 0.10,
                      seed: int = 0xB05ACE,
+                     seed_init: str = 'random',
                      on_event=None) -> dict:
     """Run a (μ+λ) GA.  Returns the best genome and a per-generation
     trajectory."""
@@ -47,12 +56,19 @@ def evolve_stack(*,
 
     pool_cache: Dict[int, object] = {}  # idx → upcasted cell8 LUT
 
-    # Initial population: pop_size random genomes.
+    # Initial population: pop_size genomes built by the chosen
+    # seed_init function.  random_genome explores wiring topology;
+    # naive_pipeline_genome / echo_seed_genome give the GA a
+    # structured starting point so it only has to evolve rule_idx.
+    init_fn = SEED_INIT_FNS.get(seed_init)
+    if init_fn is None:
+        raise ValueError(f'unknown seed_init {seed_init!r}; '
+                            f'pick from {list(SEED_INIT_FNS)}')
     population: List[dict] = []
     for i in range(pop_size):
-        g = random_genome(n_boards=n_boards, board_side=board_side,
-                              pool_size=ps, stack_ticks=stack_ticks,
-                              seed=seed ^ (i * 7919))
+        g = init_fn(n_boards=n_boards, board_side=board_side,
+                       pool_size=ps, stack_ticks=stack_ticks,
+                       seed=seed ^ (i * 7919))
         r = evaluate(g, test_set_id=test_set, personality=personality,
                           pool_cache=pool_cache)
         population.append({'genome': g, 'fitness': r['fitness'],

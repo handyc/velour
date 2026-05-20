@@ -31,6 +31,13 @@ class Command(BaseCommand):
         parser.add_argument('--gens', type=int, default=30)
         parser.add_argument('--mutation-rate', type=float, default=0.10)
         parser.add_argument('--seed', type=int, default=0xB05ACE)
+        parser.add_argument('--seed-init', type=str, default='random',
+                              choices=['random', 'naive_pipeline', 'echo'],
+                              help='initial-population shape: '
+                                     'random = fully random wiring; '
+                                     'naive_pipeline = board K reads board K-1 '
+                                     'TL cell, linear chain; '
+                                     'echo = every board reads prompt port')
         parser.add_argument('--persist', action='store_true',
                               help='save best genome + run summary to DB')
         parser.add_argument('--slug', type=str, default='',
@@ -38,7 +45,7 @@ class Command(BaseCommand):
 
     def handle(self, *, n_boards, board_side, stack_ticks, test_set,
                  personality, pop, elite_n, gens, mutation_rate, seed,
-                 persist, slug, **opts):
+                 seed_init, persist, slug, **opts):
         from boardstack.ga import evolve_stack
         from boardstack.models import StackGenome, EvolutionRun
         from django.utils.timezone import now
@@ -51,7 +58,8 @@ class Command(BaseCommand):
         log(f'  test_set:        {test_set}')
         log(f'  pop / elite / gens: {pop} / {elite_n} / {gens}')
         log(f'  mutation rate:   {mutation_rate}')
-        log(f'  seed:            0x{seed:08x}\n')
+        log(f'  seed:            0x{seed:08x}')
+        log(f'  seed_init:       {seed_init}\n')
 
         def on_event(k, p):
             if k == 'init':
@@ -73,7 +81,7 @@ class Command(BaseCommand):
             test_set=test_set, personality=personality,
             pop_size=pop, elite_n=elite_n,
             generations=gens, mutation_rate=mutation_rate,
-            seed=seed, on_event=on_event)
+            seed=seed, seed_init=seed_init, on_event=on_event)
         wall = time.time() - t0
 
         log(f'\n=== done ({wall:.1f}s) ===')

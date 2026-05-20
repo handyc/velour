@@ -69,6 +69,58 @@ def random_genome(*, n_boards: int = 16, board_side: int = 64,
     }
 
 
+def naive_pipeline_genome(*, n_boards: int = 16, board_side: int = 32,
+                                 pool_size: int = 64, stack_ticks: int = 4,
+                                 seed: int = 0xB05A1EAF) -> Dict:
+    """A deliberately sane "naive pipeline" seed gene.
+
+    - All boards run 1 tick per stack-step (uniform rates).
+    - Board 0 reads from prompt-byte register.
+    - Each later board reads from the PREVIOUS board's top-left cell
+      (0, 0).  Linear pipeline.
+    - Output decoded from (0, 0) of last board.
+    - rule_idx still random (the LUTs are class-4 from the pool, but
+      WHICH class-4 LUT each board uses gets randomised).
+
+    This gives the GA a "structured wiring + random rules" starting
+    point — it can then mutate rules without simultaneously having
+    to discover a sensible wiring topology.
+    """
+    rng = random.Random(seed)
+    return {
+        'n_boards':    n_boards,
+        'board_side':  board_side,
+        'rule_idx':    [rng.randrange(pool_size) for _ in range(n_boards)],
+        'ticks':       [1] * n_boards,
+        'wiring':      [(-1, 0, 0) if k == 0 else (k - 1, 0, 0)
+                            for k in range(n_boards)],
+        'output_cell': (0, 0),
+        'stack_ticks': stack_ticks,
+    }
+
+
+def echo_seed_genome(*, n_boards: int = 16, board_side: int = 32,
+                              pool_size: int = 64, stack_ticks: int = 4,
+                              seed: int = 0xE0E0) -> Dict:
+    """A seed gene aimed at the 'echo' task (output = input byte).
+
+    Every board reads from the PROMPT-BYTE REGISTER directly (not
+    from previous boards).  Output cell at (0, 0).  If any class-4
+    rule turns out to map "prompt-bit-stream-in-port → identical-
+    bit-stream-at-(0,0)", the GA finds it via rule_idx mutation.
+    """
+    rng = random.Random(seed)
+    return {
+        'n_boards':    n_boards,
+        'board_side':  board_side,
+        'rule_idx':    [rng.randrange(pool_size) for _ in range(n_boards)],
+        'ticks':       [1] * n_boards,
+        'wiring':      [(-1, 0, 0)] * n_boards,
+        'output_cell': (0, 0),
+        'stack_ticks': stack_ticks,
+    }
+
+
 def mutate_genome(g: Dict, *, mutation_rate: float = 0.05,
                        pool_size: int = 64, seed: int = 0) -> Dict:
     """Return a mutated copy of `g`.  Each gene-element has
