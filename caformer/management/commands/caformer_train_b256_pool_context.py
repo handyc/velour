@@ -55,10 +55,16 @@ class Command(BaseCommand):
                               help='at the end, verify against N additional '
                                      'pool members the rule was NOT trained on '
                                      '(generalization test)')
+        parser.add_argument('--class4-filter', action='store_true',
+                              help='reject GA mutations that drop the rule '
+                                     'out of class-4 activity band (probe on '
+                                     'a small random state).  Tries to keep '
+                                     'the search inside the computationally '
+                                     'rich subspace.')
 
     def handle(self, *, pair_pk, position, pool_dir, pool_k, max_seconds,
                  n_ticks, warm_start_from_board128, seed, out, verify_extra,
-                 **opts):
+                 class4_filter, **opts):
         from caformer.models import QRPair
         from caformer.board256 import (train_position_b256_pool_context,
                                               forward_byte_with_context,
@@ -139,11 +145,15 @@ class Command(BaseCommand):
             n_ticks=n_ticks,
             max_seconds=max_seconds,
             seed_rule=warm,
-            seed=seed)
+            seed=seed,
+            class4_filter=class4_filter,
+            on_event=on_event)
         wall = time.time() - t0
         log(f'\n=== training result ({wall:.1f}s) ===')
         log(f'  matched all training contexts: {r["byte_match_all"]}')
         log(f'  phase: {r["phase"]}')
+        if class4_filter:
+            log(f'  class4_rejects: {r.get("class4_rejects", 0)}')
 
         rule = r['rule_table']
 

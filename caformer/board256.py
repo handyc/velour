@@ -611,6 +611,52 @@ CONTEXT_OFFSET_256 = 8192     # cells 8192..24575 = context region
 CONTEXT_LEN_256    = 16384    # exactly one 16K LUT
 
 
+# ── Fast class-4 probe for GA mutation filtering ───────────────────
+#
+# Runs the cell8 rule on a small (32×32) random state for a handful
+# of ticks, measures activity (cells changed per tick).  Class-4 =
+# persistent localised computation, neither dying out (class-1) nor
+# saturating (class-3).  Empirical band from caformer/lut_pool work:
+# activity in [0.05, 0.55].
+#
+# Cost: ~0.1 ms per probe vs ~500 ms for a full fitness eval — so
+# attaching this to every mutation in the GA is essentially free.
+
+_CLASS4_PROBE_SEED = 0xC1A554
+_CLASS4_PROBE_SIDE = 32
+
+def is_class4_cell8(rule, *, port_value: int = 0,
+                          side: int = _CLASS4_PROBE_SIDE,
+                          ticks: int = 12,
+                          transient: int = 4,
+                          activity_min: float = 0.02,
+                          activity_max: float = 0.55) -> bool:
+    """True iff the rule's POST-TRANSIENT mean activity on a random
+    probe state lands in the class-4 band.  Class-1/2 rules die or
+    freeze (activity → 0); class-3 rules saturate (activity stays
+    high); class-4 rules hold persistent moderate activity.
+
+    Skips the first `transient` ticks so that converge-fast rules
+    (class-1/2) don't get scored on their initial busy step.  Cheap
+    (~0.2 ms total)."""
+    rng = np.random.RandomState(_CLASS4_PROBE_SEED)
+    state = rng.randint(0, 4, size=(side, side)).astype(np.uint8)
+    inp = broadcast_input(side, port_value)
+    n_cells = side * side
+    # Run through transient.
+    for _ in range(transient):
+        state = hex_ca_step_cell8(state, inp, rule)
+    # Measure activity in the steady regime.
+    measured = max(1, ticks - transient)
+    total_activity = 0.0
+    for _ in range(measured):
+        new = hex_ca_step_cell8(state, inp, rule)
+        total_activity += int((new != state).sum()) / n_cells
+        state = new
+    mean_act = total_activity / measured
+    return activity_min <= mean_act <= activity_max
+
+
 def paint_context_into_state(state: np.ndarray, context_bytes: bytes,
                                    offset: int = CONTEXT_OFFSET_256,
                                    length: int = CONTEXT_LEN_256) -> np.ndarray:
@@ -639,6 +685,7 @@ def train_position_b256_pool_context(
         seed: int = 0xC02E7E47,
         seed_rule=None,
         port_value: int = 0,
+        class4_filter: bool = False,
         on_event=None) -> dict:
     """Train one cell8 rule to produce `target_byte` at `position`
     INVARIANT TO which member of `context_pool` is painted into the
@@ -740,6 +787,7 @@ def train_position_b256_pool_context(
                 'K': K, 'wall': time.time() - t0, 'phase': 'init'}
 
     burst = 0
+    n_class4_rejects = 0
     while time.time() - t0 < max_seconds and not matched:
         burst += 1
         for _gen in range(generations_per_burst):
@@ -754,6 +802,15 @@ def train_position_b256_pool_context(
                 new = rng.randint(0, 3)
                 while new == cur: new = rng.randint(0, 3)
                 child[idx] = new
+            # Class-4 filter: reject mutations that drop the rule out
+            # of the class-4 activity band on a small probe state.
+            # Probe is ~0.1 ms vs ~500 ms for the full fitness eval,
+            # so the cost is negligible — the saving is in not wasting
+            # fitness budget on dead (class-1) or chaotic (class-3)
+            # candidates that won't help converge.
+            if class4_filter and not is_class4_cell8(child, port_value=port_value):
+                n_class4_rejects += 1
+                continue
             cf = _fitness(child)
             worst_idx = min(range(len(pop)), key=lambda i: pop[i][1])
             if cf > pop[worst_idx][1]:
@@ -770,7 +827,8 @@ def train_position_b256_pool_context(
 
     return {'rule_table': best_rule, 'byte_match_all': matched,
             'K': K, 'wall': time.time() - t0,
-            'phase': 'matched' if matched else 'budget_out'}
+            'phase': 'matched' if matched else 'budget_out',
+            'class4_rejects': n_class4_rejects}
 
 
 # ── Phase 3: pool conditioning that changes output bytes ───────────

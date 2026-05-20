@@ -193,6 +193,20 @@
        title="standalone LUT viewer (also downloadable)">
       lut view
     </a>
+    <a href="{% url 'caformer:caformer_quarter_compose' %}"
+       style="color:#cca5ff; text-decoration:none;
+              border:1px solid #5a3a8a; padding:2px 8px;
+              background:#1a0a2a; font-size:0.72rem;"
+       title="compose 4 trained pairs into one cell8 LUT, run all 4 ports">
+      quarter compose
+    </a>
+    <a href="{% url 'caformer:caformer_engine_compare' %}"
+       style="color:#cca5ff; text-decoration:none;
+              border:1px solid #5a3a8a; padding:2px 8px;
+              background:#1a0a2a; font-size:0.72rem;"
+       title="side-by-side board128 vs cell8+256 on same prompt">
+      engine compare
+    </a>
     <a href="{% url 'caformer:caformer_standalone_download' %}"
        download="caformer_standalone.html"
        style="color:#aaffaa; text-decoration:none;
