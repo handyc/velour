@@ -436,9 +436,20 @@ function mulberry32(seed) {
 
 // Each channel = deterministic (mode, params) from channel-id seed.
 function buildChannel(chId) {
-  // Channel 0 = the default Mandelbrot main view (the baked LUT).
-  if (chId === 0) {
-    return { mode: 'mandelbrot', label: 'CH 01  MANDEL · main view',
+  // Channels 0..CORPUS_CHANNELS.length-1 = real trained per-position
+  // LUTs from the corpus (FTV mode). After those, channel
+  // CORPUS_CHANNELS.length = Mandelbrot main view; then fractals.
+  if (chId < CORPUS_CHANNELS.length) {
+    const c = CORPUS_CHANNELS[chId];
+    return { mode: 'corpus',
+             label: `CH ${String(chId+1).padStart(2,'0')}  ${c.label}`,
+             lut: c.lut };
+  }
+  // Adjusted ID for the fractal channel space.
+  const fId = chId - CORPUS_CHANNELS.length;
+  if (fId === 0) {
+    return { mode: 'mandelbrot',
+             label: `CH ${String(chId+1).padStart(2,'0')}  MANDEL · main view`,
              lut: defaultLut };
   }
   const rnd = mulberry32(0xC1A55E + chId * 7919);
@@ -486,6 +497,20 @@ function buildChannel(chId) {
   const lut = g.directLut ? g.directLut : posterise(g.escape, g.iterCap);
   return { mode, params, label: `CH ${String(chId+1).padStart(2,'0')}  ${label}`, lut };
 }
+
+// ── Baked corpus channels (FTV mode) ───────────────────────────────
+// Each entry is { label: string, lut: Uint8Array }.  These channels
+// fire first (CH 01, CH 02 …) before the fractal-generated ones.
+// Each one is a real trained per-position rule from the corpus —
+// when channel-surfed, you see THAT rule's CA dynamics on its own
+// LUT-as-image.
+const CORPUS_CHANNELS_RAW = __CORPUS_CHANNELS_JSON__;
+const CORPUS_CHANNELS = CORPUS_CHANNELS_RAW.map(c => {
+  const bin = atob(c.lut_b64);
+  const lut = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) lut[i] = bin.charCodeAt(i) & 3;
+  return { label: c.label, lut };
+});
 
 // ── Default LUT (Mandelbrot main view), baked at build time ─────────
 const DEFAULT_LUT_B64 = "__DEFAULT_LUT_B64__";
@@ -622,22 +647,65 @@ requestAnimationFrame(frame);
 
 
 class Command(BaseCommand):
-    help = ('Emit a standalone HTML 1970s TV that channel-surfs through '
-            'fractal-derived CA rules at 30 fps.')
+    help = ('Emit a standalone 1970s TV that channel-surfs CA rules at '
+            '30 fps.  --bake-corpus N adds N real trained per-position '
+            'LUTs from board128_exact pairs as the first N channels '
+            '(FTV = "fractal television" plus corpus).')
 
     def add_arguments(self, parser):
         parser.add_argument('--out', type=str, default='tv.html')
+        parser.add_argument('--bake-corpus', type=int, default=0,
+                              help='how many real corpus channels to bake '
+                                     'as the first channels (default 0 = '
+                                     'fractal-only TV)')
+        parser.add_argument('--corpus-per-pair', type=int, default=1,
+                              help='channels per pair (default 1 = position '
+                                     '0 only).  Use 0 for all positions.')
 
-    def handle(self, *, out, **opts):
+    def handle(self, *, out, bake_corpus, corpus_per_pair, **opts):
+        import json
+        # Default Mandelbrot LUT.
         try:
             default = _default_mandelbrot_lut()
             b64 = base64.b64encode(default).decode('ascii')
         except Exception as e:
             sys.stdout.write(f'note: skipping default LUT ({e})\n')
             b64 = ''
-        html = HTML.replace('__DEFAULT_LUT_B64__', b64)
+
+        # Corpus channels: collect N real trained per-position rules.
+        corpus_channels = []
+        if bake_corpus > 0:
+            from caformer.models import QRPair
+            pairs = list(QRPair.objects.filter(board128_exact=True)
+                                .order_by('pk'))
+            for p in pairs:
+                if len(corpus_channels) >= bake_corpus: break
+                blob = bytes(p.board128_rules_blob or b'')
+                n_pos = len(blob) // 16384
+                max_take = n_pos if corpus_per_pair == 0 \
+                                  else min(corpus_per_pair, n_pos)
+                for pos in range(max_take):
+                    if len(corpus_channels) >= bake_corpus: break
+                    rule_bytes = blob[pos*16384:(pos+1)*16384]
+                    target_char = (p.expected[pos] if pos < len(p.expected)
+                                       else '?')
+                    label = (f'pk{p.pk} {p.prompt!r}→{p.expected!r}'
+                             f' pos{pos}={target_char!r}')[:60]
+                    corpus_channels.append({
+                        'label':   label,
+                        'lut_b64': base64.b64encode(rule_bytes).decode('ascii'),
+                    })
+            sys.stdout.write(
+                f'baked {len(corpus_channels)} corpus channels '
+                f'(from {len(pairs)} board128_exact pairs)\n')
+
+        html = (HTML
+                .replace('__DEFAULT_LUT_B64__', b64)
+                .replace('__CORPUS_CHANNELS_JSON__',
+                            json.dumps(corpus_channels)))
         out_p = Path(out)
         out_p.write_text(html, encoding='utf-8')
         sys.stdout.write(
-            f'wrote {out_p} ({out_p.stat().st_size} B'
-            f'{", default LUT embedded" if b64 else ""})\n')
+            f'wrote {out_p} ({out_p.stat().st_size:,} B; '
+            f'{len(corpus_channels)} corpus channels + fractal channels'
+            f'{", default Mandelbrot baked" if b64 else ""})\n')

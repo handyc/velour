@@ -127,11 +127,25 @@ class Command(BaseCommand):
                 'n_pairs': len(v_pairs), 'size_kb': size_kb,
             })
 
+        # FTV: fractal television with corpus channels.  Built by
+        # invoking caformer_emit_tv directly so the kit ships with
+        # the same standalone TV the live system has.
+        log(f'    building beano/ftv.html (FTV — 1970s TV with corpus '
+            f'+ fractal channels)...')
+        from django.core.management import call_command
+        ftv_path = beano_dir / 'ftv.html'
+        call_command('caformer_emit_tv',
+                        out=str(ftv_path),
+                        bake_corpus=30, corpus_per_pair=1, verbosity=0)
+        log(f'    wrote beano/ftv.html '
+            f'({ftv_path.stat().st_size//1024} KB)')
+
         # Generate beano/index.html — the landing page that lists all
-        # the variants with sizes and links.
+        # the variants + ftv with sizes and links.
         (beano_dir / 'index.html').write_text(
-            _build_beano_index_html(variant_results, tier))
-        log(f'    wrote beano/index.html (variant selector)')
+            _build_beano_index_html(variant_results, tier,
+                                            ftv_size_kb=ftv_path.stat().st_size//1024))
+        log(f'    wrote beano/index.html (variant selector + ftv)')
 
         # The kit's chatbot template (used by make-chatbot.sh as the
         # base for user-trained chatbots) = the 'chat' variant.
@@ -228,7 +242,7 @@ class Command(BaseCommand):
 # Beano variant index page builder.
 # ============================================================
 
-def _build_beano_index_html(variants, tier):
+def _build_beano_index_html(variants, tier, ftv_size_kb=None):
     """A tiny landing page listing every beano variant + size +
     link.  No deps, opens straight in any browser."""
     rows = []
@@ -240,6 +254,17 @@ def _build_beano_index_html(variants, tier):
             f'<td>{v["size_kb"]} KB</td>'
             f'<td>{v["description"]}</td>'
             f'<td><a href="{v["slug"]}/corpus.json">corpus.json</a></td>'
+            f'</tr>')
+    if ftv_size_kb is not None:
+        rows.append(
+            f'<tr style="background:#0a1a2a;">'
+            f'<td><a href="ftv.html">📺 ftv · fractal television</a></td>'
+            f'<td>30+∞</td>'
+            f'<td>{ftv_size_kb} KB</td>'
+            f'<td>1970s TV with channels that mix real corpus rules '
+            f'(CH 1–30) and fractal-generated rules (CH 31+).  Auto '
+            f'channel-surfs at the press of a button.</td>'
+            f'<td>—</td>'
             f'</tr>')
     return f'''<!DOCTYPE html>
 <html>
@@ -815,6 +840,7 @@ no model download) with its trained model baked in:
 | `beano/micro/chatbot.html` | 3 "hi" variants — proves multi-response sampling |
 | `beano/tiny/chatbot.html`  | 10 shortest pairs — fastest load |
 | `beano/chat/chatbot.html`  | full 71-pair corpus, complete breadth |
+| `beano/ftv.html`           | 1970s television channel-surfing 30 real corpus rules + fractal rules |
 
 ## Train your own (one command)
 
@@ -889,7 +915,8 @@ caformer-kit/
 │   ├── index.html        ← variant selector, open this first
 │   ├── micro/chatbot.html + corpus.json
 │   ├── tiny/chatbot.html  + corpus.json
-│   └── chat/chatbot.html  + corpus.json  (the full demo)
+│   ├── chat/chatbot.html  + corpus.json  (the full demo)
+│   └── ftv.html                            (1970s TV channel-surfing CA rules)
 ├── scripts/
 │   ├── extract_pairs.py
 │   ├── train_pairs.py
