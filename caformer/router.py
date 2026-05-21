@@ -22,7 +22,12 @@ import numpy as np
 N_STATES = 4
 LUT_SIZE = N_STATES ** 7
 SIDE     = 8
-TICKS    = 6
+TICKS    = 4    # K=4 alignment 2026-05-21: each cell can pass
+                # through any 4 colours in succession over time.
+                # Existing artifacts under .artifacts/router_v* and
+                # .artifacts/boardstack4_v* store their own ticks
+                # value in meta.json and are not affected by this
+                # default change at load time.
 
 
 def embed_prompt(prompt: str, side: int = SIDE) -> np.ndarray:

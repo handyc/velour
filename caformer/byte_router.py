@@ -49,7 +49,7 @@ from caformer.cell8 import (LUT_SIZE_8, hex_ca_step_cell8,
 N_LAYERS = 4
 N_BOARDS = 4
 SIDE     = 8
-TICKS    = 6
+TICKS    = 4    # K=4 alignment — see caformer/router.py for rationale.
 DEFAULT_DIR = '.artifacts/byte_router_v1'
 
 
@@ -144,24 +144,43 @@ class ByteRouter:
         )
         return fp, intermediates
 
-    def route_prompt(self, prompt: str
-                          ) -> dict:
-        """Phase 1: route the *first byte* of the prompt.  Phase 2 may
-        aggregate across multiple bytes (histogram / sequence / vote).
+    def route_prompt(self, prompt: str, n_bytes: int = 4
+                          ) -> dict | None:
+        """Route the first ``n_bytes`` of the prompt and aggregate the
+        per-byte fingerprints via bitwise XOR per chunk position.
+
+        Aggregation: for each of the 4 chunk positions, XOR the
+        corresponding chunk value across all routed bytes.  XOR over
+        2-bit values preserves K=4 and is order-invariant — same
+        input set, same fingerprint regardless of byte order.
 
         Returns: {
-            'fingerprint': (c0, c1, c2, c3),
-            'bytes_intermediate': [byte_per_layer],
-            'first_byte': int,
+            'fingerprint':              (c0, c1, c2, c3),     # aggregate
+            'per_byte_fingerprints':    [(c,c,c,c), …],       # one per byte
+            'bytes_in':                 [int, int, …],
+            'bytes_intermediate':       [[byte/layer], …],
+            'first_byte':               int,                  # for back-compat
         } — or None when the prompt is empty."""
-        b = prompt.encode('utf-8')
-        if not b:
+        raw = prompt.encode('utf-8')[:max(1, int(n_bytes))]
+        if not raw:
             return None
-        fp, inters = self.route_byte(b[0])
+        per_byte_fps: list[tuple[int, int, int, int]] = []
+        all_inters: list[list[int]] = []
+        for byte_val in raw:
+            fp, inters = self.route_byte(byte_val)
+            per_byte_fps.append(fp)
+            all_inters.append(inters)
+        # XOR aggregate across positions.
+        agg = [0, 0, 0, 0]
+        for fp in per_byte_fps:
+            for i in range(4):
+                agg[i] ^= fp[i] & 3
         return {
-            'fingerprint':        fp,
-            'bytes_intermediate': inters,
-            'first_byte':         int(b[0]),
+            'fingerprint':            tuple(agg),
+            'per_byte_fingerprints':  per_byte_fps,
+            'bytes_in':               [int(b) for b in raw],
+            'bytes_intermediate':     all_inters,
+            'first_byte':             int(raw[0]),
         }
 
 
