@@ -38,6 +38,21 @@
   .pm-sub.k1 { border-left: 3px solid #79c0ff; }
   .pm-sub.k2 { border-left: 3px solid #ffd070; }
   .pm-sub.k3 { border-left: 3px solid #ff7ec7; }
+  .kind-axis, .kind-preset {
+        font-size: 0.65rem; font-weight: 600; padding: 1px 6px;
+        border-radius: 2px; letter-spacing: 0.06em;
+        text-transform: uppercase; vertical-align: middle; }
+  .kind-axis   { color: #1a1a1a; background: #ffd070; }
+  .kind-preset { color: #1a1a1a; background: #79c0ff; }
+  .vec { font-family: ui-monospace, monospace; font-size: 0.78rem;
+          color: #cdd; margin: 4px 0 12px;
+          display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; }
+  .vec-cell { padding: 2px 6px; border-radius: 2px;
+               background: #11161d; }
+  .vec-cell.k0 { color: #2ea043; }
+  .vec-cell.k1 { color: #79c0ff; }
+  .vec-cell.k2 { color: #ffd070; }
+  .vec-cell.k3 { color: #ff7ec7; }
 </style>
 
 <div class="pm-page">
@@ -55,9 +70,22 @@
 
     {% for m in rows %}
       <div class="pm-mod">
-        <h2>{{ m.name }}<span class="slug">{{ m.slug }}</span></h2>
+        <h2>{{ m.name }}<span class="slug">{{ m.slug }}</span>
+          {% if m.kind == 'axis' %}
+            <span class="kind-axis">AXIS: {{ m.axis_slug }}</span>
+          {% else %}
+            <span class="kind-preset">PRESET</span>
+          {% endif %}
+        </h2>
         {% if m.description %}
           <div class="desc">{{ m.description }}</div>
+        {% endif %}
+        {% if m.labelled_vec %}
+          <div class="vec">state vector:
+            {% for v in m.labelled_vec %}
+              <span class="vec-cell k{{ v.value }}">{{ v.axis }}={{ v.label }}</span>
+            {% endfor %}
+          </div>
         {% endif %}
         {% if m.users %}
           <div class="uses">in use by:

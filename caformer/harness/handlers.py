@@ -345,6 +345,41 @@ def _h_corpus_state(slots: dict[str, str]) -> str:
         return f'(corpus_state failed: {e})'
 
 
+def _h_personality_state(slots: dict[str, str]) -> str:
+    """Compute the PersonalityState 4-tuple (drive/expression/relation/
+    lens) for the slot 'X' via the boardstack4 cascade."""
+    text = (slots.get('text') or slots.get('X') or '').strip()
+    if not text:
+        return '(no text to evaluate)'
+    try:
+        from caformer.harness.personality_state import (
+            compute_state, refresh_labels_from_db)
+        refresh_labels_from_db()
+        s = compute_state(text)
+        return f'{s.as_tuple()}: {s}'
+    except Exception as e:                           # noqa: BLE001
+        return f'(state computation failed: {e})'
+
+
+def _h_personality_preset(slots: dict[str, str]) -> str:
+    """Look up a named PersonalityModule preset's 4-tuple.  Slot 'X'
+    = the module slug (e.g. 'velour', 'grice-maxims')."""
+    name = (slots.get('text') or slots.get('X') or '').strip().lower()
+    if not name:
+        return '(no module name)'
+    try:
+        from caformer.harness.personality_state import (
+            preset_for_module, refresh_labels_from_db)
+        refresh_labels_from_db()
+        s = preset_for_module(name)
+        if s is None:
+            return (f'(no preset {name!r}; try velour / techbro / '
+                    'isaacs-four-fields / grice-maxims)')
+        return f'{s.as_tuple()}: {s}'
+    except Exception as e:                           # noqa: BLE001
+        return f'(preset lookup failed: {e})'
+
+
 def _h_describe_self(slots: dict[str, str]) -> str:
     """Meta: a richer multi-paragraph self-description composing
     mood + branch + corpus + capabilities."""
@@ -470,6 +505,8 @@ HANDLERS: dict[str, Callable[[dict], str]] = {
     'prefilter_state':  _h_prefilter_state,
     'capabilities':     _h_capabilities,
     'describe_self':    _h_describe_self,
+    'personality_state':  _h_personality_state,
+    'personality_preset': _h_personality_preset,
     'disk_sizes':       _h_disk_sizes,
     'corpus_state':     _h_corpus_state,
 }

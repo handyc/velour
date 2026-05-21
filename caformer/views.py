@@ -5329,15 +5329,37 @@ def personality_modules_view(request):
                 p.persona_name or p.slug)
     # Hand-bake each module row with users attached, so the template
     # doesn't need a custom |get_item filter.
+    # Pull axis labels so presets can be rendered with axis names too.
+    from caformer.harness.personality_state import (
+        AXES, AXIS_LABELS, refresh_labels_from_db)
+    refresh_labels_from_db()
     rows = []
-    for m in PersonalityModule.objects.all():
+    # Sort: axes first (so they read top-of-page), presets after.
+    qs = list(PersonalityModule.objects.all())
+    qs.sort(key=lambda m: (0 if m.kind == 'axis' else 1, m.slug))
+    for m in qs:
+        sv = m.state_vector or []
+        labelled_vec = None
+        if m.kind == 'preset' and len(sv) >= 4:
+            labelled_vec = [
+                {'axis':  AXES[i],
+                 'value': int(sv[i]) & 3,
+                 'label': AXIS_LABELS[AXES[i]][int(sv[i]) & 3]}
+                for i in range(4)
+            ]
         rows.append({
-            'name':        m.name,
-            'slug':        m.slug,
-            'description': m.description,
-            'subroutes':   m.subroutes or [],
-            'users':       profiles_by_slug.get(m.slug, []),
+            'name':         m.name,
+            'slug':         m.slug,
+            'description':  m.description,
+            'subroutes':    m.subroutes or [],
+            'users':        profiles_by_slug.get(m.slug, []),
+            'kind':         m.kind,
+            'axis_slug':    m.axis_slug,
+            'state_vector': sv,
+            'labelled_vec': labelled_vec,
         })
     return render(request, 'caformer/personality_modules.html', {
         'rows': rows,
+        'axes': AXES,
+        'axis_labels': AXIS_LABELS,
     })
