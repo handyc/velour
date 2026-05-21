@@ -360,21 +360,44 @@ AGENTS_BY_COLOUR: dict[int, object] = {
 
 
 def _cell8_dispatch(prompt: str) -> dict:
-    """Single-prompt cell8 QRPair lookup.  Reused by both
-    InformationAgent and the composer's non-chain fallback path."""
+    """Single-prompt cell8 QRPair lookup.  Two-tier match:
+
+      1. Exact prompt match (byte-identical) — preferred, highest
+         confidence.
+      2. Reduced-form match (lower_no_punct) — fallback that covers
+         capitalisation / punctuation variants of trained prompts.
+
+    Reused by both InformationAgent and the composer's non-chain
+    fallback path."""
     from django.db.models import Q
     from caformer.models import QRPair
     from caformer import board256 as _b256
     from caformer.cell8_multires import (forward_pair_cell8_at_side,
                                                    TIER_SIDES,
                                                    cell8_tier_geometry)
+    from . import normalization as _norm
 
-    pair = (QRPair.objects.filter(prompt=prompt).filter(
-        Q(cell8_b008_exact=True) | Q(cell8_b016_exact=True) |
-        Q(cell8_b032_exact=True) | Q(cell8_b064_exact=True) |
-        Q(cell8_b128_exact=True) | Q(cell8_b256_exact=True)).first())
+    exact_filter = (Q(cell8_b008_exact=True) | Q(cell8_b016_exact=True) |
+                    Q(cell8_b032_exact=True) | Q(cell8_b064_exact=True) |
+                    Q(cell8_b128_exact=True) | Q(cell8_b256_exact=True))
+    match_kind = 'exact'
+    matched_prompt: str = prompt
+    pair = (QRPair.objects.filter(prompt=prompt).filter(exact_filter).first())
     if pair is None:
-        return {'reply': '', 'sub_label': 'no exact QRPair match'}
+        # Fall back to reduced-form lookup.  Scan only QRPairs that
+        # already have at least one cell8 tier exact — cheap because
+        # the corpus is ≤ a few hundred rows.
+        reduced = _norm.lower_no_punct(prompt)
+        if reduced:
+            for cand in QRPair.objects.filter(exact_filter).only(
+                    'pk', 'prompt'):
+                if _norm.lower_no_punct(cand.prompt) == reduced:
+                    pair = cand
+                    matched_prompt = cand.prompt
+                    match_kind = 'lower_no_punct'
+                    break
+    if pair is None:
+        return {'reply': '', 'sub_label': 'no exact / reduced QRPair match'}
     tier = (pair.best_cell8_tier()
             if hasattr(pair, 'best_cell8_tier') else None)
     if tier is None:
@@ -383,24 +406,35 @@ def _cell8_dispatch(prompt: str) -> dict:
         return {'reply': '', 'sub_label': 'no tier exact'}
     rules = pair.cell8_rules_at_tier(tier)
     n_bytes = len(pair.expected.encode('utf-8'))
+    # Use the QRPair's *trained* prompt for the forward pass, not the
+    # raw user prompt — the rules are byte-exact only against the
+    # exact training input, so a normalized match must still cascade
+    # the canonical training prompt to produce the byte-exact reply.
+    forward_prompt = matched_prompt
     if tier == 'b256':
         side, n_ticks = 256, _b256.DEFAULT_N_TICKS_256
         produced = _b256.forward_pair_board256_positional(
-            prompt, rules, n_bytes, n_ticks=n_ticks, port_value=0)
+            forward_prompt, rules, n_bytes,
+            n_ticks=n_ticks, port_value=0)
     else:
         side = TIER_SIDES[tier]
         n_ticks = cell8_tier_geometry(side)['n_ticks_default']
         produced = forward_pair_cell8_at_side(
-            prompt, rules, n_bytes, side, n_ticks=n_ticks, port_value=0)
+            forward_prompt, rules, n_bytes, side,
+            n_ticks=n_ticks, port_value=0)
     try:
         reply = produced.decode('utf-8')
     except UnicodeDecodeError:
         reply = produced.decode('latin-1', errors='replace')
+    sub_label = f'cell8/{tier} side={side} ticks={n_ticks}'
+    if match_kind != 'exact':
+        sub_label = f'{sub_label}  ←  match via {match_kind}'
     return {
         'reply':      reply,
-        'sub_label':  f'cell8/{tier} side={side} ticks={n_ticks}',
+        'sub_label':  sub_label,
         'qrpair_pk':  pair.pk,
         'tier':       tier,
+        'match_kind': match_kind,
     }
 
 
