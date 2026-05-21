@@ -4618,3 +4618,60 @@ def viz3d_state(request):
         'states_per_board': states_per_board,
         'final_cell00':     per_board_final,
     })
+
+
+# ─── Concept system browser ────────────────────────────────────────
+
+
+@login_required
+def concept_system_view(request):
+    """Browse the Sanskrit concept system tables: verb roots,
+    preverbs, kṛt suffixes.  Also a small encoder probe field so the
+    operator can see live text → concept mapping."""
+    from caformer.concept_system import (VERB_ROOTS, PREVERBS,
+                                                   KRIT_SUFFIXES,
+                                                   bit_budget,
+                                                   encode, decode, surface)
+    probe_text = (request.GET.get('q') or '').strip()
+    probe = None
+    if probe_text:
+        concepts = encode(probe_text)
+        probe = {
+            'text':     probe_text,
+            'concepts': [
+                {'surface': surface(c), 'gloss': decode(c),
+                 'preverb_id': c.preverb_id,
+                 'verb_id':    c.verb_id,
+                 'suffix_id':  c.suffix_id,
+                 'bytes':      c.to_bytes().hex()}
+                for c in concepts
+            ],
+            'count':    len(concepts),
+        }
+    return render(request, 'caformer/concept_system.html', {
+        'verbs':    VERB_ROOTS,
+        'preverbs': PREVERBS,
+        'suffixes': KRIT_SUFFIXES,
+        'budget':   bit_budget(),
+        'probe':    probe,
+    })
+
+
+@login_required
+def concept_system_encode(request):
+    """JSON encoder probe.  GET ?q=<text> → list of concept dicts."""
+    from caformer.concept_system import encode, decode, surface
+    q = (request.GET.get('q') or '').strip()
+    if not q:
+        return _json_response({'error': 'empty prompt', 'concepts': []})
+    concepts = encode(q)
+    return _json_response({
+        'text':     q,
+        'count':    len(concepts),
+        'concepts': [
+            {'surface': surface(c), 'gloss': decode(c),
+             'preverb_id': c.preverb_id, 'verb_id': c.verb_id,
+             'suffix_id':  c.suffix_id}
+            for c in concepts
+        ],
+    })

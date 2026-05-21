@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}caformer — concept system{% endblock %}
+{% block content %}
+<style>
+  .cs-page { max-width: 72em; }
+  .cs-page h1 { margin: 0 0 6px; }
+  .cs-meta   { color: #888; font-size: 0.85rem; }
+  .cs-section{ margin: 22px 0; padding-top: 14px;
+                border-top: 1px solid #1a1a1a; }
+  .cs-section h2 { margin: 0 0 8px; color: #cfc;
+                    font-size: 1.0rem; font-weight: 600; }
+  .cs-budget { font-family: ui-monospace, monospace;
+                font-size: 0.82rem; color: #cdd;
+                background: #0a0a0a; border: 1px solid #1a1a1a;
+                padding: 10px 14px; }
+  .cs-budget td { padding: 1px 16px 1px 0; }
+  .cs-budget .k { color: #8b949e; }
+  table.cs-tab { border-collapse: collapse; width: 100%;
+                  font-family: ui-monospace, monospace;
+                  font-size: 0.85rem; }
+  table.cs-tab th, table.cs-tab td {
+        padding: 4px 10px; border-bottom: 1px solid #1a1a1a;
+        text-align: left; vertical-align: top; }
+  table.cs-tab th { color: #8b949e; font-weight: 500; }
+  table.cs-tab td.id  { color: #cfc; font-weight: 600; }
+  table.cs-tab td.root{ color: #9ecbff; font-weight: 600; }
+  table.cs-tab td.gl  { color: #cdd; }
+  table.cs-tab td.cl  { color: #6e7681; font-size: 0.78rem; }
+  .cs-probe { display: flex; gap: 10px; align-items: center;
+               flex-wrap: wrap; margin: 8px 0; }
+  .cs-probe input[type=text]{ background: #0d1117;
+        border: 1px solid #30363d; color: #cdd;
+        padding: 6px 10px; font-family: inherit;
+        font-size: 0.9rem; min-width: 28em; }
+  .cs-probe button { background: #222; color: #cfc;
+        border: 1px solid #555; padding: 6px 14px; cursor: pointer;
+        font-family: inherit; }
+  .cs-result { background: #0a0a0a; border: 1px solid #1a1a1a;
+                padding: 10px 14px;
+                font-family: ui-monospace, monospace; font-size: 0.82rem;
+                color: #cdd; }
+  .cs-result .surf { color: #9ecbff; font-weight: 600; }
+  .cs-result .gl   { color: #cfc; }
+  .cs-result .id   { color: #6e7681; font-size: 0.75rem; }
+  .cs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 60em) { .cs-grid { grid-template-columns: 1fr; } }
+</style>
+
+<div class="cs-page">
+  <h1>concept system</h1>
+  <p class="cs-meta">
+    Sanskrit verb roots × preverbs × kṛt suffixes as a compositional
+    concept space.  Acts as an interlingua under the caformer harness:
+    English → Concept(s) → English.
+  </p>
+
+  <div class="cs-section">
+    <h2>Bit budget</h2>
+    <table class="cs-budget"><tbody>
+      <tr><td class="k">verb roots</td><td>{{ budget.n_verbs }}</td>
+          <td class="k">verb bits</td><td>{{ budget.verb_bits }}</td></tr>
+      <tr><td class="k">preverbs</td><td>{{ budget.n_preverbs }}</td>
+          <td class="k">preverb bits</td><td>{{ budget.preverb_bits }}</td></tr>
+      <tr><td class="k">suffixes</td><td>{{ budget.n_suffixes }}</td>
+          <td class="k">suffix bits</td><td>{{ budget.suffix_bits }}</td></tr>
+      <tr><td class="k">total bits per concept</td><td>{{ budget.bits_per_concept }}</td>
+          <td class="k">bytes per concept</td><td>{{ budget.bytes_per_concept }}</td></tr>
+      <tr><td class="k">full-space concepts</td><td colspan=3>{{ budget.concepts_in_full_space }}</td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="cs-section">
+    <h2>Encoder probe</h2>
+    <form method="get" class="cs-probe">
+      <input type="text" name="q"
+             value="{% if probe %}{{ probe.text }}{% endif %}"
+             placeholder="enter English text — e.g. 'I am going home'">
+      <button type="submit">encode</button>
+    </form>
+    {% if probe %}
+      <div class="cs-result">
+        <b>{{ probe.text }}</b> → {{ probe.count }} concept{{ probe.count|pluralize }}
+        {% for c in probe.concepts %}
+          <div style="margin-top:6px;">
+            <span class="surf">{{ c.surface }}</span>
+            <span class="gl">= {{ c.gloss }}</span>
+            <span class="id">  (pre={{ c.preverb_id }} v={{ c.verb_id }} suf={{ c.suffix_id }}; bytes={{ c.bytes }})</span>
+          </div>
+        {% empty %}
+          <div style="color:#d29922;">no recognised roots</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="cs-grid">
+    <div class="cs-section" style="border-top: none; padding-top: 0;">
+      <h2>Preverbs ({{ preverbs|length }})</h2>
+      <table class="cs-tab">
+        <thead><tr><th>id</th><th>form</th><th>gloss</th></tr></thead>
+        <tbody>
+        {% for p in preverbs %}
+          <tr><td class="id">{{ p.id }}</td>
+              <td class="root">{{ p.form }}</td>
+              <td class="gl">{{ p.gloss }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="cs-section" style="border-top: none; padding-top: 0;">
+      <h2>Kṛt suffixes ({{ suffixes|length }})</h2>
+      <table class="cs-tab">
+        <thead><tr><th>id</th><th>form</th><th>sense</th><th>example</th></tr></thead>
+        <tbody>
+        {% for s in suffixes %}
+          <tr><td class="id">{{ s.id }}</td>
+              <td class="root">{{ s.form }}</td>
+              <td class="gl">{{ s.sense }}</td>
+              <td class="cl">{{ s.example }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="cs-section">
+    <h2>Verb roots ({{ verbs|length }})</h2>
+    <table class="cs-tab">
+      <thead><tr><th>id</th><th>root</th><th>gloss</th><th>class</th></tr></thead>
+      <tbody>
+      {% for v in verbs %}
+        <tr><td class="id">{{ v.id }}</td>
+            <td class="root">{{ v.root }}</td>
+            <td class="gl">{{ v.gloss }}</td>
+            <td class="cl">{{ v.semantic_class }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
