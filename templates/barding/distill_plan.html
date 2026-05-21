@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}barding — distillation plan{% endblock %}
+{% block content %}
+<style>
+  .br-page { max-width: 64em; }
+  .br-meta { color: #888; font-size: 0.85rem; }
+  .br-section { margin: 22px 0; padding-top: 14px;
+                border-top: 1px solid #1a1a1a; }
+  .br-section h2 { margin: 0 0 8px; font-size: 1.0rem;
+                   color: #cfc; font-weight: 600; }
+  .crumb a { color: #8b949e; }
+  .summary { display: flex; gap: 18px; flex-wrap: wrap;
+             font-family: ui-monospace, monospace; font-size: 0.83rem; }
+  .summary .b { padding: 4px 10px; border: 1px solid #1a1a1a;
+                background: #0b0b0b; color: #cfc; }
+  .prop { border-left: 3px solid #30363d; padding: 8px 12px;
+          margin: 8px 0; background: #0b0b0b; }
+  .prop.include    { border-color: #2ea043; }
+  .prop.simplified { border-color: #d29922; }
+  .prop.skip       { border-color: #6e7681; opacity: 0.7; }
+  .prop.research   { border-color: #9ecbff; }
+  .prop .top { display:flex; gap:10px; align-items: baseline;
+               flex-wrap: wrap; }
+  .prop .dec { font-weight: 600; }
+  .dec.include    { color: #2ea043; }
+  .dec.simplified { color: #d29922; }
+  .dec.skip       { color: #8b949e; }
+  .dec.research   { color: #9ecbff; }
+  .prop a.tech { color: #cdd; text-decoration: none; font-weight: 600; }
+  .prop a.tech:hover { color: #9ecbff; }
+  .num { color: #cfc; font-family: monospace; }
+  .pri { color: #8b949e; font-family: monospace; }
+  .needs { color: #d29922; }
+  .b-include    { color: #2ea043; }
+  .b-simplified { color: #d29922; }
+  .b-skip       { color: #8b949e; }
+  .b-research   { color: #9ecbff; }
+  .b-unassigned { color: #f85149; }
+</style>
+<div class="br-page">
+  <p class="crumb"><a href="{% url 'barding:index' %}">← barding</a></p>
+  <h1 style="margin-top: 0;">distillation plan</h1>
+  <p class="br-meta">
+    For each technique we've catalogued: do we port it into the
+    caformer harness, port a simplified version, skip it, or hold
+    pending experiment?  This page is the actionable output of the
+    study.
+  </p>
+
+  <div class="summary">
+    <span class="b b-include">include · {{ summary.include }}</span>
+    <span class="b b-simplified">simplified · {{ summary.simplified }}</span>
+    <span class="b b-skip">skip · {{ summary.skip }}</span>
+    <span class="b b-research">research · {{ summary.research }}</span>
+    <span class="b b-unassigned">unassigned · {{ summary.unassigned }}</span>
+    <span class="b">budget · {{ budget_total }} B</span>
+  </div>
+
+  <div class="br-section">
+    <h2>Decided proposals</h2>
+    {% for p in proposals %}
+      <div class="prop {{ p.decision }}">
+        <div class="top">
+          <span class="dec {{ p.decision }}">{{ p.get_decision_display }}</span>
+          <a class="tech" href="{% url 'barding:technique_detail' slug=p.technique.slug %}">{{ p.technique.name }}</a>
+          <span class="pri">priority {{ p.priority }}</span>
+          {% if p.byte_budget %}<span class="num">≈ {{ p.byte_budget }} B</span>{% endif %}
+          <span class="pri">mw {{ p.technique.magic_weight|floatformat:2 }}</span>
+        </div>
+        {% if p.rationale %}<p style="color:#cdd; margin: 6px 0 0;">{{ p.rationale|linebreaksbr }}</p>{% endif %}
+        {% if p.implementation_notes %}<p style="color:#8b949e; font-size:0.83rem; margin: 4px 0 0;"><b>impl:</b> {{ p.implementation_notes|linebreaksbr }}</p>{% endif %}
+      </div>
+    {% empty %}
+      <p class="br-meta">No proposals yet.  Add some from a technique
+         detail page or in <a href="/admin/barding/distillationproposal/" style="color:#9ecbff;">admin</a>.</p>
+    {% endfor %}
+  </div>
+
+  {% if unassigned %}
+  <div class="br-section">
+    <h2>Awaiting decision <span class="needs">({{ unassigned.count }})</span></h2>
+    <p class="br-meta">Techniques with no distillation proposal yet, ranked by magic weight.</p>
+    <ul>
+      {% for t in unassigned %}
+        <li><a href="{% url 'barding:technique_detail' slug=t.slug %}" style="color:#9ecbff;">{{ t.name }}</a>
+            <span class="pri">· mw {{ t.magic_weight|floatformat:2 }} · cost {{ t.get_deterministic_cost_display }}</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

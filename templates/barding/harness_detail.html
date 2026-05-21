@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}barding — {{ harness.name }}{% endblock %}
+{% block content %}
+<style>
+  .br-page { max-width: 64em; }
+  .br-meta { color: #888; font-size: 0.85rem; }
+  .br-section { margin: 22px 0; padding-top: 14px;
+                border-top: 1px solid #1a1a1a; }
+  .br-section h2 { margin: 0 0 8px; font-size: 1.0rem;
+                   color: #cfc; font-weight: 600; }
+  .br-obs { margin: 6px 0; padding: 6px 10px;
+            border-left: 2px solid #30363d; }
+  .br-obs .top { display: flex; gap: 10px; align-items: baseline;
+                 flex-wrap: wrap; }
+  .br-obs .tech { color: #9ecbff; }
+  .br-obs .src  { color: #8b949e; font-size: 0.78rem; }
+  .br-obs .conf { color: #cfc; font-family: monospace; font-size: 0.78rem; }
+  .br-obs .ev   { color: #b8c4cc; font-family: ui-monospace, monospace;
+                  font-size: 0.78rem; white-space: pre-wrap;
+                  background: #0d1117; padding: 6px 8px; margin-top: 4px;
+                  border: 1px solid #1a1a1a; }
+  .br-pill { display: inline-block; padding: 0 6px;
+             border: 1px solid #30363d; border-radius: 3px;
+             font-size: 0.7rem; color: #8b949e; }
+  .crumb a { color: #8b949e; }
+  .meta-table { font-family: ui-monospace, monospace; font-size: 0.83rem; }
+  .meta-table td { padding: 2px 12px 2px 0; vertical-align: top; }
+  .meta-table .k { color: #8b949e; }
+  .meta-table .v { color: #cfc; }
+</style>
+<div class="br-page">
+  <p class="crumb">
+    <a href="{% url 'barding:index' %}">barding</a>
+    · <a href="{% url 'barding:harness_list' %}">harnesses</a>
+    · {{ harness.name }}
+  </p>
+  <h1 style="margin-top: 0;">{{ harness.name }}</h1>
+
+  <table class="meta-table"><tbody>
+    <tr><td class="k">vendor</td><td class="v">{{ harness.vendor|default:"—" }}</td></tr>
+    <tr><td class="k">surface</td><td class="v">{{ harness.get_surface_display }}</td></tr>
+    <tr><td class="k">open source</td><td class="v">{% if harness.is_open_source %}yes{% else %}closed{% endif %}</td></tr>
+    {% if harness.version_seen %}<tr><td class="k">version</td><td class="v">{{ harness.version_seen }}</td></tr>{% endif %}
+    {% if harness.home_url %}<tr><td class="k">home</td><td class="v"><a href="{{ harness.home_url }}">{{ harness.home_url }}</a></td></tr>{% endif %}
+    {% if harness.repo_url %}<tr><td class="k">repo</td><td class="v"><a href="{{ harness.repo_url }}">{{ harness.repo_url }}</a></td></tr>{% endif %}
+    <tr><td class="k">observations</td><td class="v">{{ observation_count }}</td></tr>
+  </tbody></table>
+
+  {% if harness.summary %}
+    <p style="margin-top: 14px; color: #cdd;">{{ harness.summary|linebreaksbr }}</p>
+  {% endif %}
+
+  {% if extras %}
+  <div class="br-section">
+    <h2>Live operator tools (Claude Code only)</h2>
+    <p class="br-meta">
+      Installed: {{ extras.version.version|default:"—" }} ·
+      {{ extras.scope_count }} settings scopes ·
+      {{ extras.wish_count }} bundle-patch wish{{ extras.wish_count|pluralize:"es" }}.
+    </p>
+    <p>
+      <a class="br-pill" href="{% url 'barding:bundle_patches' %}">bundle patches</a>
+      <a class="br-pill" href="{% url 'barding:binary_index' %}">binary inspector</a>
+    </p>
+  </div>
+  {% endif %}
+
+  <div class="br-section">
+    <h2>Observed techniques</h2>
+    {% if by_category %}
+      {% for cat, obs_list in by_category.items %}
+        <h3 style="color:#9ecbff; font-size:0.9rem; margin: 14px 0 4px;">{{ cat }}</h3>
+        {% for o in obs_list %}
+          <div class="br-obs">
+            <div class="top">
+              <a class="tech" href="{% url 'barding:technique_detail' slug=o.technique.slug %}">{{ o.technique.name }}</a>
+              <span class="src">{{ o.get_source_kind_display }}</span>
+              <span class="conf">conf {{ o.confidence|floatformat:2 }}</span>
+              {% if o.observed_at %}<span class="src">· {{ o.observed_at }}</span>{% endif %}
+            </div>
+            <div style="color:#cdd; font-size: 0.85rem; margin-top: 2px;">{{ o.summary }}</div>
+            {% if o.evidence %}<pre class="ev">{{ o.evidence }}</pre>{% endif %}
+          </div>
+        {% endfor %}
+      {% endfor %}
+    {% else %}
+      <p class="br-meta">No observations recorded yet for this harness.</p>
+    {% endif %}
+  </div>
+
+  {% if harness.notes %}
+  <div class="br-section">
+    <h2>Notes</h2>
+    <p style="color:#cdd;">{{ harness.notes|linebreaksbr }}</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

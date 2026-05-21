@@ -20,7 +20,13 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from .models import BundlePatchWish, SettingsScope
+from django.db.models import Avg, Count, Max
+from django.shortcuts import get_object_or_404
+
+from .models import (
+    BundlePatchWish, SettingsScope,
+    Harness, Technique, Observation, DistillationProposal,
+)
 
 
 CLAUDE_BIN_DEFAULT = os.path.expanduser('~/.local/bin/claude')
@@ -117,6 +123,9 @@ def _installed_version() -> dict:
 
 @login_required
 def index(request):
+    """Hub: comparative-study links on the left, Claude-Code operator
+    tools on the right.  Counts come from the study models so the page
+    doubles as an at-a-glance status of how much we've catalogued."""
     scopes = []
     for sc in SettingsScope.objects.filter(is_active=True):
         parsed, raw = _read_scope(sc)
@@ -128,12 +137,170 @@ def index(request):
             'exists': bool(raw) or parsed is not None,
             'parse_error': parsed is None and bool(raw),
         })
+    study_counts = {
+        'harnesses': Harness.objects.count(),
+        'techniques': Technique.objects.count(),
+        'observations': Observation.objects.count(),
+        'distill_total': DistillationProposal.objects.count(),
+        'distill_include': DistillationProposal.objects
+                             .filter(decision='include').count(),
+        'distill_simplified': DistillationProposal.objects
+                                .filter(decision='simplified').count(),
+        'distill_skip': DistillationProposal.objects
+                          .filter(decision='skip').count(),
+    }
     return render(request, 'barding/index.html', {
         'version': _installed_version(),
         'scopes': scopes,
         'sanctioned_bools': SANCTIONED_BOOLS,
         'unsupported_notes': UNSUPPORTED_NOTES,
         'wishes': BundlePatchWish.objects.all()[:50],
+        'study_counts': study_counts,
+    })
+
+
+# ─── Comparative-study views ───────────────────────────────────────
+
+@login_required
+def harness_list(request):
+    rows = []
+    for h in Harness.objects.all():
+        rows.append({
+            'obj': h,
+            'observation_count': h.observations.count(),
+            'technique_count': h.observations.values('technique').distinct().count(),
+            'last_seen': h.observations.aggregate(m=Max('observed_at'))['m'],
+        })
+    return render(request, 'barding/harness_list.html', {'rows': rows})
+
+
+@login_required
+def harness_detail(request, slug):
+    h = get_object_or_404(Harness, slug=slug)
+    obs = (h.observations.select_related('technique')
+                          .order_by('technique__category',
+                                    '-technique__magic_weight'))
+    by_cat = {}
+    for o in obs:
+        by_cat.setdefault(o.technique.get_category_display(), []).append(o)
+    extras = None
+    if h.slug == 'claude-code-cli':
+        # The Claude-Code-specific deep-observation set lives in the
+        # original barding models — link out so users can jump.
+        extras = {
+            'version': _installed_version(),
+            'scope_count': SettingsScope.objects.filter(is_active=True).count(),
+            'wish_count': BundlePatchWish.objects.count(),
+        }
+    return render(request, 'barding/harness_detail.html', {
+        'harness': h,
+        'by_category': by_cat,
+        'observation_count': obs.count(),
+        'extras': extras,
+    })
+
+
+@login_required
+def technique_list(request):
+    by_cat = {}
+    for t in Technique.objects.all():
+        by_cat.setdefault(t.get_category_display(), []).append({
+            'obj': t,
+            'observation_count': t.observations.count(),
+            'harness_count': t.observations.values('harness').distinct().count(),
+            'has_proposal': hasattr(t, 'distill'),
+        })
+    # Preserve canonical category order from the choices.
+    from .models import TECHNIQUE_CATEGORIES
+    display_order = [label for _key, label in TECHNIQUE_CATEGORIES]
+    ordered = [(label, by_cat[label]) for label in display_order
+               if label in by_cat]
+    return render(request, 'barding/technique_list.html', {
+        'by_category': ordered,
+    })
+
+
+@login_required
+def technique_detail(request, slug):
+    t = get_object_or_404(Technique, slug=slug)
+    obs = (t.observations.select_related('harness')
+                          .order_by('-confidence', 'harness__name'))
+    proposal = getattr(t, 'distill', None)
+    return render(request, 'barding/technique_detail.html', {
+        'technique': t,
+        'observations': obs,
+        'proposal': proposal,
+    })
+
+
+@login_required
+def compare_grid(request):
+    """Harness × Technique grid.  Each cell shows the max-confidence
+    observation we have for that pair (or blank if none).  Techniques
+    are grouped by category and sorted by magic_weight; harnesses are
+    sorted by name."""
+    harnesses = list(Harness.objects.all())
+    techniques = list(Technique.objects.all())
+    # Build a (technique_id, harness_id) → best observation map in one
+    # query to avoid N×M lookups.
+    cells = {}
+    for o in Observation.objects.all().only(
+            'harness_id', 'technique_id', 'confidence', 'source_kind'):
+        key = (o.technique_id, o.harness_id)
+        prev = cells.get(key)
+        if prev is None or o.confidence > prev['confidence']:
+            cells[key] = {
+                'confidence': o.confidence,
+                'source_kind': o.source_kind,
+            }
+    # Group techniques by category for the row blocks.
+    from .models import TECHNIQUE_CATEGORIES
+    cat_order = [label for _key, label in TECHNIQUE_CATEGORIES]
+    by_cat = {}
+    for t in techniques:
+        by_cat.setdefault(t.get_category_display(), []).append(t)
+    groups = []
+    for cat in cat_order:
+        if cat not in by_cat:
+            continue
+        rows = []
+        for t in by_cat[cat]:
+            row = {'technique': t, 'cells': []}
+            for h in harnesses:
+                row['cells'].append(cells.get((t.id, h.id)))
+            rows.append(row)
+        groups.append((cat, rows))
+    return render(request, 'barding/compare_grid.html', {
+        'harnesses': harnesses,
+        'groups': groups,
+    })
+
+
+@login_required
+def distill_plan(request):
+    """The actionable output of the study: per-technique decisions for
+    the caformer harness, ranked by priority and magic_weight."""
+    proposals = (DistillationProposal.objects
+                   .select_related('technique')
+                   .order_by('priority', '-technique__magic_weight'))
+    # Techniques without a proposal — surface as "needs decision".
+    unassigned = (Technique.objects
+                    .filter(distill__isnull=True)
+                    .order_by('-magic_weight'))
+    summary = {
+        'include': proposals.filter(decision='include').count(),
+        'simplified': proposals.filter(decision='simplified').count(),
+        'skip': proposals.filter(decision='skip').count(),
+        'research': proposals.filter(decision='research').count(),
+        'unassigned': unassigned.count(),
+    }
+    budget_total = sum((p.byte_budget or 0) for p in proposals
+                       if p.decision in ('include', 'simplified'))
+    return render(request, 'barding/distill_plan.html', {
+        'proposals': proposals,
+        'unassigned': unassigned,
+        'summary': summary,
+        'budget_total': budget_total,
     })
 
 

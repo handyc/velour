@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}barding — techniques{% endblock %}
+{% block content %}
+<style>
+  .br-page { max-width: 64em; }
+  .br-meta { color: #888; font-size: 0.85rem; }
+  .br-tab  { width: 100%; border-collapse: collapse;
+             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+             font-size: 0.85rem; }
+  .br-tab th, .br-tab td { padding: 5px 10px; border-bottom: 1px solid #1a1a1a;
+                           text-align: left; vertical-align: top; }
+  .br-tab th { color: #8b949e; font-weight: 500; }
+  .br-tab a { color: #9ecbff; }
+  .num { color: #cfc; }
+  .crumb a { color: #8b949e; }
+  .mw-bar { display: inline-block; height: 6px; width: 80px;
+            background: #1a1a1a; vertical-align: middle; }
+  .mw-bar > i { display: block; height: 100%; background: #2ea043; }
+  h3 { color: #9ecbff; font-size: 0.9rem; margin: 22px 0 4px; }
+  .cost-trivial { color: #2ea043; }
+  .cost-cheap   { color: #2ea043; }
+  .cost-medium  { color: #d29922; }
+  .cost-heavy   { color: #f85149; }
+  .cost-\?      { color: #8b949e; }
+  .has-prop  { color: #2ea043; }
+  .needs-prop{ color: #d29922; }
+</style>
+<div class="br-page">
+  <p class="crumb"><a href="{% url 'barding:index' %}">← barding</a></p>
+  <h1 style="margin-top: 0;">techniques</h1>
+  <p class="br-meta">Grouped by category, ranked within category by
+     magic-weight.  ★ = has a distillation proposal.</p>
+
+  {% for cat, rows in by_category %}
+    <h3>{{ cat }}</h3>
+    <table class="br-tab">
+      <thead>
+        <tr><th>name</th><th>magic</th><th>cost</th>
+            <th>harnesses</th><th>obs</th><th></th></tr>
+      </thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><a href="{% url 'barding:technique_detail' slug=r.obj.slug %}">{{ r.obj.name }}</a></td>
+          <td><span class="mw-bar"><i style="width: {% widthratio r.obj.magic_weight 1 100 %}%;"></i></span>
+              <span class="num" style="font-size:0.75rem;">&nbsp;{{ r.obj.magic_weight|floatformat:2 }}</span></td>
+          <td><span class="cost-{{ r.obj.deterministic_cost }}">{{ r.obj.get_deterministic_cost_display }}</span></td>
+          <td class="num">{{ r.harness_count }}</td>
+          <td class="num">{{ r.observation_count }}</td>
+          <td>{% if r.has_proposal %}<span class="has-prop">★</span>{% else %}<span class="needs-prop">·</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% empty %}
+    <p class="br-meta">No techniques yet.  Run
+       <code>manage.py barding_seed_study</code>.</p>
+  {% endfor %}
+</div>
+{% endblock %}

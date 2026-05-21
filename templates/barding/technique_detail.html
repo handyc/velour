@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}barding — {{ technique.name }}{% endblock %}
+{% block content %}
+<style>
+  .br-page { max-width: 60em; }
+  .br-meta { color: #888; font-size: 0.85rem; }
+  .br-section { margin: 22px 0; padding-top: 14px;
+                border-top: 1px solid #1a1a1a; }
+  .br-section h2 { margin: 0 0 8px; font-size: 1.0rem;
+                   color: #cfc; font-weight: 600; }
+  .br-obs { margin: 6px 0; padding: 6px 10px;
+            border-left: 2px solid #30363d; }
+  .br-obs .top { display: flex; gap: 10px; align-items: baseline;
+                 flex-wrap: wrap; }
+  .br-obs .h    { color: #9ecbff; }
+  .br-obs .src  { color: #8b949e; font-size: 0.78rem; }
+  .br-obs .conf { color: #cfc; font-family: monospace; font-size: 0.78rem; }
+  .br-obs .ev   { color: #b8c4cc; font-family: ui-monospace, monospace;
+                  font-size: 0.78rem; white-space: pre-wrap;
+                  background: #0d1117; padding: 6px 8px; margin-top: 4px;
+                  border: 1px solid #1a1a1a; }
+  .crumb a { color: #8b949e; }
+  .meta-table { font-family: ui-monospace, monospace; font-size: 0.83rem; }
+  .meta-table td { padding: 2px 12px 2px 0; vertical-align: top; }
+  .meta-table .k { color: #8b949e; }
+  .meta-table .v { color: #cfc; }
+  .prop { border: 1px solid #30363d; padding: 10px 12px;
+          background: #0b0b0b; }
+  .prop .dec { color: #cfc; font-weight: 600; }
+  .dec-include    { color: #2ea043 !important; }
+  .dec-simplified { color: #d29922 !important; }
+  .dec-skip       { color: #8b949e !important; }
+  .dec-research   { color: #9ecbff !important; }
+</style>
+<div class="br-page">
+  <p class="crumb">
+    <a href="{% url 'barding:index' %}">barding</a>
+    · <a href="{% url 'barding:technique_list' %}">techniques</a>
+    · {{ technique.name }}
+  </p>
+  <h1 style="margin-top: 0;">{{ technique.name }}</h1>
+
+  <table class="meta-table"><tbody>
+    <tr><td class="k">category</td><td class="v">{{ technique.get_category_display }}</td></tr>
+    <tr><td class="k">magic weight</td><td class="v">{{ technique.magic_weight|floatformat:2 }}</td></tr>
+    <tr><td class="k">det. cost</td><td class="v">{{ technique.get_deterministic_cost_display }}</td></tr>
+  </tbody></table>
+
+  {% if technique.description %}
+    <p style="margin-top: 14px; color: #cdd;">{{ technique.description|linebreaksbr }}</p>
+  {% endif %}
+
+  <div class="br-section">
+    <h2>Distillation proposal</h2>
+    {% if proposal %}
+      <div class="prop">
+        <div><span class="dec dec-{{ proposal.decision }}">{{ proposal.get_decision_display }}</span>
+             &nbsp; · priority {{ proposal.priority }}
+             {% if proposal.byte_budget %}· ≈ {{ proposal.byte_budget }} B{% endif %}</div>
+        {% if proposal.rationale %}<p style="color:#cdd; margin: 8px 0 0;">{{ proposal.rationale|linebreaksbr }}</p>{% endif %}
+        {% if proposal.implementation_notes %}
+          <p style="color:#8b949e; font-size:0.83rem; margin: 6px 0 0;"><b>impl:</b> {{ proposal.implementation_notes|linebreaksbr }}</p>
+        {% endif %}
+      </div>
+    {% else %}
+      <p class="br-meta">No proposal yet.  Add one via the
+         <a href="/admin/barding/distillationproposal/add/" style="color:#9ecbff;">admin</a>.</p>
+    {% endif %}
+  </div>
+
+  <div class="br-section">
+    <h2>Observations across harnesses</h2>
+    {% for o in observations %}
+      <div class="br-obs">
+        <div class="top">
+          <a class="h" href="{% url 'barding:harness_detail' slug=o.harness.slug %}">{{ o.harness.name }}</a>
+          <span class="src">{{ o.get_source_kind_display }}</span>
+          <span class="conf">conf {{ o.confidence|floatformat:2 }}</span>
+          {% if o.observed_at %}<span class="src">· {{ o.observed_at }}</span>{% endif %}
+        </div>
+        <div style="color:#cdd; font-size: 0.85rem; margin-top: 2px;">{{ o.summary }}</div>
+        {% if o.evidence %}<pre class="ev">{{ o.evidence }}</pre>{% endif %}
+      </div>
+    {% empty %}
+      <p class="br-meta">No observations of this technique yet.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

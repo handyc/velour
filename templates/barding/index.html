@@ -1,22 +1,22 @@
 {% extends "base.html" %}
-{% block title %}barding — Claude Code CLI config{% endblock %}
+{% block title %}barding — harness study + Claude Code tools{% endblock %}
 {% block content %}
 <style>
-  .cc-page  { max-width: 64em; }
-  .cc-meta  { color: #888; font-size: 0.85rem; }
-  .cc-section { margin: 22px 0; padding-top: 14px;
-                border-top: 1px solid #1a1a1a; }
+  .cc-page   { max-width: 72em; }
+  .cc-meta   { color: #888; font-size: 0.85rem; }
+  .cc-section{ margin: 22px 0; padding-top: 14px;
+               border-top: 1px solid #1a1a1a; }
   .cc-section h2 { margin: 0 0 8px; font-size: 1.05rem;
                    color: #cfc; font-weight: 600; }
-  .cc-table { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-              font-size: 0.85rem; color: #cdd; }
+  .cc-table  { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+               font-size: 0.85rem; color: #cdd; }
   .cc-table .key   { color: #8b949e; padding-right: 1.5em; }
   .cc-table .val   { color: #cfc; }
-  .cc-json  { background: #0d1117; border: 1px solid #1a1a1a;
-              padding: 10px 12px; font-family: ui-monospace, SFMono-Regular,
-              Menlo, monospace; font-size: 0.78rem;
-              color: #c9d1d9; white-space: pre; overflow-x: auto;
-              max-height: 36em; }
+  .cc-json   { background: #0d1117; border: 1px solid #1a1a1a;
+               padding: 10px 12px; font-family: ui-monospace, SFMono-Regular,
+               Menlo, monospace; font-size: 0.78rem;
+               color: #c9d1d9; white-space: pre; overflow-x: auto;
+               max-height: 24em; }
   .cc-scope-row { display: flex; gap: 14px; align-items: baseline;
                   margin: 4px 0; }
   .cc-scope-row .name  { color: #cfc; font-weight: 600; }
@@ -35,25 +35,61 @@
   .new-btn:hover { border-color: #8b949e; }
   .cc-unsupported li { margin: 6px 0; }
   .cc-unsupported li b { color: #d29922; }
+  .hub-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 60em) { .hub-cols { grid-template-columns: 1fr; } }
+  .hub-card { border: 1px solid #1a1a1a; padding: 14px 16px;
+              background: #0b0b0b; }
+  .hub-card h2 { margin-top: 0; }
+  .hub-card .links a { display: inline-block; margin: 0 12px 6px 0; }
+  .num { font-family: ui-monospace, monospace; color: #cfc; }
 </style>
 
 <div class="cc-page">
 <h1 style="margin-top: 0;">barding</h1>
 <p class="cc-meta">
-  Centralised view of Claude Code's <code>settings.json</code> across
-  scopes, plus an honest record of customisations Anthropic's CLI does
-  not officially support.  This app never invokes the <code>claude</code>
-  binary &mdash; it only reads &amp; writes settings files and reports
-  the installed version.
+  Comparative study of LLM <i>harnesses</i> — the layer that turns a
+  deterministic next-token function into something that feels like a
+  collaborator — and an actionable plan to distill the load-bearing
+  techniques into the caformer's lightweight harness.
 </p>
 
-<div class="cc-section">
-  <h2>Installed binary</h2>
-  {% include "barding/_version_partial.html" %}
+<div class="hub-cols">
+
+  <div class="hub-card">
+    <h2>Study</h2>
+    <p class="cc-meta">Catalogue of harnesses &amp; techniques; the
+       distillation plan for caformer.</p>
+    <div class="links">
+      <a class="new-btn" href="{% url 'barding:harness_list' %}">harnesses ({{ study_counts.harnesses }})</a>
+      <a class="new-btn" href="{% url 'barding:technique_list' %}">techniques ({{ study_counts.techniques }})</a>
+      <a class="new-btn" href="{% url 'barding:compare_grid' %}">compare</a>
+      <a class="new-btn" href="{% url 'barding:distill_plan' %}">distill →</a>
+    </div>
+    <table class="cc-table" style="margin-top: 10px;"><tbody>
+      <tr><td class="key">observations</td><td class="val num">{{ study_counts.observations }}</td></tr>
+      <tr><td class="key">distill / include</td><td class="val num">{{ study_counts.distill_include }}</td></tr>
+      <tr><td class="key">distill / simplified</td><td class="val num">{{ study_counts.distill_simplified }}</td></tr>
+      <tr><td class="key">distill / skip</td><td class="val num">{{ study_counts.distill_skip }}</td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="hub-card">
+    <h2>Claude Code operator tools</h2>
+    <p class="cc-meta">Original barding scope.  Settings editor,
+       binary inspector, bundle-patch wishlist.  Doubles as the
+       deepest observation set for the <code>claude-code-cli</code>
+       harness profile.</p>
+    <div>{% include "barding/_version_partial.html" %}</div>
+    <div class="links" style="margin-top: 10px;">
+      <a class="new-btn" href="{% url 'barding:bundle_patches' %}">bundle patches ({{ wishes|length }})</a>
+      <a class="new-btn" href="{% url 'barding:binary_index' %}">binary inspector</a>
+    </div>
+  </div>
+
 </div>
 
 <div class="cc-section">
-  <h2>Scopes</h2>
+  <h2>Settings scopes</h2>
   {% if scopes %}
     {% for s in scopes %}
     <div class="cc-scope-row">
@@ -65,9 +101,6 @@
       {% else %}<span class="cc-ok">· ok</span>
       {% endif %}
     </div>
-    {% if s.exists %}
-    <pre class="cc-json">{{ s.pretty }}</pre>
-    {% endif %}
     {% endfor %}
   {% else %}
     <p class="cc-meta">
@@ -97,11 +130,6 @@
     <li><b>{{ label }}.</b> {{ body }}</li>
     {% endfor %}
   </ul>
-  <p>
-    <a class="new-btn" href="{% url 'barding:bundle_patches' %}">bundle patch wishlist &rsaquo;</a>
-    <a class="new-btn" href="{% url 'barding:binary_index' %}" style="margin-left:8px;">binary inspector &rsaquo;</a>
-    {% if wishes %}<span class="cc-meta">· {{ wishes|length }} wish{{ wishes|length|pluralize:"es" }} recorded</span>{% endif %}
-  </p>
 </div>
 
 </div>

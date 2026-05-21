@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}barding — harnesses{% endblock %}
+{% block content %}
+<style>
+  .br-page { max-width: 64em; }
+  .br-meta { color: #888; font-size: 0.85rem; }
+  .br-tab  { width: 100%; border-collapse: collapse;
+             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+             font-size: 0.85rem; }
+  .br-tab th, .br-tab td { padding: 6px 10px; border-bottom: 1px solid #1a1a1a;
+                           text-align: left; vertical-align: top; }
+  .br-tab th { color: #8b949e; font-weight: 500; }
+  .br-tab a { color: #9ecbff; }
+  .br-pill { display: inline-block; padding: 0 6px;
+             border: 1px solid #30363d; border-radius: 3px;
+             font-size: 0.7rem; color: #8b949e; }
+  .num { color: #cfc; }
+  .crumb a { color: #8b949e; }
+</style>
+<div class="br-page">
+  <p class="crumb"><a href="{% url 'barding:index' %}">← barding</a></p>
+  <h1 style="margin-top: 0;">harnesses</h1>
+  <p class="br-meta">Each row is one LLM harness under study.  Click a
+     name for its observed techniques.</p>
+
+  <table class="br-tab">
+    <thead>
+      <tr><th>name</th><th>vendor</th><th>surface</th><th>OSS</th>
+          <th>techniques</th><th>observations</th><th>last seen</th></tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td><a href="{% url 'barding:harness_detail' slug=r.obj.slug %}">{{ r.obj.name }}</a></td>
+        <td>{{ r.obj.vendor }}</td>
+        <td><span class="br-pill">{{ r.obj.get_surface_display }}</span></td>
+        <td>{% if r.obj.is_open_source %}<span style="color:#2ea043">yes</span>{% else %}<span style="color:#8b949e">closed</span>{% endif %}</td>
+        <td class="num">{{ r.technique_count }}</td>
+        <td class="num">{{ r.observation_count }}</td>
+        <td class="br-meta">{{ r.last_seen|default:"—" }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="7" class="br-meta">No harnesses yet.  Run
+          <code>manage.py barding_seed_study</code>.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
