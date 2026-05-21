@@ -45,6 +45,23 @@ PROFILES = [
         inject_identity=True,
     ),
     dict(
+        slug='velour-multiscale',
+        persona_name='Velour (multiscale)',
+        is_default=False,
+        prefilter_mode='multiscale',
+        persona_description=(
+            "Velour persona routed through multiple boardstack4 "
+            "resolutions in parallel (sides 4, 8, 16, 32 — whichever "
+            "are trained).  Paths from each scale are XOR-combined "
+            "per position into a single 4-colour fingerprint that "
+            "integrates local and global pattern signal."),
+        system_prompt_extra='',
+        inject_cwd=False,
+        inject_time=True,
+        inject_git=False,
+        inject_identity=True,
+    ),
+    dict(
         slug='librarian',
         persona_name='the librarian',
         is_default=False,

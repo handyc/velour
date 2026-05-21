@@ -82,6 +82,32 @@ def _classify_boardstack4(prompt: str) -> PrefilterResult:
         path=path)
 
 
+def _classify_multiscale(prompt: str) -> PrefilterResult:
+    """Multi-scale variant: load multiple BoardStack4 instances at
+    different sides, XOR-combine their per-scale paths.  Soft-falls
+    to single-scale when only one stack is loadable."""
+    try:
+        from caformer import (multiscale_boardstack4 as ms,
+                                   boardstack4 as bs4)
+        m = ms.get_multiscale(
+            sides=ms.DEFAULT_SIDES,
+            dir_template=ms.DEFAULT_DIR_TEMPLATE,
+            fallback_side_8='.artifacts/boardstack4_v1')
+    except (FileNotFoundError, Exception):           # noqa: BLE001
+        return _classify_boardstack4(prompt)
+    r = m.cascade(prompt)
+    combined = r['combined']
+    cat = bs4.path_to_category(combined)
+    sides_str = ','.join(str(s) for s in r['sides'])
+    return PrefilterResult(
+        category=cat,
+        name=CATEGORY_NAMES.get(cat, '?'),
+        colour=CATEGORY_COLOURS.get(cat, 'ffffff'),
+        available=True,
+        mode=f'multiscale (sides {sides_str})',
+        path=combined)
+
+
 def classify(prompt: str, mode: str = 'router') -> PrefilterResult:
     """Route ``prompt`` to a category.  ``mode`` picks the prefilter:
 
@@ -94,4 +120,6 @@ def classify(prompt: str, mode: str = 'router') -> PrefilterResult:
     mode = (mode or 'router').strip().lower()
     if mode == 'boardstack4':
         return _classify_boardstack4(prompt)
+    if mode == 'multiscale':
+        return _classify_multiscale(prompt)
     return _classify_router(prompt)
