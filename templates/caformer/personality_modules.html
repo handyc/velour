@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}caformer — personality modules{% endblock %}
+{% block content %}
+<style>
+  .pm-page { max-width: 72em; }
+  .pm-page h1 { margin: 0 0 6px; }
+  .pm-meta   { color: #888; font-size: 0.85rem; }
+  .pm-section{ margin: 22px 0; padding-top: 12px;
+                border-top: 1px solid #1a1a1a; }
+  .pm-mod { background: #0a0a0a; border: 1px solid #1a1a1a;
+             padding: 14px 18px; margin-bottom: 18px;
+             border-radius: 4px; }
+  .pm-mod h2 { margin: 0 0 4px; color: #9ecbff;
+                font-size: 1.0rem; font-weight: 600;
+                display: flex; align-items: baseline; gap: 8px; }
+  .pm-mod h2 .slug { color: #6e7681; font-size: 0.75rem;
+                      font-weight: 400; }
+  .pm-mod .desc { color: #b8c4cc; margin: 4px 0 12px;
+                   font-size: 0.88rem; }
+  .pm-mod .uses { color: #2ea043; font-size: 0.78rem;
+                   margin-bottom: 12px; }
+  .pm-mod .uses-empty { color: #6e7681; font-size: 0.78rem;
+                         margin-bottom: 12px; }
+  .pm-subs { display: grid;
+              grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  @media (max-width: 60em) { .pm-subs { grid-template-columns: 1fr; } }
+  .pm-sub { background: #0d1117; border: 1px solid #21262d;
+             padding: 10px 12px; border-radius: 3px; }
+  .pm-sub h3 { margin: 0 0 4px; color: #cfc;
+                font-size: 0.92rem; font-weight: 600; }
+  .pm-sub .toks { font-family: ui-monospace, monospace;
+                   font-size: 0.78rem; color: #ffd070;
+                   margin-bottom: 4px; }
+  .pm-sub .notes { color: #b8c4cc; font-size: 0.82rem;
+                    line-height: 1.4; font-style: italic; }
+  /* Subroute index colour-coding (0..3 → K=4 palette). */
+  .pm-sub.k0 { border-left: 3px solid #2ea043; }
+  .pm-sub.k1 { border-left: 3px solid #79c0ff; }
+  .pm-sub.k2 { border-left: 3px solid #ffd070; }
+  .pm-sub.k3 { border-left: 3px solid #ff7ec7; }
+</style>
+
+<div class="pm-page">
+  <h1>personality modules</h1>
+  <p class="pm-meta">
+    Each module owns its own 4-subroute taxonomy under the personality
+    route.  Boardstack4 routes a prompt to personality (color 0); the
+    active HarnessProfile's personality_module then decides which of
+    its four subroutes the prompt descends into.  Different modules
+    slice the personality space along very different lines.
+  </p>
+
+  <div class="pm-section">
+    <h2 class="pm-meta">{{ rows|length }} module(s) seeded</h2>
+
+    {% for m in rows %}
+      <div class="pm-mod">
+        <h2>{{ m.name }}<span class="slug">{{ m.slug }}</span></h2>
+        {% if m.description %}
+          <div class="desc">{{ m.description }}</div>
+        {% endif %}
+        {% if m.users %}
+          <div class="uses">in use by:
+            {% for u in m.users %}
+              <span>{{ u }}</span>{% if not forloop.last %} · {% endif %}
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="uses-empty">no HarnessProfile points to this module yet</div>
+        {% endif %}
+        <div class="pm-subs">
+          {% for sub in m.subroutes %}
+            <div class="pm-sub k{{ forloop.counter0 }}">
+              <h3>{{ forloop.counter0 }} · {{ sub.label }}</h3>
+              <div class="toks">{{ sub.tokens|join:" · " }}</div>
+              {% if sub.notes %}
+                <div class="notes">{{ sub.notes }}</div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% empty %}
+      <p class="pm-meta">No modules seeded yet — run
+        <code>manage.py caformer_seed_personality_modules</code>.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

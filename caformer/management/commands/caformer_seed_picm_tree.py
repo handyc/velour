@@ -50,6 +50,40 @@ NODES = [
         False, '', '',
         'introspection / ambiguous / multi-step'),
 
+    # ── Depth 1: Personality sub-routes (user request 2026-05-21) ──
+    # The personality umbrella covers four distinct conversational
+    # registers — each picks up different relevance tokens and would
+    # eventually route to a tailored persona response.
+    ('0.0', 'informative',
+        ['fact', 'note', 'know', 'fyi', 'btw', 'also',
+         'cool', 'wow', 'nice', 'huh', 'oh', 'ah'],
+        True, '', '',
+        'informative personality — sharing observations, '
+        'reactions, light facts in a personal register'),
+
+    ('0.1', 'social',
+        ['hi', 'hey', 'hello', 'yo', 'sup', 'bye', 'thx',
+         'ty', 'np', 'lol', 'omg', 'cheers', 'welcome',
+         'pleas', 'sorry'],
+        True, '', '',
+        'social personality — greetings, farewells, '
+        'phatic exchange, courtesy'),
+
+    ('0.2', 'practical',
+        ['help', 'fix', 'try', 'go', 'do', 'ok', 'yes', 'no',
+         'sure', 'maybe', 'plan', 'idea', 'next'],
+        True, '', '',
+        'practical personality — getting-things-done in a '
+        'conversational register, soft directives'),
+
+    ('0.3', 'persuasive',
+        ['should', 'must', 'could', 'would', 'maybe',
+         'best', 'better', 'try', 'urge', 'reco',
+         'sugg', 'opin', 'feel'],
+        True, '', '',
+        'persuasive personality — recommendations, opinions, '
+        'encouragement, gentle persuasion'),
+
     # ── Depth 1: Information's 5W children (who/what/where/when) ──
     ('1.0', 'who-queries',
         ['who', 'whose', 'whom'],

@@ -506,6 +506,50 @@ class QRPair(models.Model):
 # ─── Harness ────────────────────────────────────────────────────────
 
 
+class PersonalityModule(models.Model):
+    """A named personality with its own 4-way subroute taxonomy.
+
+    The boardstack4 cascade routes a prompt to *personality* (color 0)
+    as one of four top-level categories.  Within personality, each
+    PersonalityModule defines its own 4 subroutes — different modules
+    may slice that same space along very different lines.
+
+    Examples shipped today:
+
+      Velour:       Informative · Social · Practical · Persuasive
+      David Angel:  Dialogue    · Discourse · Debate  · Diatribe
+
+    A HarnessProfile points to one module via personality_module_slug;
+    the harness applies that module's subroute tokens when descending
+    under the personality root."""
+
+    slug = models.SlugField(
+        max_length=64, unique=True,
+        help_text='Stable identifier, e.g. "velour", "david-angel".')
+    name = models.CharField(
+        max_length=80,
+        help_text='Display name, e.g. "Velour", "David Angel".')
+    description = models.TextField(
+        blank=True,
+        help_text='Short character sketch of the personality.')
+    subroutes = models.JSONField(
+        default=list,
+        help_text='List of 4 dicts: '
+                  '[{label, tokens: [...], notes}, ...].  '
+                  'tokens are short (≤ 4 char) keyword matches on '
+                  'word boundaries.  Order matters — index 0..3 maps '
+                  'to depth-1 branch indices under personality (0).')
+
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['slug']
+
+    def __str__(self):
+        return f'{self.name} ({self.slug})'
+
+
 class HarnessProfile(models.Model):
     """A named configuration of the caformer harness.
 
@@ -548,6 +592,13 @@ class HarnessProfile(models.Model):
         ('multiscale',  'multiscale boardstack4 (sides 4/8/16/32, XOR combined)'),
         ('byte_router', 'byte_router (4×4 cell8 cascade with trained permutation)'),
     )
+
+    personality_module_slug = models.CharField(
+        max_length=64, blank=True,
+        help_text='Optional slug of a PersonalityModule.  When set, '
+                  "this profile's personality route descends into that "
+                  "module's 4 subroutes instead of the shared PICM "
+                  "tree's personality children.")
     prefilter_mode = models.CharField(
         max_length=16, choices=PREFILTER_CHOICES, default='router',
         help_text='Which deterministic prefilter classifies the prompt. '

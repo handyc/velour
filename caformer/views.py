@@ -5312,3 +5312,32 @@ def viz3d_harness_state(request):
         'edges':  edges,
         'trace':  trace,
     })
+
+
+# ─── Personality modules browser ───────────────────────────────────
+
+
+@login_required
+def personality_modules_view(request):
+    """Browse all PersonalityModule rows + their subroutes."""
+    from caformer.models import PersonalityModule, HarnessProfile
+    profiles_by_slug: dict[str, list[str]] = {}
+    for p in HarnessProfile.objects.all():
+        if p.personality_module_slug:
+            profiles_by_slug.setdefault(
+                p.personality_module_slug, []).append(
+                p.persona_name or p.slug)
+    # Hand-bake each module row with users attached, so the template
+    # doesn't need a custom |get_item filter.
+    rows = []
+    for m in PersonalityModule.objects.all():
+        rows.append({
+            'name':        m.name,
+            'slug':        m.slug,
+            'description': m.description,
+            'subroutes':   m.subroutes or [],
+            'users':       profiles_by_slug.get(m.slug, []),
+        })
+    return render(request, 'caformer/personality_modules.html', {
+        'rows': rows,
+    })
