@@ -77,10 +77,28 @@
       🎯 Q→R training
     </a>
     <br>
+    <span style="margin-top:6px; display:inline-block;">
+      <a href="{% url 'caformer:harness' %}" style="color:#9ecbff;"
+         title="The interface layer wrapping the deterministic CA core: persona, prefilter, context injection, agents, templates, handlers, Sanskrit interlingua.">
+        🎭 Harness
+      </a>
+      &middot;
+      <a href="{% url 'caformer:viz3d' %}" style="color:#9ecbff;"
+         title="3D walkthrough of the boardstack4 cascade — boards rendered as K=4 cube grids, animated tick-by-tick.">
+        ⬢ 3D viz
+      </a>
+      &middot;
+      <a href="{% url 'caformer:concept_system' %}" style="color:#9ecbff;"
+         title="Sanskrit verb-preverb-suffix interlingua. ~640k concepts in 4 KB.">
+        ॐ Concept system
+      </a>
+    </span>
+    <br>
     <span style="color:#888; font-size:0.85rem;">
       DMN: no input, just CA + nano_gpt feeding back into itself.
       Chat: char-level prompt → fully-CA forward → text back.
       Train: GA-evolve the rule tables against a corpus you supply.
+      Harness: persona/prefilter/templates/handlers around the core.
     </span>
   </p>
 
