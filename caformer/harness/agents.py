@@ -27,6 +27,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Sequence
 
+from . import picm as _picm
+from . import templates as _tpl
+
 
 # ─── Contribution + state ──────────────────────────────────────────
 
@@ -99,11 +102,32 @@ class PersonalityAgent:
     colour_code = 0
 
     def run(self, state: AgentState) -> None:
-        """Add a register-appropriate wrapper when the prompt is
-        conversational, otherwise pass silently."""
+        """Wrap conversational prompts.  Tries template patterns
+        first (e.g. 'thanks [X]' → "you're welcome, [X]"), then PICM
+        keyword presence, then the hardcoded greeting check."""
+        tokens = _picm.vocab_for(self.colour_code)
+        matches = _picm.match_keywords(state.prompt, tokens)
+        picm_strs = [t for (_i, t) in matches]
+        tpl = _tpl.match_table(state.prompt, self.colour_code)
+
+        if tpl is not None and not any(c.kind == 'wrapper'
+                                       for c in state.contributions):
+            state.contributions.append(Contribution(
+                agent=self.name, kind='wrapper',
+                content=tpl.output, confidence=tpl.confidence))
+            state.step_log.append({
+                'agent': self.name, 'action': 'wrapper',
+                'content': tpl.output,
+                'template':  tpl.pattern,
+                'slots':     tpl.slots,
+                'picm_matches': picm_strs})
+            return
+
         prompt = state.prompt.lower().strip()
         first_token = prompt.split()[0] if prompt else ''
-        is_greeting = first_token in _GREETING_KEYWORDS or len(prompt) <= 4
+        is_greeting = (bool(matches)
+                       or first_token in _GREETING_KEYWORDS
+                       or len(prompt) <= 4)
         if is_greeting and not any(c.kind == 'wrapper'
                                    for c in state.contributions):
             persona = getattr(state.profile, 'persona_name', '') or ''
@@ -113,11 +137,13 @@ class PersonalityAgent:
                 content=wrapper, confidence=0.7))
             state.step_log.append({
                 'agent': self.name, 'action': 'wrapper',
-                'content': wrapper})
+                'content': wrapper,
+                'picm_matches': picm_strs})
             return
         state.step_log.append({
             'agent': self.name, 'action': 'pass',
-            'content': '(not conversational)'})
+            'content': '(not conversational)',
+            'picm_matches': picm_strs})
 
 
 class InformationAgent:
@@ -125,13 +151,21 @@ class InformationAgent:
     colour_code = 1
 
     def run(self, state: AgentState) -> None:
-        """Try a cell8 QRPair dispatch.  When it lands, add a
-        high-confidence 'reply' contribution.  Caches across repeated
-        calls within the same chain by checking state.has_reply()."""
+        """Three paths, in priority order:
+
+          1. cell8 QRPair byte-exact dispatch (highest confidence);
+          2. template-pattern match (parametric — 'look up [X]');
+          3. PICM keyword acknowledgement (lowest — 'how many' etc.).
+
+        Caches across repeated chain calls via state.has_reply()."""
+        tokens = _picm.vocab_for(self.colour_code)
+        matches = _picm.match_keywords(state.prompt, tokens)
+        matched_strs = [t for (_i, t) in matches]
         if state.has_reply():
             state.step_log.append({
                 'agent': self.name, 'action': 'pass',
-                'content': '(reply already present, leaving it)'})
+                'content': '(reply already present, leaving it)',
+                'picm_matches': matched_strs})
             return
         core = _cell8_dispatch(state.prompt)
         if core.get('reply'):
@@ -141,11 +175,39 @@ class InformationAgent:
             state.step_log.append({
                 'agent': self.name, 'action': 'reply',
                 'content': core['reply'],
-                'detail':  core.get('sub_label', '')})
+                'detail':  core.get('sub_label', ''),
+                'picm_matches': matched_strs})
+            return
+        tpl = _tpl.match_table(state.prompt, self.colour_code)
+        if tpl is not None:
+            state.contributions.append(Contribution(
+                agent=self.name, kind='reply',
+                content=tpl.output, confidence=tpl.confidence))
+            state.step_log.append({
+                'agent': self.name, 'action': 'reply',
+                'content':  tpl.output,
+                'detail':   f'template {tpl.pattern!r} '
+                            f'spec={tpl.specificity}',
+                'template': tpl.pattern,
+                'slots':    tpl.slots,
+                'picm_matches': matched_strs})
+            return
+        if matches and not state.first('announce'):
+            announce = (f"Recognised query stem(s): "
+                        f"{', '.join(matched_strs)} — but no "
+                        f"byte-exact answer in the QRPair store yet.")
+            state.contributions.append(Contribution(
+                agent=self.name, kind='announce',
+                content=announce, confidence=0.35))
+            state.step_log.append({
+                'agent': self.name, 'action': 'announce',
+                'content': announce,
+                'picm_matches': matched_strs})
             return
         state.step_log.append({
             'agent': self.name, 'action': 'pass',
-            'content': core.get('sub_label', '(no QRPair match)')})
+            'content': core.get('sub_label', '(no QRPair match)'),
+            'picm_matches': matched_strs})
 
 
 class CommandAgent:
@@ -153,32 +215,63 @@ class CommandAgent:
     colour_code = 2
 
     def run(self, state: AgentState) -> None:
-        """If the prompt is imperative ('write me X', 'make Y') and
-        no reply exists yet, contribute an 'announce' acknowledging
-        the request.  This is the seam where a real action layer
-        would later plug in (the agent layer that produces
-        programs / files / artifacts)."""
+        """Three paths:
+
+          1. template-pattern match (e.g. 'run [X]' → 'I would run
+             [X]') — highest priority for commands;
+          2. PICM keyword match (shell/C tokens present);
+          3. imperative-verb heuristic.
+
+        All produce an 'announce' contribution — the command agent
+        doesn't have an actual executor yet, so it's an "I would do
+        X" signal until the seam is wired."""
+        tokens = _picm.vocab_for(self.colour_code)
+        matches = _picm.match_keywords(state.prompt, tokens)
+        matched_strs = [t for (_i, t) in matches]
         if state.has_reply():
             state.step_log.append({
                 'agent': self.name, 'action': 'pass',
-                'content': '(reply already present)'})
+                'content': '(reply already present)',
+                'picm_matches': matched_strs})
+            return
+        tpl = _tpl.match_table(state.prompt, self.colour_code)
+        if tpl is not None:
+            state.contributions.append(Contribution(
+                agent=self.name, kind='announce',
+                content=tpl.output, confidence=tpl.confidence))
+            state.step_log.append({
+                'agent': self.name, 'action': 'announce',
+                'content':  tpl.output,
+                'detail':   f'template {tpl.pattern!r}',
+                'template': tpl.pattern,
+                'slots':    tpl.slots,
+                'picm_matches': matched_strs})
             return
         prompt = state.prompt.lower().strip()
         first_token = prompt.split()[0] if prompt else ''
-        if first_token in _COMMAND_VERBS:
-            target = ' '.join(prompt.split()[1:])[:80] or '(unspecified target)'
-            announce = (f"I'd produce: {target} — but the command "
-                        f"agent isn't wired to an executor yet.")
+        is_imperative = (first_token in _COMMAND_VERBS) or bool(matches)
+        if is_imperative:
+            if matches:
+                announce = (f"Command tokens recognised: "
+                            f"{', '.join(matched_strs)} — but the "
+                            f"command agent isn't wired to an "
+                            f"executor yet.")
+            else:
+                target = ' '.join(prompt.split()[1:])[:80] or '(unspecified target)'
+                announce = (f"I'd produce: {target} — but the command "
+                            f"agent isn't wired to an executor yet.")
             state.contributions.append(Contribution(
                 agent=self.name, kind='announce',
                 content=announce, confidence=0.4))
             state.step_log.append({
                 'agent': self.name, 'action': 'announce',
-                'content': announce})
+                'content': announce,
+                'picm_matches': matched_strs})
             return
         state.step_log.append({
             'agent': self.name, 'action': 'pass',
-            'content': '(not imperative)'})
+            'content': '(not imperative)',
+            'picm_matches': matched_strs})
 
 
 class MetaAgent:
@@ -186,15 +279,17 @@ class MetaAgent:
     colour_code = 3
 
     def run(self, state: AgentState) -> None:
-        """Add a hedge or clarification when:
-          - the prompt is very short (< 3 tokens) AND no reply yet, OR
-          - the prompt asks 'why/how/what does' AND no reply yet.
-        Otherwise pass."""
+        """Adds hedge / clarify contributions, plus template-driven
+        introspection output ('reflect on [X]' → meta template
+        outputs)."""
         prompt = state.prompt.strip()
-        tokens = prompt.split()
+        tokens_in = prompt.split()
+        picm_tokens = _picm.vocab_for(self.colour_code)
+        matches = _picm.match_keywords(state.prompt, picm_tokens)
+        matched_strs = [t for (_i, t) in matches]
+        tpl = _tpl.match_table(state.prompt, self.colour_code)
+
         if state.has_reply():
-            # Once we have a reply, meta may still add a hedge for
-            # low-confidence answers.
             best = max((c.confidence for c in state.replies()), default=1.0)
             if best < 0.6 and not state.first('hedge'):
                 hedge = "I'm not entirely sure about that, though."
@@ -203,27 +298,54 @@ class MetaAgent:
                     content=hedge, confidence=0.5))
                 state.step_log.append({
                     'agent': self.name, 'action': 'hedge',
-                    'content': hedge})
+                    'content': hedge,
+                    'picm_matches': matched_strs})
                 return
             state.step_log.append({
                 'agent': self.name, 'action': 'pass',
-                'content': '(reply confident, no hedge needed)'})
+                'content': '(reply confident, no hedge needed)',
+                'picm_matches': matched_strs})
             return
-        looks_meta = (len(tokens) <= 2 or any(
-            prompt.lower().startswith(m) for m in _META_MARKERS))
+        # Template match takes priority — emit as reply not clarify,
+        # because a matched meta-template (e.g. 'reflect on [X]') is
+        # giving a structured introspective response, not asking for
+        # more info.
+        if tpl is not None and not state.has_reply():
+            state.contributions.append(Contribution(
+                agent=self.name, kind='reply',
+                content=tpl.output, confidence=tpl.confidence))
+            state.step_log.append({
+                'agent': self.name, 'action': 'reply',
+                'content':  tpl.output,
+                'detail':   f'template {tpl.pattern!r}',
+                'template': tpl.pattern,
+                'slots':    tpl.slots,
+                'picm_matches': matched_strs})
+            return
+        looks_meta = (
+            len(tokens_in) <= 2
+            or bool(matches)
+            or any(prompt.lower().startswith(m) for m in _META_MARKERS))
         if looks_meta:
-            clarify = ("Could you say a bit more about what you're "
-                       "looking for?")
+            if matches:
+                clarify = (f"Picked up introspective markers "
+                           f"({', '.join(matched_strs)}) — could you "
+                           f"say a bit more about what you're looking for?")
+            else:
+                clarify = ("Could you say a bit more about what you're "
+                           "looking for?")
             state.contributions.append(Contribution(
                 agent=self.name, kind='clarify',
                 content=clarify, confidence=0.6))
             state.step_log.append({
                 'agent': self.name, 'action': 'clarify',
-                'content': clarify})
+                'content': clarify,
+                'picm_matches': matched_strs})
             return
         state.step_log.append({
             'agent': self.name, 'action': 'pass',
-            'content': '(prompt looks specific enough)'})
+            'content': '(prompt looks specific enough)',
+            'picm_matches': matched_strs})
 
 
 AGENTS_BY_COLOUR: dict[int, object] = {

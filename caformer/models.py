@@ -584,3 +584,129 @@ class HarnessProfile(models.Model):
             else:
                 out[cat] = DEFAULT_VERBS[cat]
         return out
+
+
+class PICMVocab(models.Model):
+    """Per-Intent Character Map — the vocabulary store for one
+    boardstack4 agent.
+
+    Each routing colour (0..3 = personality / information / command /
+    meta) gets its own PICMVocab.  The vocab is a list of short tokens
+    (≤ ``bytes_per_token`` ASCII chars, default 4) that the agent
+    recognises and emits.
+
+    The 128×128 K=4 "board" view is *derived* from the token list:
+    each token packs into ``bytes_per_token × 4`` cells (2 bits per
+    cell), occupying ``token_count`` slots within the 16,384-cell
+    board.  Future phases may evolve the board with a CA and read
+    tokens back out; for now the JSON list is the source of truth.
+
+    Why JSON-first and not raw-blob-first: tokens are human-edited
+    in admin, and we want changes to be visible immediately without
+    re-packing.  ``caformer.harness.picm.pack_board()`` produces the
+    binary board on demand."""
+
+    AGENT_CHOICES = (
+        (0, 'personality'),
+        (1, 'information'),
+        (2, 'command'),
+        (3, 'meta'),
+    )
+    agent_color = models.PositiveSmallIntegerField(
+        choices=AGENT_CHOICES, unique=True,
+        help_text='Which boardstack4 routing colour this vocab belongs to.')
+    bytes_per_token = models.PositiveSmallIntegerField(
+        default=4,
+        help_text='Max ASCII bytes per token.  4 = 1024 tokens fit '
+                  'in 128×128 K=4; 8 = 512 tokens.')
+    token_count = models.PositiveSmallIntegerField(
+        default=1024,
+        help_text='Max vocab size.  16,384 cells / (bytes_per_token × 4) '
+                  'is the upper bound.')
+    tokens_json = models.JSONField(
+        default=list, blank=True,
+        help_text='Ordered list of token strings.  Truncated to '
+                  'bytes_per_token chars at pack time; longer entries '
+                  'lose their tail.')
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('agent_color',)
+
+    def __str__(self) -> str:
+        n = len(self.tokens_json or [])
+        return f'PICM[{self.get_agent_color_display()}] {n} tokens'
+
+    def tokens(self) -> list[str]:
+        """Normalise the JSON list to a Python list of strings,
+        truncated to bytes_per_token bytes each."""
+        out: list[str] = []
+        for t in (self.tokens_json or []):
+            s = str(t)[:self.bytes_per_token]
+            out.append(s)
+        return out
+
+
+class TemplatePattern(models.Model):
+    """A slot-templated p → q mapping owned by one boardstack4 agent.
+
+    The pattern field is a *prompt template* with bracketed slots,
+    e.g. ``look up [X]`` or ``how many [thing] are in [container]``.
+    A user prompt matches this row if the literal parts align and
+    every slot captures a non-empty span.
+
+    The ``output`` field is an *answer template* referencing the
+    same slot names; on match, slot values are substituted in.
+    The combination gives parametric coverage with one trained row:
+
+        pattern  = 'look up [X]'
+        output   = 'https://en.wikipedia.org/wiki/[X]'
+        prompt   = 'look up dogs'   → 'https://en.wikipedia.org/wiki/dogs'
+        prompt   = 'look up Velour' → 'https://en.wikipedia.org/wiki/Velour'
+
+    Multiple patterns may match an incoming prompt; the harness picks
+    the most *specific* one (longest literal portion + fewest slots),
+    yielding an implicit decision-tree shape from a flat table.
+
+    Author tip: keep slot names short (single uppercase letters or
+    short snake_case).  Slot names must match between ``pattern``
+    and ``output``; unused output slots are emitted literally."""
+
+    AGENT_CHOICES = (
+        (0, 'personality'),
+        (1, 'information'),
+        (2, 'command'),
+        (3, 'meta'),
+    )
+    agent_color = models.PositiveSmallIntegerField(choices=AGENT_CHOICES)
+    pattern = models.CharField(
+        max_length=240,
+        help_text='Prompt pattern with [SlotName] markers, e.g. '
+                  "'look up [X]' or 'how many [item]'.")
+    output = models.TextField(
+        help_text='Answer template referencing the same slot names. '
+                  'On match, slot values are substituted in.')
+    priority = models.PositiveSmallIntegerField(
+        default=5,
+        help_text='Lower priority wins ties between equally specific '
+                  'patterns.  1 = highest, 9 = lowest.')
+    is_active = models.BooleanField(default=True)
+    confidence = models.FloatField(
+        default=0.7,
+        help_text='Confidence the harness reports for matches from '
+                  'this template.  0..1.  Templates with no real '
+                  'data backing them (stubs) should be ≤ 0.5.')
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('agent_color', 'priority', '-updated_at')
+        indexes = [
+            models.Index(fields=['agent_color', 'is_active']),
+        ]
+
+    def __str__(self) -> str:
+        return f'[{self.get_agent_color_display()}] {self.pattern}'

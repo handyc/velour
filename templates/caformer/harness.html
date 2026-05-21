@@ -152,6 +152,24 @@
                 ({{ step.detail }})
               </span>
             {% endif %}
+            {% if step.template %}
+              <div class="small" style="color:#79c0ff;
+                                         margin-top: 2px;
+                                         font-family: ui-monospace, monospace;">
+                ↳ template <i>{{ step.template }}</i>
+                {% if step.slots %}
+                  · slots: {% for k, v in step.slots.items %}<b>{{ k }}</b>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                {% endif %}
+              </div>
+            {% endif %}
+            {% if step.picm_matches %}
+              <div class="small" style="color:#d29922;
+                                         margin-top: 2px;
+                                         font-family: ui-monospace, monospace;">
+                ↳ PICM tokens hit:
+                {% for tok in step.picm_matches %}<span style="background:#2a2010; border-radius:2px; padding:0 4px; margin-right:3px;">{{ tok }}</span>{% endfor %}
+              </div>
+            {% endif %}
           </div>
         {% endif %}
       {% endfor %}
