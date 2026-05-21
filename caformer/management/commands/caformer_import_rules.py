@@ -41,8 +41,15 @@ class Command(BaseCommand):
                               help='abort upsert for any pair where some '
                                      'positions are missing (default: write '
                                      'whatever positions we have, mark exact=False)')
+        parser.add_argument('--verify', action='store_true',
+                              help='re-derive byte_matched by running the '
+                                     'cascade forward and comparing to '
+                                     'expected bytes.  Use when the trainer '
+                                     'is suspected of mis-flagging records '
+                                     '(e.g. cell8 bundles before the '
+                                     'byte_matched=matched fix).')
 
-    def handle(self, *, files, dry_run, require_complete, **opts):
+    def handle(self, *, files, dry_run, require_complete, verify, **opts):
         from caformer.models import QRPair
         from caformer.io.rule_blob import (read_records, SHAPE_CELL8,
                                                    SHAPE_7TO1, SHAPE_LEN,
@@ -54,7 +61,8 @@ class Command(BaseCommand):
         log(f'=== caformer_import_rules ===')
         log(f'  files:        {len(files)}  ({", ".join(files)})')
         log(f'  dry-run:      {dry_run}')
-        log(f'  require-full: {require_complete}\n')
+        log(f'  require-full: {require_complete}')
+        log(f'  verify:       {verify}\n')
 
         # Bucket records by (pair_pk, shape, port_src), then by position.
         # bucket[(pk, shape, port_src)] = {position: (rule_blob, byte_matched)}
@@ -90,6 +98,57 @@ class Command(BaseCommand):
         missing = [pk for pk in pks_needed if pk not in pairs]
         if missing:
             log(f'  WARNING: {len(missing)} pks have no QRPair row: {missing}')
+
+        # --verify: re-derive byte_matched per record by cascading the
+        # cell8 rules forward through the prompt and comparing each
+        # produced byte against the expected byte for that position.
+        # This corrects bundles that wrote byte_matched=True by default
+        # regardless of the trainer's actual outcome (the cell8
+        # generator pre-fix had this bug).
+        if verify:
+            import numpy as np
+            from caformer import board256 as _b256
+            log(f'  verifying cell8 records by cascade-forward …')
+            n_groups = 0
+            n_flipped_true = 0
+            n_flipped_false = 0
+            for (pk, shape, port_src), pos_info in bucket.items():
+                if shape != SHAPE_CELL8:
+                    continue
+                pair = pairs.get(pk)
+                if pair is None:
+                    continue
+                expected = pair.expected.encode('utf-8')
+                n_bytes = len(expected)
+                rule_len = SHAPE_LEN[SHAPE_CELL8]
+                # Build per-position rules; missing positions fall back
+                # to a zero rule so the cascade still runs (it will
+                # produce wrong bytes at those positions, correctly
+                # flagged as not-matched).
+                zero_blob = bytes(rule_len)
+                rules = [np.frombuffer(
+                            pos_info.get(i, (zero_blob, False))[0],
+                            dtype=np.uint8)
+                         for i in range(n_bytes)]
+                try:
+                    produced = _b256.forward_pair_board256_positional(
+                        pair.prompt, rules, n_bytes,
+                        n_ticks=_b256.DEFAULT_N_TICKS_256, port_value=0)
+                except Exception as e:                       # noqa: BLE001
+                    log(f'  verify: pk={pk} cascade failed ({e}); '
+                        f'leaving byte_matched flags untouched')
+                    continue
+                n_groups += 1
+                for i, (blob, old_matched) in list(pos_info.items()):
+                    new_matched = (i < len(produced)
+                                       and produced[i] == expected[i])
+                    if new_matched != old_matched:
+                        if new_matched: n_flipped_true += 1
+                        else:           n_flipped_false += 1
+                    pos_info[i] = (blob, new_matched)
+            log(f'  verify: {n_groups} cell8 groups cascaded; '
+                f'{n_flipped_true} positions flipped to matched, '
+                f'{n_flipped_false} flipped to not-matched\n')
 
         # Plan + execute upserts.
         n_writes = 0

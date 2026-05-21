@@ -46,7 +46,16 @@ class Command(BaseCommand):
         parser.add_argument('--slug', type=str, required=True)
         parser.add_argument('--pair-pks', type=str, required=True,
                               help="'1-35,42' | 'all' | 'exact'")
-        parser.add_argument('--array-size', type=int, default=32)
+        parser.add_argument('--array-size', type=int, default=32,
+                              help='legacy pair-slicing mode: number of '
+                                     'array tasks (ignored when '
+                                     '--positions-per-task > 0)')
+        parser.add_argument('--positions-per-task', type=int, default=0,
+                              help='if >0, slice the corpus into chunks of '
+                                     'this many independent (pair, position) '
+                                     'items per array task.  Use when each '
+                                     'task must fit a short-queue walltime '
+                                     '(e.g. cpu-short / 4 h on ALICE).')
         parser.add_argument('--max-seconds-per-pos', type=float, default=180.0)
         parser.add_argument('--n-ticks', type=int, default=256)
         parser.add_argument('--no-warm-start', action='store_true')
@@ -56,9 +65,9 @@ class Command(BaseCommand):
                               default='alice')
         parser.add_argument('--ssh-user', type=str, default='handyca')
 
-    def handle(self, *, slug, pair_pks, array_size, max_seconds_per_pos,
-                 n_ticks, no_warm_start, time_limit, mem_per_task,
-                 ssh_host, ssh_user, **opts):
+    def handle(self, *, slug, pair_pks, array_size, positions_per_task,
+                 max_seconds_per_pos, n_ticks, no_warm_start, time_limit,
+                 mem_per_task, ssh_host, ssh_user, **opts):
         from caformer.models import QRPair
         from conduit.alice.caformer_cell8 import (BundleParams,
                                                           export_pairs_for_bundle,
@@ -73,6 +82,7 @@ class Command(BaseCommand):
         params = BundleParams(
             slug=slug, pair_pks=pks, pairs=pairs,
             array_size=array_size,
+            positions_per_task=positions_per_task,
             max_seconds_per_pos=max_seconds_per_pos,
             n_ticks=n_ticks,
             warm_start=not no_warm_start,
@@ -83,9 +93,22 @@ class Command(BaseCommand):
         bundle_dir = repo_root / 'conduit' / 'alice' / 'bundles' / slug
         generate_bundle(bundle_dir, params)
 
-        print(f'\n=== bundle written: {bundle_dir} ===')
-        print(f'  {len(pairs)} pairs, array_size={array_size}, '
-              f'~{((len(pairs) * 5 * max_seconds_per_pos) / 3600):.1f} CPU-hr total')
+        total_positions = sum(len(p['expected'].encode('utf-8'))
+                              for p in pairs)
+        if positions_per_task > 0:
+            n_array = (total_positions + positions_per_task - 1) // positions_per_task
+            per_task_walltime = positions_per_task * max_seconds_per_pos
+            print(f'\n=== bundle written: {bundle_dir} ===')
+            print(f'  {len(pairs)} pairs, {total_positions} positions, '
+                  f'positions_per_task={positions_per_task}, '
+                  f'array_size={n_array}')
+            print(f'  per-task walltime ≈ {per_task_walltime/3600:.2f} h '
+                  f'(of {time_limit} SLURM limit)')
+            print(f'  total CPU ≈ {(total_positions * max_seconds_per_pos)/3600:.1f} CPU-hr')
+        else:
+            print(f'\n=== bundle written: {bundle_dir} ===')
+            print(f'  {len(pairs)} pairs, array_size={array_size}, '
+                  f'~{((len(pairs) * 5 * max_seconds_per_pos) / 3600):.1f} CPU-hr total')
         print(f'\n  Next steps:')
         print(f'    bash {bundle_dir}/push.sh')
         print(f'    ssh {ssh_user}@{ssh_host}; cd ~/velour-dev/.alice_bundles/{slug}; sbatch submit.sh')

@@ -60,6 +60,11 @@ class BundleParams:
     pairs:    List[dict] = field(default_factory=list)
                                           # exported pair dicts (see _resolve_pairs)
     array_size:           int = 32
+    positions_per_task:   int = 0          # 0 = legacy pair-slicing;
+                                            # >0 = position-level slicing
+                                            # (this many positions per array
+                                            # task — lets long pairs fit in
+                                            # short-queue walltimes).
     max_seconds_per_pos:  float = 180.0
     n_ticks:              int = 256
     warm_start:           bool = True
@@ -120,27 +125,72 @@ def generate_bundle(out_dir: Path, params: BundleParams) -> Path:
         raise ValueError('no pairs in BundleParams; populate via '
                             'export_pairs_for_bundle()')
 
-    # Slice pairs across array tasks.
-    array_size = max(1, int(params.array_size))
-    if array_size > n_pairs:
-        array_size = n_pairs       # don't allocate empty slots
-    slice_size = (n_pairs + array_size - 1) // array_size
+    # Slice mode.  positions_per_task > 0 → flatten the corpus into a
+    # list of (pk, position, target_byte) items and slice THOSE across
+    # array tasks, so a single long pair gets split across multiple
+    # tasks.  Required when each array task must fit a short-queue
+    # walltime (e.g. ALICE cpu-short at 4h).  Legacy mode (== 0)
+    # slices whole pairs into tasks; each task trains a pair end-to-end.
+    positions_per_task = max(0, int(params.positions_per_task))
 
-    for task_id in range(array_size):
-        lo = task_id * slice_size
-        hi = min(n_pairs, lo + slice_size)
-        task_pairs = pairs[lo:hi] if lo < hi else []
-        (out_dir / 'inputs' / f'{task_id:03d}.json').write_text(
-            json.dumps({
-                'task_id':            task_id,
-                'slice_lo':           lo,
-                'slice_hi':           hi,
-                'seed_base':          (params.seed_base ^ task_id) & 0xFFFFFFFF,
-                'max_seconds_per_pos': params.max_seconds_per_pos,
-                'n_ticks':            params.n_ticks,
-                'warm_start':         bool(params.warm_start),
-                'pairs':              task_pairs,
-            }, indent=2))
+    if positions_per_task > 0:
+        # Build the flat item list.  Each item is a single
+        # (pair, position) training job.
+        items: List[dict] = []
+        for pair in pairs:
+            expected_bytes = pair['expected'].encode('utf-8')
+            warm = pair.get('warm_start_hex') or []
+            for pos, tb in enumerate(expected_bytes):
+                it = {
+                    'pk':          int(pair['pk']),
+                    'prompt':      pair['prompt'],
+                    'position':    pos,
+                    'target_byte': int(tb),
+                }
+                if pos < len(warm):
+                    it['warm_start_hex'] = warm[pos]
+                items.append(it)
+        n_items = len(items)
+        if n_items == 0:
+            raise ValueError('position-slice mode: no positions in input')
+        array_size = (n_items + positions_per_task - 1) // positions_per_task
+        for task_id in range(array_size):
+            lo = task_id * positions_per_task
+            hi = min(n_items, lo + positions_per_task)
+            (out_dir / 'inputs' / f'{task_id:03d}.json').write_text(
+                json.dumps({
+                    'task_id':            task_id,
+                    'slice_lo':           lo,
+                    'slice_hi':           hi,
+                    'slice_mode':         'position',
+                    'seed_base':          (params.seed_base ^ task_id) & 0xFFFFFFFF,
+                    'max_seconds_per_pos': params.max_seconds_per_pos,
+                    'n_ticks':            params.n_ticks,
+                    'warm_start':         bool(params.warm_start),
+                    'items':              items[lo:hi],
+                }, indent=2))
+    else:
+        # Legacy pair-level slicing.
+        array_size = max(1, int(params.array_size))
+        if array_size > n_pairs:
+            array_size = n_pairs       # don't allocate empty slots
+        slice_size = (n_pairs + array_size - 1) // array_size
+        for task_id in range(array_size):
+            lo = task_id * slice_size
+            hi = min(n_pairs, lo + slice_size)
+            task_pairs = pairs[lo:hi] if lo < hi else []
+            (out_dir / 'inputs' / f'{task_id:03d}.json').write_text(
+                json.dumps({
+                    'task_id':            task_id,
+                    'slice_lo':           lo,
+                    'slice_hi':           hi,
+                    'slice_mode':         'pair',
+                    'seed_base':          (params.seed_base ^ task_id) & 0xFFFFFFFF,
+                    'max_seconds_per_pos': params.max_seconds_per_pos,
+                    'n_ticks':            params.n_ticks,
+                    'warm_start':         bool(params.warm_start),
+                    'pairs':              task_pairs,
+                }, indent=2))
 
     # Vendor pure-numpy modules.
     repo_root = Path(__file__).resolve().parent.parent.parent
@@ -189,28 +239,30 @@ def main(task_id):
     log_path = BUNDLE / 'outputs' / f'{task_id:03d}.log'
 
     cfg = json.loads(in_path.read_text())
-    pairs = cfg['pairs']
     seed_base    = cfg['seed_base']
     max_seconds  = cfg['max_seconds_per_pos']
     n_ticks      = cfg['n_ticks']
     warm_start   = bool(cfg.get('warm_start', False))
+    slice_mode   = cfg.get('slice_mode', 'pair')
 
-    log_lines = [f'task_id={task_id}  n_pairs={len(pairs)}']
     grand_t0 = time.time()
     n_pos_total   = 0
     n_pos_matched = 0
 
-    for p_idx, pair in enumerate(pairs):
-        pk = int(pair['pk'])
-        prompt = pair['prompt']
-        expected_bytes = pair['expected'].encode('utf-8')
-        warm = pair.get('warm_start_hex') if warm_start else None
-        log_lines.append(
-            f'-- pair {p_idx+1}/{len(pairs)} pk={pk} '
-            f'expected={pair["expected"]!r} n={len(expected_bytes)} --')
-        pair_t0 = time.time()
-        for pos, tb in enumerate(expected_bytes):
-            ws_bytes = bytes.fromhex(warm[pos]) if warm and pos < len(warm) else None
+    if slice_mode == 'position':
+        # Flat-list mode: each item is one (pk, position, target_byte)
+        # training job.  No nested per-pair loop — keeps short-queue
+        # walltimes predictable since each item costs ~max_seconds.
+        items = cfg['items']
+        log_lines = [f'task_id={task_id}  n_items={len(items)}  '
+                     f'slice_mode=position']
+        for i_idx, it in enumerate(items):
+            pk     = int(it['pk'])
+            prompt = it['prompt']
+            pos    = int(it['position'])
+            tb     = int(it['target_byte'])
+            ws_hex = it.get('warm_start_hex') if warm_start else None
+            ws_bytes = bytes.fromhex(ws_hex) if ws_hex else None
             t0 = time.time()
             r = train_position_board256(
                 prompt, tb, pos,
@@ -225,13 +277,52 @@ def main(task_id):
             rec = RuleRecord(
                 pair_pk=pk, position=pos, n_ticks=n_ticks,
                 port_src='off', rule_shape=SHAPE_CELL8,
-                rule_blob=bytes(r['rule_table']))
+                rule_blob=bytes(r['rule_table']),
+                byte_matched=matched)
             append_records(out_path, [rec])
             log_lines.append(
-                f'  pos {pos:2d} target=0x{tb:02x}  '
+                f'  item {i_idx+1:3d}/{len(items)} pk={pk:4d} pos={pos:2d} '
+                f'target=0x{tb:02x}  '
                 f'{("MATCH" if matched else "miss "):6s} '
                 f'{r["phase"]:10s} {wall:6.1f}s')
-        log_lines.append(f'  pair wall {time.time()-pair_t0:.1f}s')
+    else:
+        # Legacy pair-level slicing.
+        pairs = cfg['pairs']
+        log_lines = [f'task_id={task_id}  n_pairs={len(pairs)}  '
+                     f'slice_mode=pair']
+        for p_idx, pair in enumerate(pairs):
+            pk = int(pair['pk'])
+            prompt = pair['prompt']
+            expected_bytes = pair['expected'].encode('utf-8')
+            warm = pair.get('warm_start_hex') if warm_start else None
+            log_lines.append(
+                f'-- pair {p_idx+1}/{len(pairs)} pk={pk} '
+                f'expected={pair["expected"]!r} n={len(expected_bytes)} --')
+            pair_t0 = time.time()
+            for pos, tb in enumerate(expected_bytes):
+                ws_bytes = bytes.fromhex(warm[pos]) if warm and pos < len(warm) else None
+                t0 = time.time()
+                r = train_position_board256(
+                    prompt, tb, pos,
+                    n_ticks=n_ticks,
+                    max_seconds=max_seconds,
+                    seed=(seed_base ^ (pk * 19937) ^ (pos * 4099)) & 0xFFFFFFFF,
+                    seed_rule=ws_bytes)
+                wall = time.time() - t0
+                n_pos_total += 1
+                matched = bool(r['byte_match'])
+                if matched: n_pos_matched += 1
+                rec = RuleRecord(
+                    pair_pk=pk, position=pos, n_ticks=n_ticks,
+                    port_src='off', rule_shape=SHAPE_CELL8,
+                    rule_blob=bytes(r['rule_table']),
+                    byte_matched=matched)
+                append_records(out_path, [rec])
+                log_lines.append(
+                    f'  pos {pos:2d} target=0x{tb:02x}  '
+                    f'{("MATCH" if matched else "miss "):6s} '
+                    f'{r["phase"]:10s} {wall:6.1f}s')
+            log_lines.append(f'  pair wall {time.time()-pair_t0:.1f}s')
 
     summary = (f'\\n=== task {task_id} done in {time.time()-grand_t0:.1f}s, '
                 f'{n_pos_matched}/{n_pos_total} positions matched ===\\n')
@@ -370,14 +461,19 @@ def analyse(bundle_dir: Path) -> dict:
     }
 
 
-def ingest(bundle_dir: Path) -> dict:
+def ingest(bundle_dir: Path, verify: bool = False) -> dict:
     """Read all outputs/*.rules into the live QRPair DB via
-    caformer_import_rules logic.  Returns a summary."""
+    caformer_import_rules logic.  Returns a summary.
+
+    ``verify=True`` passes --verify through to the importer, which
+    re-derives byte_matched by cascading the rules forward against
+    each pair's expected bytes.  Use it when ingesting outputs from
+    a bundle whose trainer may have mis-flagged records."""
     from django.core.management import call_command
     bd = Path(bundle_dir)
     files = sorted((bd / 'outputs').glob('*.rules'))
     if not files:
         return {'error': f'no .rules files in {bd}/outputs/'}
-    # Call the same management command path we already tested.
-    call_command('caformer_import_rules', *[str(f) for f in files])
-    return {'files': len(files), 'ingested': True}
+    kwargs = {'verify': True} if verify else {}
+    call_command('caformer_import_rules', *[str(f) for f in files], **kwargs)
+    return {'files': len(files), 'ingested': True, 'verified': bool(verify)}
