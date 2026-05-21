@@ -115,6 +115,50 @@
     <p class="small">{{ reply.sub_label }}</p>
   </div>
 
+  {% if reply.chain_used %}
+  <div class="h-section">
+    <h2>Agent chain
+      <span class="small" style="margin-left:8px;">
+        path {{ reply.path.0 }}-{{ reply.path.1 }}-{{ reply.path.2 }}-{{ reply.path.3 }}
+        · body_kind: {{ reply.chain_body_kind|default:"empty" }}
+      </span>
+    </h2>
+    <div style="display: flex; flex-direction: column; gap: 4px;
+                font-family: ui-monospace, monospace; font-size: 0.8rem;">
+      {% for step in reply.chain_steps %}
+        {% if step.action %}
+          <div style="padding: 4px 8px;
+                      border-left: 3px solid
+                        {% if step.action == 'pass' %}#30363d
+                        {% elif step.action == 'reply' %}#2ea043
+                        {% elif step.action == 'wrapper' %}#79c0ff
+                        {% elif step.action == 'announce' %}#ffd070
+                        {% elif step.action == 'hedge' %}#d29922
+                        {% elif step.action == 'clarify' %}#ff7ec7
+                        {% else %}#8b949e{% endif %};
+                      background: #0a0a0a;">
+            <b style="color:#cfc;">{{ step.agent }}</b>
+            <span style="color:#8b949e;">·</span>
+            <span style="color:#cdd;">{{ step.action }}</span>
+            {% if step.content %}
+              <span style="color:#8b949e;">·</span>
+              <span style="color:
+                {% if step.action == 'pass' %}#6e7681{% else %}#b8c4cc{% endif %};">
+                {{ step.content }}
+              </span>
+            {% endif %}
+            {% if step.detail %}
+              <span class="small" style="color:#6e7681; margin-left:6px;">
+                ({{ step.detail }})
+              </span>
+            {% endif %}
+          </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <div class="h-section">
     <h2>What the harness did</h2>
     <div class="grid">

@@ -48,6 +48,9 @@ class HarnessReply:
     tier: str = ''                           # cell8 tier when relevant
     sub_label: str = ''                      # core's own sub-label
     pure_ca: bool = True
+    chain_used: bool = False                 # Phase 2 path-as-chain
+    chain_steps: list[dict] = field(default_factory=list)
+    chain_body_kind: str = ''                # reply|announce|clarify|''
     error: str = ''
     extra: dict = field(default_factory=dict)
 
@@ -172,17 +175,47 @@ def run_turn(profile, prompt: str,
     reply.system_prompt = _compose_system_prompt(
         profile, cb.text, pre.name)
 
-    # 5. Dispatch.
-    core = _core_dispatch(profile, prompt)
-    reply.reply      = core['reply']
-    reply.dispatched = core['dispatched']
-    reply.engine     = core['engine']
-    reply.tier       = core['tier']
-    reply.sub_label  = core['sub_label']
-    reply.pure_ca    = core['pure_ca']
-
-    # 6. Post-process (placeholder — phases ahead add hedging, repair,
-    #    register matching).  For now we just record the verb prefix
-    #    that the UI might want to display before the reply lands.
+    # 5. Dispatch.  Two paths:
+    #
+    #  - boardstack4 + path present  → run the 4-step agent chain
+    #    (Phase 2): each colour in the path triggers one sub-agent,
+    #    and the assembler stitches their contributions into one
+    #    reply.
+    #  - otherwise (router, or boardstack4 with no path)  → original
+    #    single-step cell8 dispatch.
+    if pre.path is not None:
+        from . import agents as _agents
+        chain_state = _agents.run_chain(pre.path, prompt, profile)
+        assembled, body_kind = _agents.assemble_reply(chain_state)
+        reply.reply = assembled
+        reply.chain_used = True
+        reply.chain_steps = list(chain_state.step_log)
+        reply.chain_body_kind = body_kind
+        # Tag the dispatched/engine fields from any cell8 reply
+        # contribution so the existing UI still shows the substrate
+        # being used.
+        info = next((c for c in chain_state.contributions
+                     if c.agent == 'information'
+                     and c.kind == 'reply'), None)
+        if info is not None:
+            # We need to know which QRPair / tier was used; re-look up
+            # from the agents.dispatch detail.
+            info_step = next((s for s in chain_state.step_log
+                              if s.get('agent') == 'information'
+                              and s.get('action') == 'reply'), None)
+            if info_step and info_step.get('detail'):
+                reply.sub_label = info_step['detail']
+            reply.engine = 'cell8'
+            reply.dispatched = 'qrpair-chain'
+        else:
+            reply.sub_label = f'chain body_kind={body_kind or "empty"}'
+    else:
+        core = _core_dispatch(profile, prompt)
+        reply.reply      = core['reply']
+        reply.dispatched = core['dispatched']
+        reply.engine     = core['engine']
+        reply.tier       = core['tier']
+        reply.sub_label  = core['sub_label']
+        reply.pure_ca    = core['pure_ca']
 
     return reply

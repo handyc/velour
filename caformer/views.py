@@ -4529,5 +4529,8 @@ def harness_reply(request):
         'tier':              reply.tier,
         'sub_label':         reply.sub_label,
         'pure_ca':           reply.pure_ca,
+        'chain_used':        reply.chain_used,
+        'chain_steps':       reply.chain_steps,
+        'chain_body_kind':   reply.chain_body_kind,
         'error':             reply.error,
     })
