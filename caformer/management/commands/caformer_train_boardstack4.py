@@ -251,6 +251,11 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('--ticks', type=int, default=TICKS)
+        parser.add_argument('--side', type=int, default=8,
+                              help='grid side N for the N×N K=4 board '
+                                     '(default 8).  Smaller boards train '
+                                     'faster; larger boards see more of '
+                                     'the prompt (side²/4 bytes).')
         parser.add_argument('--pop', type=int, default=16)
         parser.add_argument('--cell-iters', type=int, default=8000,
                               help='per-board independent-classifier '
@@ -265,7 +270,7 @@ class Command(BaseCommand):
                               default='.artifacts/boardstack4_v1')
         parser.add_argument('--seed', type=int, default=0xB04D5AC4)
 
-    def handle(self, *, ticks, pop, cell_iters, joint_iters,
+    def handle(self, *, ticks, side, pop, cell_iters, joint_iters,
                  flips_min, flips_max, diversity_weight, out_dir, seed,
                  **opts):
         def log(msg):
@@ -278,10 +283,10 @@ class Command(BaseCommand):
         log(f'  corpus: {len(CORPUS)} pairs')
         for cat, names in by_category().items():
             log(f'    {cat} ({CATEGORY_NAMES[cat]:12}): {len(names)} ex')
-        log(f'  ticks={ticks}  cell-iters={cell_iters}  '
+        log(f'  side={side}  ticks={ticks}  cell-iters={cell_iters}  '
             f'joint-iters={joint_iters}')
 
-        stims = [embed_prompt(p) for (p, _) in CORPUS]
+        stims = [embed_prompt(p, side=side) for (p, _) in CORPUS]
         targets = [c for (_, c) in CORPUS]
         M = len(targets)
 
@@ -324,6 +329,7 @@ class Command(BaseCommand):
         from caformer.boardstack4 import BoardStack4
         meta = {
             'ticks':       ticks,
+            'side':        side,
             'wall_seconds': wall,
             'stage_a_per_board_accuracy': stage_a_acc,
             'joint_final_fitness': joint_fit,

@@ -50,6 +50,11 @@ class BoardStack4:
         meta_path = self.model_dir / 'boardstack4_meta.json'
         meta = json.loads(meta_path.read_text())
         self.ticks = int(meta.get('ticks', ticks))
+        # side defaults to the module's SIDE (8) for back-compat with
+        # artifacts written before multiscale; new artifacts persist
+        # their own side in meta so different-resolution stacks can
+        # be loaded in parallel.
+        self.side = int(meta.get('side', SIDE))
         self.rules: list[np.ndarray] = []
         for i in range(N_BOARDS):
             p = self.model_dir / f'board_{i}.lut'
@@ -65,7 +70,7 @@ class BoardStack4:
 
     def cascade(self, prompt: str) -> tuple[int, int, int, int]:
         """Run the cascade and return the 4-colour path."""
-        state = embed_prompt(prompt, side=SIDE)
+        state = embed_prompt(prompt, side=self.side)
         path: list[int] = []
         for rule in self.rules:
             state = _run(rule, state, self.ticks)
@@ -75,7 +80,7 @@ class BoardStack4:
     def cascade_states(self, prompt: str) -> list[np.ndarray]:
         """Run the cascade and return all intermediate boards' final
         states (length N_BOARDS).  Useful for visualisation."""
-        state = embed_prompt(prompt, side=SIDE)
+        state = embed_prompt(prompt, side=self.side)
         out = []
         for rule in self.rules:
             state = _run(rule, state, self.ticks)
