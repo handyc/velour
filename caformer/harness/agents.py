@@ -459,6 +459,19 @@ AGENTS_BY_COLOUR: dict[int, object] = {
 # ─── Cell8 dispatch helper (shared with composer's fallback) ───────
 
 
+# Module-level cache for the (expensive) cell8 forward pass.  The
+# output bytes are a pure function of (pair_pk, tier) since the
+# cascade input is always the pair's trained prompt — never the
+# user's raw input.  Bounded in size by the total QRPair count
+# (≤ a few hundred entries today).  Manual clear via clear_forward_cache().
+_FORWARD_CACHE: dict[tuple[int, str], bytes] = {}
+
+
+def clear_forward_cache() -> None:
+    """Invalidate the cell8 forward-pass cache (call after retraining)."""
+    _FORWARD_CACHE.clear()
+
+
 def _cell8_dispatch(prompt: str, *, strict_only: bool = False) -> dict:
     """Single-prompt cell8 QRPair lookup.  Two-tier match:
 
@@ -601,24 +614,41 @@ def _cell8_dispatch(prompt: str, *, strict_only: bool = False) -> dict:
         tier = 'b256' if pair.is_cell8_b256() else None
     if tier is None:
         return {'reply': '', 'sub_label': 'no tier exact'}
-    rules = pair.cell8_rules_at_tier(tier)
-    n_bytes = len(pair.expected.encode('utf-8'))
-    # Use the QRPair's *trained* prompt for the forward pass, not the
-    # raw user prompt — the rules are byte-exact only against the
-    # exact training input, so a normalized match must still cascade
-    # the canonical training prompt to produce the byte-exact reply.
-    forward_prompt = matched_prompt
-    if tier == 'b256':
-        side, n_ticks = 256, _b256.DEFAULT_N_TICKS_256
-        produced = _b256.forward_pair_board256_positional(
-            forward_prompt, rules, n_bytes,
-            n_ticks=n_ticks, port_value=0)
+    # Forward-pass cache.  Since the cascade input is always the
+    # pair's TRAINED prompt (not the user's input), the output bytes
+    # are a pure function of (pair_pk, tier).  Cache them so the
+    # second invocation costs ~0 instead of the full forward pass
+    # — for b256 this saves several seconds per repeat dispatch.
+    cache_key = (pair.pk, tier)
+    produced = _FORWARD_CACHE.get(cache_key)
+    if produced is None:
+        rules = pair.cell8_rules_at_tier(tier)
+        n_bytes = len(pair.expected.encode('utf-8'))
+        # Use the QRPair's *trained* prompt for the forward pass, not
+        # the raw user prompt — the rules are byte-exact only against
+        # the exact training input, so a normalized / substring /
+        # fuzzy match must still cascade the canonical training
+        # prompt to produce the byte-exact reply.
+        forward_prompt = matched_prompt
+        if tier == 'b256':
+            side, n_ticks = 256, _b256.DEFAULT_N_TICKS_256
+            produced = _b256.forward_pair_board256_positional(
+                forward_prompt, rules, n_bytes,
+                n_ticks=n_ticks, port_value=0)
+        else:
+            side = TIER_SIDES[tier]
+            n_ticks = cell8_tier_geometry(side)['n_ticks_default']
+            produced = forward_pair_cell8_at_side(
+                forward_prompt, rules, n_bytes, side,
+                n_ticks=n_ticks, port_value=0)
+        _FORWARD_CACHE[cache_key] = produced
     else:
-        side = TIER_SIDES[tier]
-        n_ticks = cell8_tier_geometry(side)['n_ticks_default']
-        produced = forward_pair_cell8_at_side(
-            forward_prompt, rules, n_bytes, side,
-            n_ticks=n_ticks, port_value=0)
+        # Side / n_ticks only used for the sub_label; reconstruct.
+        if tier == 'b256':
+            side, n_ticks = 256, _b256.DEFAULT_N_TICKS_256
+        else:
+            side = TIER_SIDES[tier]
+            n_ticks = cell8_tier_geometry(side)['n_ticks_default']
     try:
         reply = produced.decode('utf-8')
     except UnicodeDecodeError:
