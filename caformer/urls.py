@@ -49,6 +49,7 @@ urlpatterns = [
     path('harness/reply/',                views.harness_reply,     name='harness_reply'),
     path('viz3d/',                        views.viz3d_view,        name='viz3d'),
     path('viz3d/state/',                  views.viz3d_state,       name='viz3d_state'),
+    path('viz3d/tree/',                   views.viz3d_tree_state,  name='viz3d_tree_state'),
     path('concept-system/',               views.concept_system_view,
                                                                     name='concept_system'),
     path('concept-system/encode/',        views.concept_system_encode,

@@ -4675,3 +4675,39 @@ def concept_system_encode(request):
             for c in concepts
         ],
     })
+
+
+@login_required
+def viz3d_tree_state(request):
+    """JSON: PICMNode tree as nodes + edges for the 3D viz tree scene.
+
+    Each node: { id, path, label, depth, branch, leaf, agent_color,
+                 token_count, parent_path }.  Edges are derived
+    client-side from parent_path.
+    """
+    from caformer.models import PICMNode
+    nodes = []
+    for n in PICMNode.objects.all().order_by('tree_path'):
+        path = n.tree_path
+        depth = n.depth
+        branch = n.branch_index
+        parent_path = n.parent_path
+        # Agent colour = first segment of the path = 0..3.
+        agent_color = int(path.split('.', 1)[0]) if path else -1
+        nodes.append({
+            'id':           n.pk,
+            'path':         path,
+            'label':        n.label,
+            'depth':        depth,
+            'branch':       branch,
+            'is_leaf':      bool(n.is_leaf),
+            'agent_color':  agent_color,
+            'token_count':  len(n.relevance_tokens or []),
+            'parent_path':  parent_path,
+            'qrpair_label': n.qrpair_label or '',
+            'template_tag': n.template_tag or '',
+        })
+    return _json_response({
+        'nodes':      nodes,
+        'n_nodes':    len(nodes),
+    })

@@ -19,6 +19,10 @@
         border: 1px solid #555; padding: 4px 12px; cursor: pointer;
         font-family: inherit; }
   .v3d-controls button:hover { border-color: #8b949e; }
+  .v3d-scene-btn { background: #0a0a0a !important; }
+  .v3d-scene-btn.active { background: #1a3a1a !important;
+                           border-color: #2ea043 !important;
+                           color: #aaffaa !important; }
   .v3d-meta { color: #888; font-size: 0.78rem; }
   #v3d-stage { width: 100%; height: 75vh;
                 background: linear-gradient(180deg, #050505 0%, #0a0a0a 100%);
@@ -36,11 +40,17 @@
 
 <div class="v3d-page">
   <div class="v3d-header">
-    <h1>caformer / 3D walkthrough · boardstack4 cascade</h1>
-    <span class="v3d-meta">Phase 1: 4 boards × side² K=4 cells, animated tick-by-tick.</span>
+    <h1>caformer / 3D walkthrough</h1>
+    <span class="v3d-meta" id="v3d-scene-meta">Phase 1: 4 boards × side² K=4 cells, animated tick-by-tick.</span>
   </div>
 
   <div class="v3d-controls">
+    <span>scene:</span>
+    <button id="v3d-scene-boardstack" class="v3d-scene-btn" data-scene="boardstack">boardstack4</button>
+    <button id="v3d-scene-tree" class="v3d-scene-btn" data-scene="tree">PICM tree</button>
+  </div>
+
+  <div class="v3d-controls" id="v3d-bs-controls">
     <span>prompt:</span>
     <input type="text" id="v3d-prompt" value="hello"
            placeholder="prompt to cascade">
@@ -49,7 +59,6 @@
     <button id="v3d-pause">⏸ pause</button>
     <button id="v3d-step">step</button>
     <span>tick: <span id="v3d-tick">0</span></span>
-    <span>board: <span id="v3d-board">0</span></span>
     <span>fingerprint: <span id="v3d-fp" class="v3d-fingerprint">∅</span></span>
   </div>
 
@@ -104,6 +113,38 @@ scene.add(key);
 // K=4 colour palette — must match the CSS legend swatches.
 const PALETTE = [0x1a1a1a, 0x2ea043, 0x79c0ff, 0xff7ec7];
 const cellGeom = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+const nodeGeom = new THREE.SphereGeometry(0.6, 16, 12);
+const edgeMatFor = (color) => new THREE.LineBasicMaterial({
+  color, transparent: true, opacity: 0.45 });
+
+// Active scene state — we tear it down on switch.
+let SCENE_NAME = 'boardstack';
+let SCENE_OBJECTS = [];  // meshes / lines / sprites added per scene
+
+function clearScene(){
+  for (const o of SCENE_OBJECTS) scene.remove(o);
+  SCENE_OBJECTS = [];
+  for (const b of BOARDS) {
+    for (const row of b.meshes) for (const m of row) scene.remove(m);
+  }
+  BOARDS = [];
+}
+
+function makeTextSprite(text, color){
+  // Cheap text rendering — a canvas texture on a sprite.
+  const canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = color || '#cfc';
+  ctx.font = '24px ui-monospace,monospace';
+  ctx.fillText(text, 4, 40);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+  const sp = new THREE.Sprite(mat);
+  sp.scale.set(4, 1, 1);
+  return sp;
+}
 
 // Materials cache keyed by colour value.
 const matCache = {};
@@ -187,6 +228,88 @@ async function loadFromPrompt(){
     (d.final_cell00 || []).join('-') || '∅';
 }
 
+async function loadTreeScene(){
+  clearScene();
+  const r = await fetch('/caformer/viz3d/tree/');
+  const d = await r.json();
+  const nodes = d.nodes || [];
+  const byPath = {};
+  // Position nodes: y = -depth × 4 (root at top), x = branch index
+  // within depth, z = parent's x offset to spread the tree out.
+  // Compute x per (depth, parent_path) so siblings spread.
+  for (const n of nodes) {
+    const x = n.branch * 4 - 6;
+    const y = -n.depth * 6;
+    // z spread by parent x position
+    const parent = byPath[n.parent_path];
+    const z = parent ? parent.pos.z + (n.branch - 1.5) * 3 : 0;
+    n.pos = { x, y, z };
+    byPath[n.path] = n;
+    // Sphere
+    const mat = new THREE.MeshStandardMaterial({
+      color: PALETTE[n.agent_color & 3] || 0xcccccc,
+      emissive: PALETTE[n.agent_color & 3] || 0x444444,
+      emissiveIntensity: n.is_leaf ? 0.45 : 0.2,
+      roughness: 0.4, metalness: 0.1,
+    });
+    const sphere = new THREE.Mesh(nodeGeom, mat);
+    sphere.position.set(x, y, z);
+    if (n.is_leaf) sphere.scale.setScalar(1.4);
+    scene.add(sphere);
+    SCENE_OBJECTS.push(sphere);
+    // Label
+    const label = makeTextSprite(`${n.label}${n.is_leaf?' ★':''}`,
+      '#' + (PALETTE[n.agent_color & 3] | 0).toString(16).padStart(6,'0'));
+    label.position.set(x, y + 1.2, z);
+    scene.add(label);
+    SCENE_OBJECTS.push(label);
+  }
+  // Edges
+  for (const n of nodes) {
+    if (!n.parent_path) continue;
+    const p = byPath[n.parent_path];
+    if (!p) continue;
+    const geom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(p.pos.x, p.pos.y, p.pos.z),
+      new THREE.Vector3(n.pos.x, n.pos.y, n.pos.z),
+    ]);
+    const line = new THREE.Line(geom,
+      edgeMatFor(PALETTE[n.agent_color & 3] || 0x888888));
+    scene.add(line);
+    SCENE_OBJECTS.push(line);
+  }
+  // Recenter camera target.
+  controls.target.set(0, -nodes.length ? -(Math.max(...nodes.map(n=>n.depth)) * 6)/2 : 0, 0);
+  controls.update();
+  document.getElementById('v3d-scene-meta').textContent =
+    `Phase 2: PICM tree (${nodes.length} nodes; leaves marked ★)`;
+}
+
+function switchScene(name){
+  SCENE_NAME = name;
+  // Toggle button highlight.
+  for (const btn of document.querySelectorAll('.v3d-scene-btn')) {
+    btn.classList.toggle('active', btn.dataset.scene === name);
+  }
+  // Show/hide the boardstack-specific controls.
+  const bsControls = document.getElementById('v3d-bs-controls');
+  if (bsControls) bsControls.style.display = (name === 'boardstack')
+    ? '' : 'none';
+  if (name === 'boardstack') {
+    document.getElementById('v3d-scene-meta').textContent =
+      'Phase 1: 4 boards × side² K=4 cells, animated tick-by-tick.';
+    clearScene();
+    loadFromPrompt();
+  } else if (name === 'tree') {
+    playing = false;
+    loadTreeScene();
+  }
+}
+
+for (const btn of document.querySelectorAll('.v3d-scene-btn')) {
+  btn.addEventListener('click', () => switchScene(btn.dataset.scene));
+}
+
 document.getElementById('v3d-load').addEventListener('click', loadFromPrompt);
 document.getElementById('v3d-play').addEventListener('click', () => playing = true);
 document.getElementById('v3d-pause').addEventListener('click', () => playing = false);
@@ -214,6 +337,6 @@ window.addEventListener('resize', () => {
 });
 
 requestAnimationFrame(animate);
-loadFromPrompt();
+switchScene('boardstack');
 </script>
 {% endblock %}
