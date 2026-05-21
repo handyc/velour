@@ -470,6 +470,7 @@ def _cell8_dispatch(prompt: str) -> dict:
             best_fuzzy_pair = None
             best_fuzzy_score = 0.0
             FUZZY_THRESHOLD = 0.50
+            FUZZY_JACCARD_GATE = 0.30
             for cand in QRPair.objects.filter(exact_filter).only(
                     'pk', 'prompt'):
                 cand_norm = _norm.lower_no_punct(cand.prompt)
@@ -491,14 +492,19 @@ def _cell8_dispatch(prompt: str) -> dict:
                 # Tier 4 candidate: combine token overlap (Jaccard)
                 # with char-level similarity (Ratcliff/Obershelp via
                 # difflib — same general shape as normalised
-                # Levenshtein for narrowing).  Take the max of the
-                # two so either signal can promote a candidate.
-                # Require ≥ 8 chars in the trained prompt so tiny
-                # pairs (which fuzzy-score high on every short user
-                # prompt) don't capture matches.
+                # Levenshtein for narrowing).  Require Jaccard as
+                # a GATE (≥ 0.30) before considering char_sim: this
+                # prevents char-similarity-alone from promoting
+                # semantically-distant pairs that happen to share
+                # short common words like 'to'/'the'/'a'.  Among
+                # gated candidates, score = max(jaccard, char_sim).
+                #
+                # Min 8 chars on trained prompt skips tiny pairs.
                 if len(cand_norm) < 8:
                     continue
                 jac = _norm.jaccard(prompt, cand.prompt)
+                if jac < FUZZY_JACCARD_GATE:
+                    continue
                 char_sim = difflib.SequenceMatcher(
                     None, reduced_user, cand_norm).ratio()
                 score = max(jac, char_sim)
