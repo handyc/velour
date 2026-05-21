@@ -71,23 +71,57 @@ def _fitness_single(lut_arr, stims, targets, ticks):
 
 def _evolve_single(stims, targets, ticks, iters, pop,
                       flips_min, flips_max, seed, log, label):
+    """Evolve one independent classifier LUT.  Logs at three cadences:
+
+      - INIT progress: every N candidates evaluated during pool seeding
+      - ACCEPT: whenever a new global best fitness is recorded
+      - HEARTBEAT: every N iters with current best + iters/sec + ETA
+        — so flat stretches still feel alive.
+
+    All cadences scale with pop/iters so the log doesn't drown the
+    terminal at small runs or fall silent on large ones."""
+    import time
+
     rng = random.Random(seed)
     M = len(targets)
     pop_list = []
+    log(f'    {label} init: seeding {pop} candidates …')
+    t0_init = time.time()
+    init_log_every = max(1, pop // 16)
+    # const-LUT seeds first (one per K=4 value)
     for v in range(N_STATES):
         lut = _const_lut(v)
         arr = np.frombuffer(lut, dtype=np.uint8) & 3
         pop_list.append((lut, _fitness_single(arr, stims, targets, ticks)))
-    for _ in range(max(0, pop - N_STATES)):
+    # random filler
+    for i in range(max(0, pop - N_STATES)):
         lut = _random_lut(rng)
         arr = np.frombuffer(lut, dtype=np.uint8) & 3
         pop_list.append((lut, _fitness_single(arr, stims, targets, ticks)))
+        n_done = len(pop_list)
+        if n_done % init_log_every == 0 or n_done == pop:
+            elapsed = time.time() - t0_init
+            rate = n_done / max(elapsed, 1e-6)
+            remaining = (pop - n_done) / max(rate, 1e-6)
+            best_so_far = max(p[1] for p in pop_list)
+            log(f'    {label} init: {n_done:>5}/{pop} '
+                f'({100*n_done/pop:5.1f}%)  '
+                f'best={best_so_far}/{M}  '
+                f'{rate:.1f} cand/s  '
+                f'ETA {remaining:.0f}s')
     pop_list.sort(key=lambda x: -x[1])
     best_lut, best_n = pop_list[0]
-    log(f'    {label} init: best={best_n}/{M}')
-    last = 0
+    init_wall = time.time() - t0_init
+    log(f'    {label} init done in {init_wall:.1f}s · best={best_n}/{M}')
+
+    last_accept_it = 0
+    t0_loop = time.time()
+    heartbeat_every = max(50, iters // 40)   # ~40 heartbeats per run
+    next_heartbeat = heartbeat_every
     for it in range(iters):
         if best_n >= M:
+            log(f'    {label} it {it:>5}: PERFECT {best_n}/{M} — '
+                f'stopping early')
             break
         parent = pop_list[rng.randrange(max(1, pop // 2))]
         child = _mutate(parent[0], rng,
@@ -102,9 +136,17 @@ def _evolve_single(stims, targets, ticks, iters, pop,
             pop_list[worst_idx] = (child, fit)
             if fit > best_n:
                 best_lut, best_n = child, fit
-                if it - last >= 100:
+                if it - last_accept_it >= 100:
                     log(f'    {label} it {it:>5}: ACCEPT {best_n}/{M}')
-                    last = it
+                    last_accept_it = it
+        if it >= next_heartbeat:
+            elapsed = time.time() - t0_loop
+            rate = (it + 1) / max(elapsed, 1e-6)
+            remaining = (iters - it - 1) / max(rate, 1e-6)
+            log(f'    {label} hb {it:>5}/{iters} '
+                f'({100*it/iters:4.1f}%)  best={best_n}/{M}  '
+                f'{rate:.0f} it/s  ETA {remaining:.0f}s')
+            next_heartbeat += heartbeat_every
     return best_lut, best_n
 
 
@@ -160,15 +202,23 @@ def _fitness_joint(luts_arr, stims, targets, ticks,
 
 def _evolve_joint(luts, stims, targets, ticks, iters, flips_min,
                       flips_max, seed, diversity_weight, log):
+    """Joint cascade fine-tune.  Single-genome hill climb (no pop),
+    one board mutated per iter.  Same logging shape as _evolve_single:
+    ACCEPT on improvement, heartbeat at fixed intervals so flat
+    stretches still report progress."""
+    import time
+
     rng = random.Random(seed)
     luts_arr = [np.frombuffer(l, dtype=np.uint8).copy() & 3 for l in luts]
     best_luts = [bytes(l) for l in luts]
     best_fit = _fitness_joint(luts_arr, stims, targets, ticks,
                                   diversity_weight=diversity_weight)
     log(f'  joint init: fit={best_fit:.4f}')
-    last = 0
+    last_accept_it = 0
+    t0 = time.time()
+    heartbeat_every = max(50, iters // 40)
+    next_heartbeat = heartbeat_every
     for it in range(iters):
-        # Mutate ONE of the 4 boards, pick which uniformly.
         which = rng.randrange(N_BOARDS)
         n_flips = rng.randint(flips_min, flips_max)
         new_lut = _mutate(best_luts[which], rng, n_flips)
@@ -181,10 +231,18 @@ def _evolve_joint(luts, stims, targets, ticks, iters, flips_min,
         if fit > best_fit:
             best_luts = cand
             best_fit = fit
-            if it - last >= 50:
+            if it - last_accept_it >= 50:
                 log(f'  joint it {it:>5}: ACCEPT board {which}, '
                     f'fit={best_fit:.4f}')
-                last = it
+                last_accept_it = it
+        if it >= next_heartbeat:
+            elapsed = time.time() - t0
+            rate = (it + 1) / max(elapsed, 1e-6)
+            remaining = (iters - it - 1) / max(rate, 1e-6)
+            log(f'  joint hb {it:>5}/{iters} '
+                f'({100*it/iters:4.1f}%)  fit={best_fit:.4f}  '
+                f'{rate:.0f} it/s  ETA {remaining:.0f}s')
+            next_heartbeat += heartbeat_every
     return best_luts, best_fit
 
 
