@@ -388,20 +388,39 @@ def _cell8_dispatch(prompt: str) -> dict:
     matched_prompt: str = prompt
     pair = (QRPair.objects.filter(prompt=prompt).filter(exact_filter).first())
     if pair is None:
-        # Fall back to reduced-form lookup.  Scan only QRPairs that
-        # already have at least one cell8 tier exact — cheap because
-        # the corpus is ≤ a few hundred rows.
-        reduced = _norm.lower_no_punct(prompt)
-        if reduced:
+        # Three-tier fallback when exact match misses.  Reduced lookup
+        # tries normalised equality; substring tries containment.
+        # Both share a single pass over the candidate set.
+        reduced_user = _norm.lower_no_punct(prompt)
+        if reduced_user:
+            best_substring_pair = None
+            best_substring_len = -1
             for cand in QRPair.objects.filter(exact_filter).only(
                     'pk', 'prompt'):
-                if _norm.lower_no_punct(cand.prompt) == reduced:
+                cand_norm = _norm.lower_no_punct(cand.prompt)
+                if not cand_norm:
+                    continue
+                if cand_norm == reduced_user:
+                    # Tier 2: normalised equality — preferred over
+                    # substring, break immediately.
                     pair = cand
                     matched_prompt = cand.prompt
                     match_kind = 'lower_no_punct'
                     break
+                if cand_norm in reduced_user:
+                    # Tier 3: substring match — keep the LONGEST
+                    # candidate, so 'capital of france' beats
+                    # 'france' when both are present.
+                    if len(cand_norm) > best_substring_len:
+                        best_substring_pair = cand
+                        best_substring_len = len(cand_norm)
+            if pair is None and best_substring_pair is not None:
+                pair = best_substring_pair
+                matched_prompt = best_substring_pair.prompt
+                match_kind = 'substring'
     if pair is None:
-        return {'reply': '', 'sub_label': 'no exact / reduced QRPair match'}
+        return {'reply': '', 'sub_label':
+                'no exact / reduced / substring QRPair match'}
     tier = (pair.best_cell8_tier()
             if hasattr(pair, 'best_cell8_tier') else None)
     if tier is None:
