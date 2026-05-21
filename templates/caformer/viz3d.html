@@ -68,6 +68,7 @@
     <button id="v3d-scene-tokenrules" class="v3d-scene-btn" data-scene="tokenrules">token rules</button>
     <button id="v3d-scene-chain" class="v3d-scene-btn" data-scene="chain">chain trace</button>
     <button id="v3d-scene-harness" class="v3d-scene-btn" data-scene="harness">harness</button>
+    <button id="v3d-scene-pspace" class="v3d-scene-btn" data-scene="pspace">personality space</button>
   </div>
 
   <div class="v3d-controls" id="v3d-bs-controls">
@@ -830,6 +831,142 @@ async function loadHarnessScene(){
   document.getElementById('v3d-scene-meta').textContent = meta;
 }
 
+// ── Scene: 4-D personality space (Phase 8) ────────────────────
+//
+// Three axes are spatial (X = drive, Y = expression, Z = relation),
+// the fourth (lens) is encoded as the dot's K=4 colour.  Each preset
+// PersonalityModule lands at the point given by its state_vector.
+// A live red sphere marks the state computed from the current prompt.
+
+async function loadPersonalitySpaceScene(){
+  clearScene();
+  TOKEN_FLOWERS = [];
+  const prompt = document.getElementById('v3d-prompt').value || 'hello';
+  const r = await fetch('/caformer/viz3d/personality-space/?q=' +
+                          encodeURIComponent(prompt));
+  const d = await r.json();
+  const SPACING = 4;
+  const LENS_COLORS = [0x2ea043, 0x79c0ff, 0xffd070, 0xff7ec7];
+
+  // Axis labels + ticks.
+  const axes = d.axes;         // ['drive', 'expression', 'relation', 'lens']
+  // Place a labelled tick at each value of each axis.
+  for (let ai = 0; ai < 3; ai++) {
+    const axis = axes[ai];
+    for (let v = 0; v < 4; v++) {
+      const p = new THREE.Vector3(0, 0, 0);
+      if (ai === 0) p.x = v * SPACING;
+      if (ai === 1) p.y = v * SPACING;
+      if (ai === 2) p.z = v * SPACING;
+      const lab = makeTextSprite(`${axis}=${d.axis_labels[axis][v]}`, '#9ecbff');
+      lab.position.copy(p);
+      lab.position.y -= 1.5;
+      lab.scale.set(4, 1, 1);
+      scene.add(lab);
+      SCENE_OBJECTS.push(lab);
+    }
+  }
+
+  // Axis line guides — X red, Y green, Z blue (mild).
+  const axisColors = [0x553333, 0x335533, 0x333355];
+  const maxL = 3 * SPACING + 1;
+  for (let ai = 0; ai < 3; ai++) {
+    const a = [0, 0, 0], b = [0, 0, 0];
+    b[ai] = maxL;
+    const g = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(...a), new THREE.Vector3(...b) ]);
+    const l = new THREE.Line(g, new THREE.LineBasicMaterial({
+      color: axisColors[ai], transparent: true, opacity: 0.5 }));
+    scene.add(l);
+    SCENE_OBJECTS.push(l);
+  }
+
+  // Lens-colour legend (small floating swatches in the corner).
+  for (let k = 0; k < 4; k++) {
+    const swatch = new THREE.Mesh(
+      new THREE.BoxGeometry(0.6, 0.6, 0.6),
+      new THREE.MeshStandardMaterial({
+        color: LENS_COLORS[k], emissive: LENS_COLORS[k],
+        emissiveIntensity: 0.4 }));
+    swatch.position.set(-5, 12 - k * 1.2, -2);
+    scene.add(swatch);
+    SCENE_OBJECTS.push(swatch);
+    const lab = makeTextSprite(
+      `lens=${d.axis_labels.lens[k]}`,
+      '#' + LENS_COLORS[k].toString(16).padStart(6, '0'));
+    lab.position.set(-3.2, 12 - k * 1.2, -2);
+    lab.scale.set(3.5, 0.9, 1);
+    scene.add(lab);
+    SCENE_OBJECTS.push(lab);
+  }
+
+  // Presets — labeled spheres at their (drive, expression, relation)
+  // coordinates, coloured by lens value.
+  for (const p of d.presets) {
+    const [drive, expression, relation, lens] = p.state;
+    const sphere = new THREE.Mesh(
+      new THREE.SphereGeometry(0.8, 24, 18),
+      new THREE.MeshStandardMaterial({
+        color: LENS_COLORS[lens & 3],
+        emissive: LENS_COLORS[lens & 3],
+        emissiveIntensity: 0.55,
+        roughness: 0.35, metalness: 0.1,
+      }));
+    sphere.position.set(drive * SPACING, expression * SPACING, relation * SPACING);
+    sphere.userData = {
+      label: p.name,
+      phase: `preset · state=(${p.state.join(', ')})`,
+      desc: p.description,
+    };
+    scene.add(sphere);
+    SCENE_OBJECTS.push(sphere);
+    const lab = makeTextSprite(p.name, '#cdd');
+    lab.position.set(drive * SPACING, expression * SPACING + 1.4,
+                      relation * SPACING);
+    lab.scale.set(5, 1.3, 1);
+    scene.add(lab);
+    SCENE_OBJECTS.push(lab);
+  }
+
+  // Live state (red sphere if a prompt was supplied).
+  if (d.live) {
+    const [drive, expression, relation, lens] = d.live.state;
+    const live = new THREE.Mesh(
+      new THREE.SphereGeometry(1.0, 24, 18),
+      new THREE.MeshStandardMaterial({
+        color: 0xff5050, emissive: 0xff5050,
+        emissiveIntensity: 0.85,
+        roughness: 0.3, metalness: 0.1,
+        wireframe: false,
+      }));
+    live.position.set(drive * SPACING, expression * SPACING, relation * SPACING);
+    live.userData = {
+      label: `live state for "${d.prompt}"`,
+      phase: `state=(${d.live.state.join(', ')})`,
+      desc: `${d.live.labels.drive} · ${d.live.labels.expression} `
+          + `· ${d.live.labels.relation} · ${d.live.labels.lens}`,
+    };
+    scene.add(live);
+    SCENE_OBJECTS.push(live);
+    const lab = makeTextSprite(
+      `▶ ${d.prompt}`, '#ff8080');
+    lab.position.set(drive * SPACING, expression * SPACING - 1.5,
+                      relation * SPACING);
+    lab.scale.set(6, 1.4, 1);
+    scene.add(lab);
+    SCENE_OBJECTS.push(lab);
+  }
+
+  // Frame on the centroid.
+  controls.target.set(1.5 * SPACING, 1.5 * SPACING, 1.5 * SPACING);
+  camera.position.set(1.5 * SPACING + 14, 1.5 * SPACING + 8,
+                       1.5 * SPACING + 18);
+  controls.update();
+  document.getElementById('v3d-scene-meta').textContent =
+    `Phase 8: 4-D personality space · ${d.presets.length} presets `
+  + `+ live state for "${d.prompt}"`;
+}
+
 // ── Click info panel (Phase 5: annotations) ───────────────────
 //
 // Mouse-click hits a raycaster against the current scene's meshes.
@@ -930,6 +1067,9 @@ function switchScene(name){
   } else if (name === 'harness') {
     playing = false;
     loadHarnessScene();
+  } else if (name === 'pspace') {
+    playing = false;
+    loadPersonalitySpaceScene();
   }
   _hideInfo();
 }

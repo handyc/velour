@@ -63,6 +63,8 @@ urlpatterns = [
                                                                     name='viz3d_chain_trace_state'),
     path('viz3d/harness/',                views.viz3d_harness_state,
                                                                     name='viz3d_harness_state'),
+    path('viz3d/personality-space/',      views.viz3d_personality_space_state,
+                                                                    name='viz3d_personality_space_state'),
     path('concept-system/',               views.concept_system_view,
                                                                     name='concept_system'),
     path('concept-system/encode/',        views.concept_system_encode,

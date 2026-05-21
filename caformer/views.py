@@ -5363,3 +5363,42 @@ def personality_modules_view(request):
         'axes': AXES,
         'axis_labels': AXIS_LABELS,
     })
+
+
+@login_required
+def viz3d_personality_space_state(request):
+    """JSON: the 4-D personality space with each preset as a labeled
+    point.  Axes map to X (drive), Y (expression), Z (relation); lens
+    is encoded as the dot's K=4 colour."""
+    prompt = (request.GET.get('q') or '').strip()
+    from caformer.harness.personality_state import (
+        AXES, AXIS_LABELS, refresh_labels_from_db,
+        preset_for_module, compute_state)
+    from caformer.models import PersonalityModule
+    refresh_labels_from_db()
+
+    presets = []
+    for m in PersonalityModule.objects.filter(kind='preset'):
+        sv = m.state_vector or [0, 0, 0, 0]
+        if len(sv) < 4:
+            continue
+        presets.append({
+            'slug':  m.slug,
+            'name':  m.name,
+            'state': [int(v) & 3 for v in sv[:4]],
+            'description': m.description,
+        })
+    live_state = None
+    if prompt:
+        s = compute_state(prompt)
+        live_state = {
+            'state':  list(s.as_tuple()),
+            'labels': s.labels(),
+        }
+    return _json_response({
+        'axes':       list(AXES),
+        'axis_labels': {a: list(AXIS_LABELS[a]) for a in AXES},
+        'presets':    presets,
+        'live':       live_state,
+        'prompt':     prompt,
+    })
