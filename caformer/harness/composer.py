@@ -51,6 +51,22 @@ class HarnessReply:
     chain_used: bool = False                 # Phase 2 path-as-chain
     chain_steps: list[dict] = field(default_factory=list)
     chain_body_kind: str = ''                # reply|announce|clarify|''
+    # Hierarchical PICM tree descent (runs alongside boardstack4 when
+    # the latter is active; both produce a 4-colour path).
+    tree_path: str = ''                      # e.g. '1.0.2'
+    tree_label_chain: list[str] = field(default_factory=list)
+    tree_depth: int = 0
+    tree_stopped_reason: str = ''
+    tree_matches_per_level: list[list[str]] = field(default_factory=list)
+    tree_leaf_node_id: int | None = None
+    tree_vs_boardstack: dict = field(default_factory=dict)
+                                              # {'agree_per_level', 'all_agree', ...}
+    # Third deterministic prefilter: byte_router (cell8 byte-chunk
+    # cascade).  Independent of both boardstack4 and PICM tree.
+    byte_router_fingerprint: tuple[int, ...] | None = None
+    byte_router_byte_in:  int | None = None
+    byte_router_byte_chain: list[int] = field(default_factory=list)
+                                              # one byte per layer transition
     error: str = ''
     extra: dict = field(default_factory=dict)
 
@@ -174,6 +190,36 @@ def run_turn(profile, prompt: str,
     # 4. System prompt (for display + future LLM-side fallback).
     reply.system_prompt = _compose_system_prompt(
         profile, cb.text, pre.name)
+
+    # 4b. PICM tree descent — runs alongside boardstack4 when the
+    #     latter is active so both prefilters' paths can be compared.
+    if pre.path is not None:
+        from . import picm_tree as _tree
+        descent = _tree.descend(prompt)
+        reply.tree_path           = descent.path
+        reply.tree_label_chain    = list(descent.label_chain)
+        reply.tree_depth          = descent.depth
+        reply.tree_stopped_reason = descent.stopped_reason
+        reply.tree_matches_per_level = list(descent.matches_per_level)
+        reply.tree_leaf_node_id   = descent.leaf_node_id
+        reply.tree_vs_boardstack  = _tree.compare_paths(
+            descent.path_tuple(), pre.path)
+
+    # 4c. byte_router — third prefilter (cell8 byte-chunk cascade).
+    #     Always runs when boardstack4 is active.  Independent CA
+    #     substrate; surfaces a 4-symbol fingerprint per prompt.
+    if pre.path is not None:
+        try:
+            from caformer import byte_router as _br
+            br = _br.get_router()
+            br_result = br.route_prompt(prompt)
+            if br_result is not None:
+                reply.byte_router_fingerprint = br_result['fingerprint']
+                reply.byte_router_byte_in     = br_result['first_byte']
+                reply.byte_router_byte_chain  = list(
+                    br_result['bytes_intermediate'])
+        except Exception:                              # noqa: BLE001
+            pass
 
     # 5. Dispatch.  Two paths:
     #

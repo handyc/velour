@@ -82,8 +82,20 @@
         <span class="badge" title="prefilter mode">{{ reply.prefilter_mode }}</span>
         {% if reply.path %}
           <span class="badge" style="font-family: ui-monospace, monospace;"
-                title="boardstack4 4-colour path">
-            path {{ reply.path.0 }}-{{ reply.path.1 }}-{{ reply.path.2 }}-{{ reply.path.3 }}
+                title="boardstack4 4-colour cascade path (CA on 8x8 K=4 grid)">
+            bp4 {{ reply.path.0 }}-{{ reply.path.1 }}-{{ reply.path.2 }}-{{ reply.path.3 }}
+          </span>
+        {% endif %}
+        {% if reply.tree_path %}
+          <span class="badge" style="font-family: ui-monospace, monospace; color: #79c0ff;"
+                title="PICM tree descent path (vocab match per level)">
+            tree {{ reply.tree_path }}{% if reply.tree_leaf_node_id %} ★{% endif %}
+          </span>
+        {% endif %}
+        {% if reply.byte_router_fingerprint %}
+          <span class="badge" style="font-family: ui-monospace, monospace; color: #ff7ec7;"
+                title="byte_router fingerprint (cell8 byte-chunk cascade, untrained Phase 1)">
+            br {{ reply.byte_router_fingerprint.0 }}-{{ reply.byte_router_fingerprint.1 }}-{{ reply.byte_router_fingerprint.2 }}-{{ reply.byte_router_fingerprint.3 }}
           </span>
         {% endif %}
       {% else %}

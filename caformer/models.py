@@ -710,3 +710,91 @@ class TemplatePattern(models.Model):
 
     def __str__(self) -> str:
         return f'[{self.get_agent_color_display()}] {self.pattern}'
+
+
+class PICMNode(models.Model):
+    """One node in the hierarchical PICM tree.
+
+    The tree is rooted implicitly; top-level nodes have ``tree_path``
+    values '0', '1', '2', '3' (one per boardstack4 routing colour).
+    Children append a dot + branch index: '1.0', '1.0.2', etc.
+    Up to four levels deep (4^4 = 256 leaves).
+
+    Descent at runtime walks one level at a time: at each level, every
+    candidate child node's ``relevance_tokens`` is scored against the
+    prompt; the child with the most matches wins.  If no children
+    match, descent stops at the current node.
+
+    Leaves connect to a labelled subset of QRPairs (via
+    ``qrpair_label``) and a tag-filtered set of TemplatePatterns (via
+    ``template_tag``).  When a leaf is hit, only those subsets are
+    consulted for dispatch — giving each leaf a *specialised* response
+    repertoire."""
+
+    tree_path = models.CharField(
+        max_length=16, unique=True,
+        help_text='Dot-separated path of K=4 branch indices.  '
+                  "Top level: '0'..'3'.  Children: '0.2', '1.3.0', etc. "
+                  'Max depth 4 (= 8 chars including dots).')
+    label = models.CharField(
+        max_length=80,
+        help_text='Short human-readable name for this node, e.g. '
+                  "'information', 'who-queries', 'historical-person'.")
+    description = models.TextField(blank=True)
+    relevance_tokens = models.JSONField(
+        default=list,
+        help_text='Tokens whose presence in the prompt signals this '
+                  'branch is the right descent.  Short (≤ 4 char) '
+                  'tokens, matched on word boundaries case-insensitively.')
+    is_leaf = models.BooleanField(
+        default=False,
+        help_text='When True, descent halts here and the harness '
+                  'dispatches using this node\'s qrpair_label + '
+                  'template_tag scopes.')
+    qrpair_label = models.CharField(
+        max_length=80, blank=True,
+        help_text='When set, leaf dispatch consults only QRPairs '
+                  'with this exact label value.')
+    template_tag = models.CharField(
+        max_length=80, blank=True,
+        help_text='When set, leaf dispatch consults only '
+                  'TemplatePatterns whose notes field contains this '
+                  'tag (case-insensitive substring).')
+    confidence = models.FloatField(
+        default=0.7,
+        help_text='Confidence reported when this leaf produces a '
+                  'reply.  0..1.')
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('tree_path',)
+        indexes = [
+            models.Index(fields=['tree_path']),
+        ]
+
+    def __str__(self) -> str:
+        return f'PICMNode {self.tree_path or "(root)"} · {self.label}'
+
+    @property
+    def depth(self) -> int:
+        """0 for top-level nodes (path '0'..'3'), 1 for '0.0'..'3.3'."""
+        if not self.tree_path:
+            return -1
+        return self.tree_path.count('.')
+
+    @property
+    def branch_index(self) -> int:
+        """The K=4 colour this node represents at its level (last
+        component of the path)."""
+        if not self.tree_path:
+            return -1
+        return int(self.tree_path.rsplit('.', 1)[-1])
+
+    @property
+    def parent_path(self) -> str:
+        """Path of the parent node, or '' if this is top-level."""
+        if '.' not in self.tree_path:
+            return ''
+        return self.tree_path.rsplit('.', 1)[0]

@@ -4532,5 +4532,16 @@ def harness_reply(request):
         'chain_used':        reply.chain_used,
         'chain_steps':       reply.chain_steps,
         'chain_body_kind':   reply.chain_body_kind,
+        'tree_path':         reply.tree_path,
+        'tree_label_chain':  reply.tree_label_chain,
+        'tree_depth':        reply.tree_depth,
+        'tree_stopped':      reply.tree_stopped_reason,
+        'tree_matches':      reply.tree_matches_per_level,
+        'tree_leaf':         reply.tree_leaf_node_id,
+        'tree_vs_bp4':       reply.tree_vs_boardstack,
+        'br_fingerprint':    list(reply.byte_router_fingerprint)
+                             if reply.byte_router_fingerprint else None,
+        'br_byte_in':        reply.byte_router_byte_in,
+        'br_byte_chain':     reply.byte_router_byte_chain,
         'error':             reply.error,
     })
