@@ -234,6 +234,19 @@ TEMPLATES_LIVE = [
         '(resolved by concept_gloss handler)',
         0.80, 'concept gloss only', 'concept_gloss'),
 
+    (3, 1, 'what can you do',
+        '(resolved by capabilities handler)',
+        0.90, 'meta: enumerate handlers', 'capabilities'),
+    (3, 1, 'list your handlers',
+        '(resolved by capabilities handler)',
+        0.90, 'meta synonym', 'capabilities'),
+    (3, 1, 'describe yourself',
+        '(resolved by describe_self handler)',
+        0.90, 'meta: rich self-description', 'describe_self'),
+    (0, 1, 'who are you',
+        '(resolved by describe_self handler)',
+        0.90, 'meta self-intro on personality route', 'describe_self'),
+
     (3, 1, 'self report',
         "Branch: [handler:git_branch]\n"
         "Mood: [handler:mood]\n"

@@ -243,6 +243,22 @@ def _h_concept_gloss(slots: dict[str, str]) -> str:
     return '; '.join(parts)
 
 
+def _h_capabilities(slots: dict[str, str]) -> str:
+    """Meta: a one-line list of every registered handler name.  When
+    the user asks 'what can you do' this is the answer."""
+    return f'{len(HANDLERS)} handlers: ' + ', '.join(sorted(HANDLERS.keys()))
+
+
+def _h_describe_self(slots: dict[str, str]) -> str:
+    """Meta: a richer multi-paragraph self-description composing
+    mood + branch + corpus + capabilities."""
+    return (f"I'm Velour's caformer harness.  I feel {invoke('mood', {})}.  "
+            f"I'm on branch {invoke('git_branch', {})} with "
+            f"{invoke('qrpair_count', {})}.  "
+            f"My prefilters: {invoke('prefilter_state', {})}.  "
+            f"My concept space: {invoke('concept_count', {})}.")
+
+
 def _h_prefilter_state(slots: dict[str, str]) -> str:
     """Meta: report which deterministic prefilters are loaded."""
     bits: list[str] = []
@@ -355,6 +371,8 @@ HANDLERS: dict[str, Callable[[dict], str]] = {
     'to_sanskrit':      _h_to_sanskrit,
     'concept_gloss':    _h_concept_gloss,
     'prefilter_state':  _h_prefilter_state,
+    'capabilities':     _h_capabilities,
+    'describe_self':    _h_describe_self,
 }
 
 
