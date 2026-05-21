@@ -210,6 +210,39 @@ def _h_recognised_concepts(slots: dict[str, str]) -> str:
     return ' | '.join(parts)
 
 
+def _h_to_sanskrit(slots: dict[str, str]) -> str:
+    """Render slot 'X' as IAST Sanskrit surface forms only (no
+    English gloss).  For templates like 'translate [X] to sanskrit'."""
+    text = (slots.get('text') or slots.get('X') or '').strip()
+    if not text:
+        return '(no text to translate)'
+    try:
+        from caformer.concept_system import encode, surface
+        concepts = encode(text)
+    except Exception:                                # noqa: BLE001
+        return '(concept encoder unavailable)'
+    if not concepts:
+        return '(no recognised roots)'
+    return ' '.join(surface(c) for c in concepts)
+
+
+def _h_concept_gloss(slots: dict[str, str]) -> str:
+    """Render slot 'X' as English glosses only (no Sanskrit surface).
+    For 'what does X mean' style templates."""
+    text = (slots.get('text') or slots.get('X') or '').strip()
+    if not text:
+        return '(no text to gloss)'
+    try:
+        from caformer.concept_system import encode, decode
+        concepts = encode(text)
+    except Exception:                                # noqa: BLE001
+        return '(concept encoder unavailable)'
+    if not concepts:
+        return '(no recognised roots)'
+    parts = [decode(c) for c in concepts]
+    return '; '.join(parts)
+
+
 def _h_prefilter_state(slots: dict[str, str]) -> str:
     """Meta: report which deterministic prefilters are loaded."""
     bits: list[str] = []
@@ -319,6 +352,8 @@ HANDLERS: dict[str, Callable[[dict], str]] = {
     'tree_paths':       _h_tree_paths,
     'concept_count':    _h_concept_count,
     'recognised_concepts': _h_recognised_concepts,
+    'to_sanskrit':      _h_to_sanskrit,
+    'concept_gloss':    _h_concept_gloss,
     'prefilter_state':  _h_prefilter_state,
 }
 

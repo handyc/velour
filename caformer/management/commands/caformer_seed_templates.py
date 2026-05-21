@@ -220,6 +220,20 @@ TEMPLATES_LIVE = [
     (3, 1, 'prefilter state',
         '[handler:prefilter_state]',
         0.85, 'meta: which prefilters loaded', ''),
+    # Sanskrit concept system templates ──────────────────────────
+    (1, 2, 'translate [X] to sanskrit',
+        '(resolved by to_sanskrit handler)',
+        0.85, 'sanskrit translation', 'to_sanskrit'),
+    (1, 2, 'what does [X] mean in sanskrit',
+        '(resolved by recognised_concepts handler)',
+        0.85, 'sanskrit concept lookup', 'recognised_concepts'),
+    (1, 2, 'sanskrit for [X]',
+        '(resolved by to_sanskrit handler)',
+        0.85, 'sanskrit shorthand', 'to_sanskrit'),
+    (1, 3, 'gloss [X]',
+        '(resolved by concept_gloss handler)',
+        0.80, 'concept gloss only', 'concept_gloss'),
+
     (3, 1, 'self report',
         "Branch: [handler:git_branch]\n"
         "Mood: [handler:mood]\n"
