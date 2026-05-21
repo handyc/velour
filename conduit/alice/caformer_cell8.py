@@ -269,7 +269,7 @@ module load SciPy-bundle/2023.11-gfbf-2023b 2>/dev/null \
 python3 -c 'import numpy' 2>/dev/null \
   || pip install --user --quiet --disable-pip-version-check numpy
 
-cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")}"
+cd "${{SLURM_SUBMIT_DIR:-$(dirname "$0")}}"
 python3 run_task.py "$SLURM_ARRAY_TASK_ID"
 '''
     _write_executable(out_dir / 'submit.sh', submit_sh)
