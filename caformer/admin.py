@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Experiment, TrainedModel
+from .models import Experiment, TrainedModel, HarnessProfile
 
 
 @admin.register(Experiment)
@@ -53,3 +53,38 @@ class TrainedModelAdmin(admin.ModelAdmin):
             lines.append(f'    {", ".join(g)}')
         return '\n'.join(lines)
     rule_diversity_pretty.short_description = 'rule diversity'
+
+
+@admin.register(HarnessProfile)
+class HarnessProfileAdmin(admin.ModelAdmin):
+    list_display = ('slug', 'persona_name', 'prefilter_mode',
+                    'is_default', 'updated_at')
+    list_filter  = ('prefilter_mode', 'is_default',
+                    'inject_cwd', 'inject_time', 'inject_git',
+                    'inject_identity')
+    search_fields = ('slug', 'persona_name', 'persona_description',
+                     'notes')
+    prepopulated_fields = {'slug': ('persona_name',)}
+    fieldsets = (
+        (None, {
+            'fields': ('slug', 'persona_name', 'is_default',
+                         'prefilter_mode'),
+        }),
+        ('Prompt', {
+            'fields': ('persona_description', 'system_prompt_extra'),
+        }),
+        ('Context injection', {
+            'fields': ('inject_cwd', 'inject_time',
+                         'inject_git', 'inject_identity'),
+        }),
+        ('Spinner verbs', {
+            'fields': ('spinner_verbs_json',),
+            'description': (
+                'Optional per-category verb overrides.  JSON map of '
+                'category code (0-3 as strings) → list of verbs.  '
+                'Leave null to use caformer.harness.verbs.DEFAULT_VERBS.'),
+        }),
+        ('Meta', {
+            'fields': ('notes',),
+        }),
+    )

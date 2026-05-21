@@ -27,6 +27,24 @@ PROFILES = [
         inject_identity=True,
     ),
     dict(
+        slug='velour-boardstack',
+        persona_name='Velour (boardstack)',
+        is_default=False,
+        prefilter_mode='boardstack4',
+        persona_description=(
+            "Same Velour persona, but routed through the 4-board "
+            "K=4 cascade prefilter.  Every turn exposes its full "
+            "4-colour path so the harness can later treat it as an "
+            "ordered chain of sub-agents."),
+        system_prompt_extra=(
+            "When asked, surface the boardstack path alongside the "
+            "reply — the path itself is part of the answer."),
+        inject_cwd=False,
+        inject_time=True,
+        inject_git=False,
+        inject_identity=True,
+    ),
+    dict(
         slug='librarian',
         persona_name='the librarian',
         is_default=False,

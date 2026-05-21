@@ -37,6 +37,8 @@ class HarnessReply:
     category_name: str = 'personality'
     category_colour: str = 'ffffff'
     router_available: bool = False
+    prefilter_mode: str = 'router'           # which prefilter ran
+    path: tuple[int, ...] | None = None      # boardstack4 4-colour path
     spinner_verb: str = ''
     persona_name: str = ''
     context_block: str = ''                  # rendered context text
@@ -147,12 +149,16 @@ def run_turn(profile, prompt: str,
         reply.error = 'empty prompt'
         return reply
 
-    # 1. Prefilter.
-    pre = _prefilter.classify(prompt)
+    # 1. Prefilter (router or boardstack4, depending on profile).
+    pre = _prefilter.classify(prompt,
+                                  mode=getattr(profile, 'prefilter_mode',
+                                                 'router'))
     reply.category        = pre.category
     reply.category_name   = pre.name
     reply.category_colour = pre.colour
     reply.router_available = pre.available
+    reply.prefilter_mode  = pre.mode
+    reply.path            = pre.path
 
     # 2. Context block.
     cb = _context.build(profile)

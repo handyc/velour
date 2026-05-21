@@ -4518,6 +4518,8 @@ def harness_reply(request):
         'category_name':     reply.category_name,
         'category_colour':   reply.category_colour,
         'router_available':  reply.router_available,
+        'prefilter_mode':    reply.prefilter_mode,
+        'path':              list(reply.path) if reply.path else None,
         'spinner_verb':      reply.spinner_verb,
         'persona_name':      reply.persona_name,
         'context_block':     reply.context_block,

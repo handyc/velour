@@ -79,8 +79,15 @@
         <span class="badge cat" style="background:#{{ reply.category_colour }};">
           {{ reply.category_name }}
         </span>
+        <span class="badge" title="prefilter mode">{{ reply.prefilter_mode }}</span>
+        {% if reply.path %}
+          <span class="badge" style="font-family: ui-monospace, monospace;"
+                title="boardstack4 4-colour path">
+            path {{ reply.path.0 }}-{{ reply.path.1 }}-{{ reply.path.2 }}-{{ reply.path.3 }}
+          </span>
+        {% endif %}
       {% else %}
-        <span class="badge" style="color:#d29922;">router off</span>
+        <span class="badge" style="color:#d29922;">prefilter off</span>
         <span class="badge cat" style="background:#{{ reply.category_colour }};">
           {{ reply.category_name }} (fallback)
         </span>

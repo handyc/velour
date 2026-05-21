@@ -542,6 +542,15 @@ class HarnessProfile(models.Model):
         help_text='Pull current Velour identity mood into the '
                   'context block (soft-fails if identity app absent).')
 
+    PREFILTER_CHOICES = (
+        ('router',      'router (single CA classifier, majority vote)'),
+        ('boardstack4', 'boardstack4 (4-board sequential cascade)'),
+    )
+    prefilter_mode = models.CharField(
+        max_length=16, choices=PREFILTER_CHOICES, default='router',
+        help_text='Which deterministic prefilter classifies the prompt. '
+                  'boardstack4 emits a 4-colour path for richer routing.')
+
     spinner_verbs_json = models.JSONField(
         null=True, blank=True,
         help_text='Optional per-category verb overrides.  Map '

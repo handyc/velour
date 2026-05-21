@@ -22,32 +22,30 @@ from caformer.router_corpus import (CATEGORY_NAMES, CATEGORY_COLOURS,
 
 @dataclass
 class PrefilterResult:
-    category: int                  # int code 0..3
+    category: int                  # int code 0..3 (path-projected)
     name: str                      # 'personality' | 'information' | …
     colour: str                    # hex, no leading #
-    available: bool                # False if router not trained
-    votes: list[int] | None = None # raw per-tick votes, for UI/debug
+    available: bool                # False if router/stack not trained
+    mode: str = 'router'           # which prefilter ran
+    votes: list[int] | None = None # router majority-vote breakdown
+    path: tuple[int, ...] | None = None  # boardstack4 4-colour path
 
 
-def classify(prompt: str) -> PrefilterResult:
-    """Route ``prompt`` to a category.  Soft-fails to PERSONALITY when
-    the router model isn't on disk yet — gives the harness a stable
-    fallback during initial setup or for fresh deployments."""
+def _fallback() -> PrefilterResult:
+    return PrefilterResult(
+        category=PERSONALITY,
+        name=CATEGORY_NAMES[PERSONALITY],
+        colour=CATEGORY_COLOURS[PERSONALITY],
+        available=False,
+        mode='fallback')
+
+
+def _classify_router(prompt: str) -> PrefilterResult:
     try:
         from caformer import router as router_mod
         rt = router_mod.get_router()
-    except FileNotFoundError:
-        return PrefilterResult(
-            category=PERSONALITY,
-            name=CATEGORY_NAMES[PERSONALITY],
-            colour=CATEGORY_COLOURS[PERSONALITY],
-            available=False)
-    except Exception:                                # noqa: BLE001
-        return PrefilterResult(
-            category=PERSONALITY,
-            name=CATEGORY_NAMES[PERSONALITY],
-            colour=CATEGORY_COLOURS[PERSONALITY],
-            available=False)
+    except (FileNotFoundError, Exception):           # noqa: BLE001
+        return _fallback()
     cat = rt.route(prompt)
     try:
         votes = rt.route_votes(prompt)
@@ -58,4 +56,42 @@ def classify(prompt: str) -> PrefilterResult:
         name=CATEGORY_NAMES.get(cat, '?'),
         colour=CATEGORY_COLOURS.get(cat, 'ffffff'),
         available=True,
+        mode='router',
         votes=votes)
+
+
+def _classify_boardstack4(prompt: str) -> PrefilterResult:
+    try:
+        from caformer import boardstack4 as bs4
+        stack = bs4.get_stack()
+    except (FileNotFoundError, Exception):           # noqa: BLE001
+        # Fall back to the single-LUT router when boardstack4 isn't
+        # trained yet — keeps the harness usable on a fresh deploy.
+        result = _classify_router(prompt)
+        if result.available:
+            result.mode = 'router (boardstack4 missing)'
+        return result
+    path = stack.cascade(prompt)
+    cat = bs4.path_to_category(path)
+    return PrefilterResult(
+        category=cat,
+        name=CATEGORY_NAMES.get(cat, '?'),
+        colour=CATEGORY_COLOURS.get(cat, 'ffffff'),
+        available=True,
+        mode='boardstack4',
+        path=path)
+
+
+def classify(prompt: str, mode: str = 'router') -> PrefilterResult:
+    """Route ``prompt`` to a category.  ``mode`` picks the prefilter:
+
+      - 'router'      — the original single-LUT trained classifier
+      - 'boardstack4' — the 4-board sequential cascade (returns the
+                         4-colour path in addition to the projected
+                         category)
+
+    Soft-fails to PERSONALITY when neither artifact is on disk."""
+    mode = (mode or 'router').strip().lower()
+    if mode == 'boardstack4':
+        return _classify_boardstack4(prompt)
+    return _classify_router(prompt)
