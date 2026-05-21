@@ -226,14 +226,18 @@ function paintState(board_idx, state){
   }
 }
 
+function _setText(id, v){
+  const el = document.getElementById(id);
+  if (el) el.textContent = v;
+}
 function paintTick(t){
   if (!DATA) return;
   curTick = Math.max(0, Math.min(DATA.n_ticks, t));
-  document.getElementById('v3d-tick').textContent = curTick;
+  _setText('v3d-tick', curTick);
   for (let bi = 0; bi < DATA.n_boards; bi++) {
     paintState(bi, DATA.states_per_board[bi][curTick]);
   }
-  document.getElementById('v3d-board').textContent = '(all 4)';
+  _setText('v3d-board', '(all 4)');
 }
 
 async function loadFromPrompt(){
@@ -566,7 +570,7 @@ async function loadChainTraceScene(){
   camera.position.set(stepX * 2, valY * 3 + 4, 18);
   controls.update();
   document.getElementById('v3d-scene-meta').textContent =
-    `Phase 6: chain trace · ${prompt!r ? prompt : ''} — three substrate paths.`;
+    `Phase 6: chain trace · ${prompt || ''} — three substrate paths.`;
 }
 
 // ── Click info panel (Phase 5: annotations) ───────────────────
