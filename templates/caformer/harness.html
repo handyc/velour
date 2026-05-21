@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}caformer harness — {{ profile.persona_name|default:profile.slug|default:"no profile" }}{% endblock %}
+{% block content %}
+<style>
+  .h-page    { max-width: 64em; }
+  .h-meta    { color: #888; font-size: 0.85rem; }
+  .h-section { margin: 18px 0; padding-top: 12px;
+               border-top: 1px solid #1a1a1a; }
+  .h-section h2 { margin: 0 0 8px; font-size: 1.0rem;
+                  color: #cfc; font-weight: 600; }
+  .form      { display: flex; gap: 8px; align-items: center;
+               flex-wrap: wrap; }
+  .form input[type=text] { background: #0d1117; border: 1px solid #30363d;
+                            color: #cdd; padding: 6px 10px; font-family: inherit;
+                            font-size: 0.9rem; min-width: 30em; }
+  .form select { background: #0d1117; border: 1px solid #30363d;
+                  color: #cdd; padding: 6px 10px; font-family: inherit; }
+  .form button { background: #222; color: #cfc; border: 1px solid #555;
+                  padding: 6px 14px; cursor: pointer; font-family: inherit; }
+  .form button:hover { border-color: #8b949e; }
+  .badges   { display: flex; gap: 8px; align-items: center;
+              flex-wrap: wrap; margin: 8px 0; }
+  .badge    { display: inline-block; padding: 2px 10px;
+              border: 1px solid #30363d; border-radius: 3px;
+              font-size: 0.78rem; color: #cdd; }
+  .badge.cat { color: #000; font-weight: 600; }
+  .verb-pill{ display: inline-block; padding: 2px 10px;
+              border: 1px solid #30363d; border-radius: 3px;
+              font-size: 0.78rem; color: #cfc;
+              background: #0d1117; font-style: italic; }
+  .reply-box{ background: #0d1117; border: 1px solid #30363d;
+              padding: 12px 14px; margin: 10px 0;
+              font-size: 0.95rem; color: #cfc;
+              font-family: ui-monospace, monospace; }
+  .meta-pre { background: #0a0a0a; border: 1px solid #1a1a1a;
+              padding: 8px 10px; font-family: ui-monospace, monospace;
+              font-size: 0.78rem; color: #b0b8be;
+              white-space: pre-wrap; }
+  .grid     { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 60em) { .grid { grid-template-columns: 1fr; } }
+  .small    { font-size: 0.78rem; color: #8b949e; }
+</style>
+
+<div class="h-page">
+  <h1 style="margin-top: 0;">caformer harness</h1>
+  <p class="h-meta">
+    The interface layer wrapping the deterministic CA core.
+    Picks a persona, prefilters the prompt via the 4-way router,
+    rolls a category-tuned spinner verb, injects context, and
+    dispatches to a QRPair if one matches.
+  </p>
+
+  <form class="form" method="get" action="">
+    <select name="slug">
+      {% for p in profiles %}
+        <option value="{{ p.slug }}"
+                {% if p.id == profile.id %}selected{% endif %}>
+          {{ p.persona_name|default:p.slug }}{% if p.is_default %} · default{% endif %}
+        </option>
+      {% endfor %}
+    </select>
+    <input type="text" name="q" value="{{ prompt }}"
+           placeholder="type a prompt…" autofocus>
+    <button type="submit">send</button>
+  </form>
+
+  {% if not profile %}
+    <p class="h-meta" style="color: #d29922; margin-top: 12px;">
+      No HarnessProfile in the DB yet.  Run
+      <code>venv/bin/python manage.py caformer_seed_harness</code>.
+    </p>
+  {% endif %}
+
+  {% if reply %}
+  <div class="h-section">
+    <h2>Reply</h2>
+    <div class="badges">
+      {% if reply.router_available %}
+        <span class="badge cat" style="background:#{{ reply.category_colour }};">
+          {{ reply.category_name }}
+        </span>
+      {% else %}
+        <span class="badge" style="color:#d29922;">router off</span>
+        <span class="badge cat" style="background:#{{ reply.category_colour }};">
+          {{ reply.category_name }} (fallback)
+        </span>
+      {% endif %}
+      {% if reply.persona_name %}
+        <span class="badge">persona: {{ reply.persona_name }}</span>
+      {% endif %}
+      <span class="verb-pill">{{ reply.spinner_verb }}…</span>
+      {% if reply.engine %}
+        <span class="badge">engine: {{ reply.engine }}{% if reply.tier %} / {{ reply.tier }}{% endif %}</span>
+      {% endif %}
+      {% if reply.dispatched %}
+        <span class="badge">{{ reply.dispatched }}</span>
+      {% endif %}
+    </div>
+
+    {% if reply.reply %}
+      <div class="reply-box">{{ reply.reply }}</div>
+    {% else %}
+      <div class="reply-box" style="color:#d29922;">
+        <i>{{ reply.sub_label|default:"(no exact QRPair — core returned empty)" }}</i>
+      </div>
+    {% endif %}
+
+    <p class="small">{{ reply.sub_label }}</p>
+  </div>
+
+  <div class="h-section">
+    <h2>What the harness did</h2>
+    <div class="grid">
+      <div>
+        <p class="small" style="margin-bottom:4px;">Context block (injected silently)</p>
+        <pre class="meta-pre">{{ reply.context_block|default:"(empty)" }}</pre>
+      </div>
+      <div>
+        <p class="small" style="margin-bottom:4px;">Composed system prompt</p>
+        <pre class="meta-pre">{{ reply.system_prompt|default:"(empty)" }}</pre>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if profile %}
+  <div class="h-section">
+    <h2>Profile · {{ profile.slug }}</h2>
+    <table class="meta-pre" style="border:none; padding:0;"><tbody>
+      <tr><td style="color:#8b949e;padding-right:1em;">persona_name</td><td>{{ profile.persona_name|default:"—" }}</td></tr>
+      <tr><td style="color:#8b949e;padding-right:1em;">inject</td><td>
+        cwd:{{ profile.inject_cwd|yesno:"y,n" }} ·
+        time:{{ profile.inject_time|yesno:"y,n" }} ·
+        git:{{ profile.inject_git|yesno:"y,n" }} ·
+        identity:{{ profile.inject_identity|yesno:"y,n" }}
+      </td></tr>
+      <tr><td style="color:#8b949e;padding-right:1em;">verbs</td><td>{% if profile.spinner_verbs_json %}custom{% else %}default pool{% endif %}</td></tr>
+    </tbody></table>
+    {% if profile.persona_description %}
+      <p class="small" style="margin-top:8px;">{{ profile.persona_description|linebreaksbr }}</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

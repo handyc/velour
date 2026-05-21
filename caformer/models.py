@@ -501,3 +501,77 @@ class QRPair(models.Model):
             if getattr(self, f'cell8_{tier}_exact', False):
                 return tier
         return None
+
+
+# ─── Harness ────────────────────────────────────────────────────────
+
+
+class HarnessProfile(models.Model):
+    """A named configuration of the caformer harness.
+
+    The deterministic core (CA rules + QRPair dispatcher) is fixed.
+    Everything *around* it — persona, system prompt, what gets
+    injected as context, which spinner verbs roll, how the prefilter
+    routes — lives here.  One profile = one personality you can pin
+    to a chat surface.
+
+    Per-category spinner verbs are stored as a single JSON blob
+    keyed by integer category (0..3, mapping to PERSONALITY /
+    INFORMATION / ACTION / META).  When None or partial, the
+    harness falls back to caformer.harness.verbs.DEFAULT_VERBS.
+    """
+
+    slug = models.SlugField(max_length=64, unique=True)
+    persona_name = models.CharField(
+        max_length=80, blank=True,
+        help_text='Short display name, e.g. "Alice", "the librarian".')
+    persona_description = models.TextField(
+        blank=True,
+        help_text='2–5 sentence character sketch.  Voice, values, '
+                  'specialities.  Forms the bulk of the system prompt.')
+    system_prompt_extra = models.TextField(
+        blank=True,
+        help_text='Additional instructions appended after the persona '
+                  'description.  Use for capability claims, refusal '
+                  'posture, formatting rules.')
+
+    inject_cwd      = models.BooleanField(default=False)
+    inject_time     = models.BooleanField(default=True)
+    inject_git      = models.BooleanField(default=False)
+    inject_identity = models.BooleanField(default=True,
+        help_text='Pull current Velour identity mood into the '
+                  'context block (soft-fails if identity app absent).')
+
+    spinner_verbs_json = models.JSONField(
+        null=True, blank=True,
+        help_text='Optional per-category verb overrides.  Map '
+                  '{"0":[...],"1":[...],"2":[...],"3":[...]}.')
+
+    notes = models.TextField(blank=True)
+    is_default = models.BooleanField(default=False,
+        help_text='Used by /caformer/harness/ when no slug is pinned.')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ('-is_default', 'persona_name', 'slug')
+
+    def __str__(self) -> str:
+        if self.persona_name:
+            return f'{self.persona_name} ({self.slug})'
+        return self.slug
+
+    def spinner_verbs_by_category(self):
+        """Return a dict[int → tuple[str]] suitable for
+        caformer.harness.verbs.pick().  Falls back to the module
+        default for any category not overridden in the JSON blob."""
+        from caformer.harness.verbs import DEFAULT_VERBS
+        override = self.spinner_verbs_json or {}
+        out = {}
+        for cat in (0, 1, 2, 3):
+            v = override.get(str(cat)) or override.get(cat)
+            if v:
+                out[cat] = tuple(v)
+            else:
+                out[cat] = DEFAULT_VERBS[cat]
+        return out

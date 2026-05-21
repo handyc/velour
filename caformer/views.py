@@ -4449,3 +4449,83 @@ def funnel_trainer_download(request, kind='binary'):
     resp['Content-Length'] = str(len(blob))
     resp['Cache-Control'] = 'public, max-age=3600'
     return resp
+
+
+# ─── Harness ────────────────────────────────────────────────────────
+
+@login_required
+def harness_view(request):
+    """The harness chat page.  Pick a HarnessProfile, type a prompt,
+    see what the harness *does* alongside the core's reply.
+
+    GET ?slug=<profile>&q=<prompt> renders the form + (if q present)
+    a single response.  No SSE / streaming yet — Phase 1 is about
+    proving the wrapper end-to-end."""
+    from caformer.models import HarnessProfile
+    from caformer.harness import run_turn
+
+    slug = (request.GET.get('slug') or '').strip()
+    q = (request.GET.get('q') or '').strip()
+
+    profile = None
+    if slug:
+        profile = HarnessProfile.objects.filter(slug=slug).first()
+    if profile is None:
+        profile = (HarnessProfile.objects.filter(is_default=True).first()
+                   or HarnessProfile.objects.first())
+
+    reply = None
+    if profile is not None and q:
+        reply = run_turn(profile, q)
+
+    return render(request, 'caformer/harness.html', {
+        'profile':   profile,
+        'profiles':  HarnessProfile.objects.all(),
+        'prompt':    q,
+        'reply':     reply,
+    })
+
+
+@login_required
+def harness_reply(request):
+    """JSON endpoint for the harness chat — used by the page's JS
+    once we add async fetches.  GET ?slug=&q=&seed= → JSON."""
+    from caformer.models import HarnessProfile
+    from caformer.harness import run_turn
+    import random
+
+    slug = (request.GET.get('slug') or '').strip()
+    q = (request.GET.get('q') or '').strip()
+    seed_raw = (request.GET.get('seed') or '').strip()
+    rng = random.Random(int(seed_raw)) if seed_raw.isdigit() else None
+
+    if not q:
+        return _json_response({'error': 'empty prompt'})
+
+    profile = (HarnessProfile.objects.filter(slug=slug).first()
+               if slug else None)
+    if profile is None:
+        profile = (HarnessProfile.objects.filter(is_default=True).first()
+                   or HarnessProfile.objects.first())
+    if profile is None:
+        return _json_response({'error': 'no HarnessProfile in DB'})
+
+    reply = run_turn(profile, q, rng=rng)
+    return _json_response({
+        'prompt':            reply.prompt,
+        'reply':             reply.reply,
+        'category':          reply.category,
+        'category_name':     reply.category_name,
+        'category_colour':   reply.category_colour,
+        'router_available':  reply.router_available,
+        'spinner_verb':      reply.spinner_verb,
+        'persona_name':      reply.persona_name,
+        'context_block':     reply.context_block,
+        'system_prompt':     reply.system_prompt,
+        'dispatched':        reply.dispatched,
+        'engine':            reply.engine,
+        'tier':              reply.tier,
+        'sub_label':         reply.sub_label,
+        'pure_ca':           reply.pure_ca,
+        'error':             reply.error,
+    })

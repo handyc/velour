@@ -45,6 +45,8 @@ urlpatterns = [
                                                                     name='pipeline_autotrain_save'),
     path('funnel-chat/',                  views.funnel_chat_view,  name='funnel_chat'),
     path('funnel-chat/reply/',            views.funnel_chat_reply, name='funnel_chat_reply'),
+    path('harness/',                      views.harness_view,      name='harness'),
+    path('harness/reply/',                views.harness_reply,     name='harness_reply'),
     path('funnel-chat/enqueue/',          views.funnel_chat_enqueue,
                                                                     name='funnel_chat_enqueue'),
     path('funnel-chat/status/',           views.funnel_chat_status,
