@@ -72,3 +72,33 @@ def reduce(text: str, name: str = 'lower_no_punct') -> str:
             return fn(text)
     raise ValueError(f'unknown reduction {name!r}; '
                      f'available: {[n for n, _ in ALL_REDUCTIONS]}')
+
+
+# ─── Token similarity helpers ──────────────────────────────────────
+
+
+def token_set(text: str) -> frozenset[str]:
+    """Reduce + tokenise + return as a frozenset (whitespace split)."""
+    return frozenset(lower_no_punct(text).split())
+
+
+def jaccard(a: str, b: str) -> float:
+    """Jaccard similarity over normalised tokens: |a ∩ b| / |a ∪ b|.
+    Returns 0.0 when either side is empty."""
+    ta, tb = token_set(a), token_set(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def trained_coverage(user_text: str, trained_text: str) -> float:
+    """Fraction of the *trained* prompt's tokens that appear in the
+    user's prompt.  Asymmetric counterpart to jaccard — higher when
+    the user covers most of what the trained prompt says, even if
+    they add or change tokens around it.
+
+    Returns 0.0 if trained_text is empty."""
+    tu, tt = token_set(user_text), token_set(trained_text)
+    if not tt:
+        return 0.0
+    return len(tu & tt) / len(tt)

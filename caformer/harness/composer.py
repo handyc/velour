@@ -232,6 +232,23 @@ def run_turn(profile, prompt: str,
     if pre.path is not None:
         from . import agents as _agents
         chain_state = _agents.run_chain(pre.path, prompt, profile)
+        # Safety-net fallback: when the chain produced NO reply
+        # contribution (because boardstack4 routing missed the info
+        # agent, but a QRPair partial / fuzzy match exists), try
+        # cell8 dispatch once more outside the chain.  Preserves
+        # byte-exact / substring / fuzzy hits regardless of routing.
+        if not chain_state.has_reply():
+            core_fb = _agents._cell8_dispatch(prompt)
+            if core_fb.get('reply'):
+                chain_state.contributions.append(_agents.Contribution(
+                    agent='information', kind='reply',
+                    content=core_fb['reply'], confidence=0.85))
+                chain_state.step_log.append({
+                    'agent':  'composer-fallback',
+                    'action': 'reply',
+                    'content': core_fb['reply'],
+                    'detail':  core_fb.get('sub_label', ''),
+                })
         assembled, body_kind = _agents.assemble_reply(chain_state)
         reply.reply = assembled
         reply.chain_used = True

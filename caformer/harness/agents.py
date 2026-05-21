@@ -456,39 +456,66 @@ def _cell8_dispatch(prompt: str) -> dict:
     matched_prompt: str = prompt
     pair = (QRPair.objects.filter(prompt=prompt).filter(exact_filter).first())
     if pair is None:
-        # Three-tier fallback when exact match misses.  Reduced lookup
-        # tries normalised equality; substring tries containment.
-        # Both share a single pass over the candidate set.
+        # Four-tier fallback when exact match misses.  All four share
+        # a single pass over the candidate set.
+        #   2. lower_no_punct equality          (precise variants)
+        #   3. substring containment            (long-trained-in-user)
+        #   4. fuzzy (Jaccard + char-similarity, picks closest above
+        #             threshold)                (partial / paraphrased)
+        import difflib
         reduced_user = _norm.lower_no_punct(prompt)
         if reduced_user:
             best_substring_pair = None
             best_substring_len = -1
+            best_fuzzy_pair = None
+            best_fuzzy_score = 0.0
+            FUZZY_THRESHOLD = 0.50
             for cand in QRPair.objects.filter(exact_filter).only(
                     'pk', 'prompt'):
                 cand_norm = _norm.lower_no_punct(cand.prompt)
                 if not cand_norm:
                     continue
                 if cand_norm == reduced_user:
-                    # Tier 2: normalised equality — preferred over
-                    # substring, break immediately.
                     pair = cand
                     matched_prompt = cand.prompt
                     match_kind = 'lower_no_punct'
                     break
                 if cand_norm in reduced_user:
-                    # Tier 3: substring match — keep the LONGEST
-                    # candidate, so 'capital of france' beats
-                    # 'france' when both are present.
-                    if len(cand_norm) > best_substring_len:
+                    # Avoid trivial matches like a 2-letter trained
+                    # prompt being a substring of every user prompt.
+                    if (len(cand_norm) >= 6
+                            and len(cand_norm) > best_substring_len):
                         best_substring_pair = cand
                         best_substring_len = len(cand_norm)
+                    continue
+                # Tier 4 candidate: combine token overlap (Jaccard)
+                # with char-level similarity (Ratcliff/Obershelp via
+                # difflib — same general shape as normalised
+                # Levenshtein for narrowing).  Take the max of the
+                # two so either signal can promote a candidate.
+                # Require ≥ 8 chars in the trained prompt so tiny
+                # pairs (which fuzzy-score high on every short user
+                # prompt) don't capture matches.
+                if len(cand_norm) < 8:
+                    continue
+                jac = _norm.jaccard(prompt, cand.prompt)
+                char_sim = difflib.SequenceMatcher(
+                    None, reduced_user, cand_norm).ratio()
+                score = max(jac, char_sim)
+                if score >= FUZZY_THRESHOLD and score > best_fuzzy_score:
+                    best_fuzzy_score = score
+                    best_fuzzy_pair = cand
             if pair is None and best_substring_pair is not None:
                 pair = best_substring_pair
                 matched_prompt = best_substring_pair.prompt
                 match_kind = 'substring'
+            elif pair is None and best_fuzzy_pair is not None:
+                pair = best_fuzzy_pair
+                matched_prompt = best_fuzzy_pair.prompt
+                match_kind = f'fuzzy ({best_fuzzy_score:.2f})'
     if pair is None:
         return {'reply': '', 'sub_label':
-                'no exact / reduced / substring QRPair match'}
+                'no exact / reduced / substring / fuzzy QRPair match'}
     tier = (pair.best_cell8_tier()
             if hasattr(pair, 'best_cell8_tier') else None)
     if tier is None:
