@@ -247,6 +247,22 @@ TEMPLATES_LIVE = [
         '(resolved by describe_self handler)',
         0.90, 'meta self-intro on personality route', 'describe_self'),
 
+    (3, 1, 'how big are you',
+        '(resolved by disk_sizes handler)',
+        0.90, 'meta: artifact disk sizes', 'disk_sizes'),
+    (3, 1, 'disk sizes',
+        '(resolved by disk_sizes handler)',
+        0.90, 'meta: disk sizes', 'disk_sizes'),
+    (3, 1, 'how is the corpus',
+        '(resolved by corpus_state handler)',
+        0.90, 'meta: corpus state', 'corpus_state'),
+    (3, 1, 'corpus state',
+        '(resolved by corpus_state handler)',
+        0.90, 'meta: corpus state alias', 'corpus_state'),
+    (3, 1, 'how many pairs are exact',
+        '(resolved by corpus_state handler)',
+        0.85, 'meta: corpus state alias', 'corpus_state'),
+
     (3, 1, 'self report',
         "Branch: [handler:git_branch]\n"
         "Mood: [handler:mood]\n"

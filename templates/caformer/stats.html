@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}caformer — stats{% endblock %}
+{% block content %}
+<style>
+  .st-page    { max-width: 72em; }
+  .st-page h1 { margin: 0 0 6px; }
+  .st-meta    { color: #888; font-size: 0.85rem; }
+  .st-section { margin: 20px 0; padding-top: 12px;
+                border-top: 1px solid #1a1a1a; }
+  .st-section h2 { margin: 0 0 8px; font-size: 1.0rem;
+                   color: #cfc; font-weight: 600; }
+  table.st-tab { border-collapse: collapse; width: 100%;
+                 font-family: ui-monospace, monospace;
+                 font-size: 0.86rem; }
+  table.st-tab th, table.st-tab td {
+        padding: 4px 12px; border-bottom: 1px solid #1a1a1a;
+        text-align: left; vertical-align: top; }
+  table.st-tab th { color: #8b949e; font-weight: 500; }
+  table.st-tab td.num { color: #cfc; text-align: right;
+                         font-variant-numeric: tabular-nums; }
+  table.st-tab td.name { color: #9ecbff; font-weight: 600; }
+  .bar       { display: inline-block; height: 8px;
+                background: #1a1a1a; vertical-align: middle;
+                min-width: 80px; max-width: 200px; }
+  .bar > i   { display: block; height: 100%; background: #2ea043; }
+  .yes       { color: #2ea043; }
+  .no        { color: #f85149; }
+  .grid      { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 60em) { .grid { grid-template-columns: 1fr; } }
+</style>
+
+<div class="st-page">
+  <h1>caformer stats</h1>
+  <p class="st-meta">Live dashboard of corpus state, artifacts, and pipeline status.</p>
+
+  <div class="st-section">
+    <h2>Corpus state</h2>
+    <table class="st-tab">
+      <thead>
+        <tr><th>domain</th><th>total</th><th>byte-exact</th><th>partial</th><th>progress</th></tr>
+      </thead>
+      <tbody>
+        {% for key, row in corpus.items %}
+          <tr>
+            <td class="name">{{ key }}</td>
+            <td class="num">{{ row.total }}</td>
+            <td class="num">{{ row.exact }}</td>
+            <td class="num">{{ row.partial }}</td>
+            <td>
+              <span class="bar"><i style="width:{{ row.pct|floatformat:0 }}%;"></i></span>
+              <span class="st-meta">{{ row.pct|floatformat:1 }}%</span>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid">
+    <div class="st-section">
+      <h2>Artifacts on disk</h2>
+      <table class="st-tab">
+        <thead><tr><th>artifact</th><th>size</th></tr></thead>
+        <tbody>
+          {% for a in artifacts %}
+            <tr><td class="name">{{ a.name }}</td>
+                <td class="num">{{ a.size }}</td></tr>
+          {% endfor %}
+          <tr><td class="name" style="color:#cfc;">total .artifacts/</td>
+              <td class="num"><b>{{ artifacts_total }}</b></td></tr>
+          <tr><td class="name" style="color:#cfc;">db.sqlite3</td>
+              <td class="num"><b>{{ db_size }}</b></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="st-section">
+      <h2>Prefilters</h2>
+      <table class="st-tab">
+        <thead><tr><th>artifact</th><th>kind</th><th>loaded</th></tr></thead>
+        <tbody>
+          {% for p in prefilters %}
+            <tr><td class="name">{{ p.name }}</td>
+                <td class="st-meta">{{ p.kind }}</td>
+                <td>{% if p.loaded %}<span class="yes">✓</span>{% else %}<span class="no">·</span>{% endif %}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="st-section">
+    <h2>Counts</h2>
+    <table class="st-tab">
+      <tbody>
+        <tr><td>QRPairs (total)</td><td class="num">{{ counts.qrpair_total }}</td></tr>
+        <tr><td>QRPairs (byte-exact)</td><td class="num">{{ counts.qrpair_exact }}</td></tr>
+        <tr><td>HarnessProfiles</td><td class="num">{{ counts.harness_profiles }}</td></tr>
+        <tr><td>Active templates</td><td class="num">{{ counts.templates }}</td></tr>
+        <tr><td>Templates with live handlers</td><td class="num">{{ counts.templates_live }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="st-section">
+    <h2>ALICE bundles</h2>
+    <table class="st-tab">
+      <thead><tr><th>bundle</th><th>.rules files</th><th>manifest mtime</th></tr></thead>
+      <tbody>
+        {% for b in bundles %}
+          <tr><td class="name">{{ b.name }}</td>
+              <td class="num">{{ b.n_rules }}</td>
+              <td class="st-meta">{{ b.mtime }}</td></tr>
+        {% empty %}
+          <tr><td class="st-meta" colspan=3>no bundles yet</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

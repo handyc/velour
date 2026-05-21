@@ -47,6 +47,7 @@ urlpatterns = [
     path('funnel-chat/reply/',            views.funnel_chat_reply, name='funnel_chat_reply'),
     path('harness/',                      views.harness_view,      name='harness'),
     path('harness/reply/',                views.harness_reply,     name='harness_reply'),
+    path('stats/',                        views.stats_view,        name='stats'),
     path('viz3d/',                        views.viz3d_view,        name='viz3d'),
     path('viz3d/state/',                  views.viz3d_state,       name='viz3d_state'),
     path('viz3d/tree/',                   views.viz3d_tree_state,  name='viz3d_tree_state'),

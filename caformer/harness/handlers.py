@@ -249,6 +249,75 @@ def _h_capabilities(slots: dict[str, str]) -> str:
     return f'{len(HANDLERS)} handlers: ' + ', '.join(sorted(HANDLERS.keys()))
 
 
+def _h_disk_sizes(slots: dict[str, str]) -> str:
+    """Live report of every caformer artifact dir + the DB."""
+    import os
+    from pathlib import Path
+    from django.conf import settings
+    base = Path(settings.BASE_DIR)
+    bits: list[str] = []
+    artifacts = base / '.artifacts'
+    if artifacts.is_dir():
+        for d in sorted(artifacts.iterdir()):
+            if not d.is_dir():
+                continue
+            if not any(d.name.startswith(p) for p in (
+                    'router_', 'boardstack4_', 'byte_router_')):
+                continue
+            total = 0
+            for root, _dirs, files in os.walk(d):
+                for f in files:
+                    try:
+                        total += (Path(root) / f).stat().st_size
+                    except OSError:
+                        pass
+            if total:
+                bits.append(f'{d.name}={_human(total)}')
+    try:
+        db = base / 'db.sqlite3'
+        if db.exists():
+            bits.append(f'db.sqlite3={_human(db.stat().st_size)}')
+    except OSError:
+        pass
+    return ', '.join(bits) if bits else '(no artifacts found)'
+
+
+def _human(n: int) -> str:
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if n < 1024:
+            return f'{n:.1f} {unit}' if unit != 'B' else f'{n} {unit}'
+        n /= 1024
+    return f'{n:.1f} TB'
+
+
+def _h_corpus_state(slots: dict[str, str]) -> str:
+    """Corpus breakdown: how many pairs are byte-exact across each
+    sub-domain (personality / shakespeare / other)."""
+    try:
+        from caformer.models import QRPair
+        from django.db.models import Q
+        exact_filter = (
+            Q(cell8_b008_exact=True) | Q(cell8_b016_exact=True) |
+            Q(cell8_b032_exact=True) | Q(cell8_b064_exact=True) |
+            Q(cell8_b128_exact=True) | Q(cell8_b256_exact=True))
+        # Domain breakdown — fixed pk ranges from the seed history.
+        def stats(qs):
+            total = qs.count()
+            exact = qs.filter(exact_filter).count()
+            return total, exact
+        pers_total, pers_exact = stats(QRPair.objects.filter(id__lt=73))
+        shake_total, shake_exact = stats(QRPair.objects.filter(
+            id__gte=73, id__lte=155))
+        other_total, other_exact = stats(QRPair.objects.filter(id__gt=155))
+        all_total, all_exact = stats(QRPair.objects.all())
+        return (f'corpus: {all_exact}/{all_total} exact  '
+                f'(personality {pers_exact}/{pers_total} · '
+                f'shakespeare {shake_exact}/{shake_total} · '
+                f'other {other_exact}/{other_total})')
+    except Exception as e:                           # noqa: BLE001
+        return f'(corpus_state failed: {e})'
+
+
 def _h_describe_self(slots: dict[str, str]) -> str:
     """Meta: a richer multi-paragraph self-description composing
     mood + branch + corpus + capabilities."""
@@ -373,6 +442,8 @@ HANDLERS: dict[str, Callable[[dict], str]] = {
     'prefilter_state':  _h_prefilter_state,
     'capabilities':     _h_capabilities,
     'describe_self':    _h_describe_self,
+    'disk_sizes':       _h_disk_sizes,
+    'corpus_state':     _h_corpus_state,
 }
 
 

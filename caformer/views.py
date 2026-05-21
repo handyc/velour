@@ -4711,3 +4711,126 @@ def viz3d_tree_state(request):
         'nodes':      nodes,
         'n_nodes':    len(nodes),
     })
+
+
+# ─── Stats dashboard ───────────────────────────────────────────────
+
+
+@login_required
+def stats_view(request):
+    """Live dashboard: corpus state, artifact disk sizes, prefilter
+    state, last ALICE bundle status."""
+    import os
+    from pathlib import Path
+    from django.conf import settings
+    from django.db.models import Q
+    from caformer.models import QRPair, HarnessProfile, TemplatePattern
+
+    base = Path(settings.BASE_DIR)
+
+    # Corpus breakdown.
+    exact_filter = (Q(cell8_b008_exact=True) | Q(cell8_b016_exact=True)
+                    | Q(cell8_b032_exact=True) | Q(cell8_b064_exact=True)
+                    | Q(cell8_b128_exact=True) | Q(cell8_b256_exact=True))
+    def stats(qs):
+        t = qs.count()
+        e = qs.filter(exact_filter).count()
+        return {'total': t, 'exact': e, 'partial': t - e,
+                'pct': (100 * e / t) if t else 0.0}
+    corpus = {
+        'all':         stats(QRPair.objects.all()),
+        'personality': stats(QRPair.objects.filter(id__lt=73)),
+        'shakespeare': stats(QRPair.objects.filter(id__gte=73, id__lte=155)),
+        'other':       stats(QRPair.objects.filter(id__gt=155)),
+    }
+
+    # Disk sizes.
+    def dir_size(p: Path) -> int:
+        n = 0
+        for root, _ds, files in os.walk(p):
+            for f in files:
+                try:
+                    n += (Path(root) / f).stat().st_size
+                except OSError:
+                    pass
+        return n
+    def human(n: int) -> str:
+        x = float(n)
+        for u in ('B', 'KB', 'MB', 'GB'):
+            if x < 1024:
+                return f'{x:.1f} {u}' if u != 'B' else f'{int(x)} {u}'
+            x /= 1024
+        return f'{x:.1f} TB'
+    artifacts_dir = base / '.artifacts'
+    artifacts = []
+    if artifacts_dir.is_dir():
+        for d in sorted(artifacts_dir.iterdir()):
+            if not d.is_dir():
+                continue
+            if not any(d.name.startswith(p) for p in (
+                    'router_', 'boardstack4_', 'byte_router_')):
+                continue
+            s = dir_size(d)
+            artifacts.append({'name': d.name, 'size_bytes': s,
+                              'size': human(s)})
+    db_size = (base / 'db.sqlite3').stat().st_size \
+        if (base / 'db.sqlite3').exists() else 0
+    artifacts_total = sum(a['size_bytes'] for a in artifacts)
+
+    # Prefilter status (which artifacts exist on disk).
+    prefilters = []
+    checks = [
+        ('router_v1',     'router'),
+        ('router_v2',     'router'),
+        ('boardstack4_v1', 'boardstack4'),
+        ('boardstack4_v3', 'boardstack4'),
+        ('boardstack4_side4', 'boardstack4'),
+        ('byte_router_v1','byte_router'),
+    ]
+    for name, kind in checks:
+        path = artifacts_dir / name
+        meta_files = ('router_meta.json', 'boardstack4_meta.json', 'meta.json')
+        loaded = any((path / m).exists() for m in meta_files)
+        prefilters.append({'name': name, 'kind': kind, 'loaded': loaded})
+
+    # Counts.
+    counts = {
+        'qrpair_total':   QRPair.objects.count(),
+        'qrpair_exact':   QRPair.objects.filter(exact_filter).count(),
+        'harness_profiles': HarnessProfile.objects.count(),
+        'templates':      TemplatePattern.objects.filter(is_active=True).count(),
+        'templates_live': TemplatePattern.objects.filter(
+            is_active=True).exclude(handler_name='').count(),
+    }
+
+    # ALICE bundle dirs (visible-only summary).
+    bundles = []
+    bundles_dir = base / 'conduit' / 'alice' / 'bundles'
+    if bundles_dir.is_dir():
+        for d in sorted(bundles_dir.iterdir()):
+            if not d.is_dir():
+                continue
+            outputs = d / 'outputs'
+            n_rules = len(list(outputs.glob('*.rules'))) if outputs.is_dir() else 0
+            manifest = d / 'manifest.json'
+            mtime = '—'
+            if manifest.exists():
+                import datetime as _dt
+                mtime = _dt.datetime.fromtimestamp(
+                    manifest.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+            bundles.append({
+                'name':    d.name,
+                'n_rules': n_rules,
+                'mtime':   mtime,
+            })
+
+    return render(request, 'caformer/stats.html', {
+        'corpus':            corpus,
+        'artifacts':         artifacts,
+        'artifacts_total':   human(artifacts_total),
+        'db_size':           human(db_size),
+        'db_size_bytes':     db_size,
+        'prefilters':        prefilters,
+        'counts':            counts,
+        'bundles':           bundles,
+    })
