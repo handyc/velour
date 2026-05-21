@@ -129,6 +129,117 @@ def _h_latest_dream(slots: dict[str, str]) -> str:
         return '(dream lookup failed)'
 
 
+def _h_route_tokens(slots: dict[str, str]) -> str:
+    """Meta: list the PICM vocabulary tokens for a named route.
+    Slot 'route' = 'personality' | 'information' | 'command' | 'meta'."""
+    name = (slots.get('route') or '').strip().lower()
+    name_to_color = {'personality': 0, 'information': 1,
+                     'command': 2, 'meta': 3}
+    color = name_to_color.get(name)
+    if color is None:
+        return f"(unknown route: {name!r}; try personality/information/command/meta)"
+    from . import picm as _picm
+    toks = _picm.vocab_for(color)
+    if not toks:
+        return f'({name} PICM vocab is empty)'
+    head = ', '.join(toks[:20])
+    tail = '' if len(toks) <= 20 else f'  (+ {len(toks)-20} more)'
+    return f'{name}: {head}{tail}'
+
+
+def _h_route_templates(slots: dict[str, str]) -> str:
+    """Meta: list the TemplatePattern patterns for a named route."""
+    name = (slots.get('route') or '').strip().lower()
+    name_to_color = {'personality': 0, 'information': 1,
+                     'command': 2, 'meta': 3}
+    color = name_to_color.get(name)
+    if color is None:
+        return f"(unknown route: {name!r})"
+    try:
+        from caformer.models import TemplatePattern
+        rows = list(TemplatePattern.objects.filter(
+            agent_color=color, is_active=True).values_list(
+            'pattern', flat=True)[:12])
+    except Exception:                                # noqa: BLE001
+        return '(template lookup failed)'
+    if not rows:
+        return f'({name} has no active templates)'
+    return f'{name} templates: ' + '; '.join(rows)
+
+
+def _h_tree_paths(slots: dict[str, str]) -> str:
+    """Meta: list PICMNode tree paths + labels."""
+    try:
+        from caformer.models import PICMNode
+        rows = list(PICMNode.objects.values_list(
+            'tree_path', 'label')[:24])
+    except Exception:                                # noqa: BLE001
+        return '(PICM tree empty)'
+    if not rows:
+        return '(no PICM nodes seeded)'
+    return ', '.join(f'{p}={l}' for p, l in rows)
+
+
+def _h_concept_count(slots: dict[str, str]) -> str:
+    """Meta: size of the Sanskrit concept system."""
+    try:
+        from caformer.concept_system import bit_budget
+        b = bit_budget()
+        return (f'{b["n_verbs"]} verbs × {b["n_preverbs"]} preverbs × '
+                f'{b["n_suffixes"]} suffixes = {b["concepts_in_full_space"]} '
+                f'concepts in full space, {b["bits_per_concept"]} bits each')
+    except Exception:                                # noqa: BLE001
+        return '(concept system not available)'
+
+
+def _h_recognised_concepts(slots: dict[str, str]) -> str:
+    """Meta: encode the slot 'text' through the concept system,
+    report what concepts were recognised.  When called without an
+    explicit text slot, uses the slot 'X' (common in templates)."""
+    text = (slots.get('text') or slots.get('X') or '').strip()
+    if not text:
+        return '(no text to encode)'
+    try:
+        from caformer.concept_system import encode, surface, decode
+        concepts = encode(text)
+    except Exception:                                # noqa: BLE001
+        return '(concept encoder unavailable)'
+    if not concepts:
+        return '(no Sanskrit roots recognised)'
+    parts = [f'{surface(c)}={decode(c)}' for c in concepts]
+    return ' | '.join(parts)
+
+
+def _h_prefilter_state(slots: dict[str, str]) -> str:
+    """Meta: report which deterministic prefilters are loaded."""
+    bits: list[str] = []
+    try:
+        from caformer import router as _r
+        _r.get_router()
+        bits.append('router:loaded')
+    except Exception:                                # noqa: BLE001
+        bits.append('router:missing')
+    try:
+        from caformer import boardstack4 as _bs
+        _bs.get_stack()
+        bits.append('boardstack4:loaded')
+    except Exception:                                # noqa: BLE001
+        bits.append('boardstack4:missing')
+    try:
+        from caformer import byte_router as _br
+        _br.get_router()
+        bits.append('byte_router:loaded')
+    except Exception:                                # noqa: BLE001
+        bits.append('byte_router:missing')
+    try:
+        from caformer.models import PICMNode
+        n = PICMNode.objects.count()
+        bits.append(f'picm_tree:{n}-nodes')
+    except Exception:                                # noqa: BLE001
+        bits.append('picm_tree:missing')
+    return ', '.join(bits)
+
+
 def _h_cond_act(slots: dict[str, str]) -> str:
     """Conditional execution.  Used by templates of the shape:
 
@@ -202,6 +313,13 @@ HANDLERS: dict[str, Callable[[dict], str]] = {
     'recent_chat':      _h_recent_chat,
     'latest_dream':     _h_latest_dream,
     'cond_act':         _h_cond_act,
+    # Meta: introspect the harness itself
+    'route_tokens':     _h_route_tokens,
+    'route_templates':  _h_route_templates,
+    'tree_paths':       _h_tree_paths,
+    'concept_count':    _h_concept_count,
+    'recognised_concepts': _h_recognised_concepts,
+    'prefilter_state':  _h_prefilter_state,
 }
 
 

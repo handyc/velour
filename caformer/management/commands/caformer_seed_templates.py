@@ -194,6 +194,41 @@ TEMPLATES_LIVE = [
     (2, 3, 'do [act] if [cond]',
         '(resolved by cond_act handler)',
         0.75, 'conditional execution (inverted order)', 'cond_act'),
+
+    # ── Meta route templates: introspect the harness ────────────
+    (3, 2, 'what tokens does [route] have',
+        '(resolved by route_tokens handler)',
+        0.85, 'meta: list PICM tokens', 'route_tokens'),
+    (3, 2, 'show me [route] tokens',
+        '(resolved by route_tokens handler)',
+        0.85, 'meta synonym', 'route_tokens'),
+    (3, 2, 'what templates does [route] have',
+        '(resolved by route_templates handler)',
+        0.85, 'meta: list templates', 'route_templates'),
+    (3, 2, 'show [route] templates',
+        '(resolved by route_templates handler)',
+        0.85, 'meta synonym', 'route_templates'),
+    (3, 1, 'list tree paths',
+        'PICM tree: [handler:tree_paths]',
+        0.85, 'meta: tree topology', ''),
+    (3, 1, 'concept system size',
+        '[handler:concept_count]',
+        0.85, 'meta: concept system stats', ''),
+    (3, 1, 'what concepts does [X] map to',
+        '(resolved by recognised_concepts handler)',
+        0.80, 'meta: text → Sanskrit concepts', 'recognised_concepts'),
+    (3, 1, 'prefilter state',
+        '[handler:prefilter_state]',
+        0.85, 'meta: which prefilters loaded', ''),
+    (3, 1, 'self report',
+        "Branch: [handler:git_branch]\n"
+        "Mood: [handler:mood]\n"
+        "Time: [handler:now]\n"
+        "Corpus: [handler:qrpair_count]\n"
+        "Prefilters: [handler:prefilter_state]\n"
+        "PICM tree: [handler:tree_paths]\n"
+        "Concept system: [handler:concept_count]",
+        0.90, 'comprehensive introspection', ''),
 ]
 
 
