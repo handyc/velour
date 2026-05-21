@@ -30,6 +30,11 @@ from typing import Sequence
 
 
 _SLOT_RE = re.compile(r'\[(?P<name>[A-Za-z_][A-Za-z_0-9]*)\]')
+# [handler:foo] markers in template output — must be checked BEFORE
+# the slot regex so the colon-bearing form doesn't get mis-parsed as
+# a slot.  Pattern compiles greedily for the [handler:name] form.
+_HANDLER_RE = re.compile(
+    r'\[handler:(?P<name>[A-Za-z_][A-Za-z_0-9]*)\]')
 
 
 @dataclass(frozen=True)
@@ -107,13 +112,30 @@ def match(cp: CompiledPattern, prompt: str) -> dict[str, str] | None:
 
 
 def fill(template: str, slots: dict[str, str]) -> str:
-    """Substitute every [SlotName] in ``template`` with the value
-    from ``slots``.  Unknown slot names are left literal (which
-    surfaces authoring errors visibly rather than silently)."""
-    def _repl(m):
+    """Substitute markers in ``template``:
+
+      [handler:name]  — call the named live-data handler; insert its
+                        return string.  Handlers receive the slots
+                        dict in case they want input context.
+      [SlotName]      — substitute the matched slot value.
+
+    Handler markers are processed first (so a handler returning
+    ``"[X]"``-ish text doesn't accidentally trigger slot substitution).
+    Unknown slot names are left literal so authoring errors surface
+    visibly rather than silently."""
+    out = template or ''
+    # 1. Handler markers — call into the registry.  Soft-fail (the
+    #    handler returns an error string) rather than raise.
+    from . import handlers as _h
+    def _hrepl(m):
+        return _h.invoke(m.group('name'), slots)
+    out = _HANDLER_RE.sub(_hrepl, out)
+    # 2. Slot markers — substitute captured values.
+    def _srepl(m):
         name = m.group('name')
         return slots.get(name, m.group(0))
-    return _SLOT_RE.sub(_repl, template or '')
+    out = _SLOT_RE.sub(_srepl, out)
+    return out
 
 
 def specificity(cp: CompiledPattern) -> int:
@@ -135,6 +157,8 @@ class TemplateMatch:
     slots: dict[str, str]
     specificity: int
     confidence: float
+    handler_name: str = ''  # handler invoked (if any)
+    handler_used: bool = False
 
 
 def match_table(prompt: str, agent_color: int) -> TemplateMatch | None:
@@ -166,13 +190,27 @@ def match_table(prompt: str, agent_color: int) -> TemplateMatch | None:
         # Lower priority wins ties; for sort, we want (spec desc, prio asc).
         score = (spec, -int(r.priority))
         if best_score is None or score > best_score:
+            # Option A: explicit handler_name on the row replaces
+            #           the entire output with the handler's return.
+            # Option B: [handler:name] markers inside output are
+            #           expanded by fill().  Both can be active on
+            #           the same row — A wins if both are set.
+            from . import handlers as _h
+            handler_used = False
+            if r.handler_name:
+                handler_used = True
+                produced = _h.invoke(r.handler_name, slots)
+            else:
+                produced = fill(r.output, slots)
             best = TemplateMatch(
                 pattern_id=r.pk,
                 pattern=r.pattern,
-                output=fill(r.output, slots),
+                output=produced,
                 slots=slots,
                 specificity=spec,
                 confidence=float(r.confidence),
+                handler_name=r.handler_name or '',
+                handler_used=handler_used,
             )
             best_score = score
     return best

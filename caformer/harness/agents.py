@@ -120,6 +120,7 @@ class PersonalityAgent:
                 'content': tpl.output,
                 'template':  tpl.pattern,
                 'slots':     tpl.slots,
+                'handler':   tpl.handler_name or '',
                 'picm_matches': picm_strs})
             return
 
@@ -190,6 +191,7 @@ class InformationAgent:
                             f'spec={tpl.specificity}',
                 'template': tpl.pattern,
                 'slots':    tpl.slots,
+                'handler':  tpl.handler_name or '',
                 'picm_matches': matched_strs})
             return
         if matches and not state.first('announce'):
@@ -245,6 +247,7 @@ class CommandAgent:
                 'detail':   f'template {tpl.pattern!r}',
                 'template': tpl.pattern,
                 'slots':    tpl.slots,
+                'handler':  tpl.handler_name or '',
                 'picm_matches': matched_strs})
             return
         prompt = state.prompt.lower().strip()
@@ -320,6 +323,7 @@ class MetaAgent:
                 'detail':   f'template {tpl.pattern!r}',
                 'template': tpl.pattern,
                 'slots':    tpl.slots,
+                'handler':  tpl.handler_name or '',
                 'picm_matches': matched_strs})
             return
         looks_meta = (

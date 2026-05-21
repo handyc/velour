@@ -698,6 +698,14 @@ class TemplatePattern(models.Model):
         help_text='Confidence the harness reports for matches from '
                   'this template.  0..1.  Templates with no real '
                   'data backing them (stubs) should be ≤ 0.5.')
+    handler_name = models.CharField(
+        max_length=64, blank=True,
+        help_text='Optional name of a registered live-data handler '
+                  '(see caformer.harness.handlers.HANDLERS).  When '
+                  'set, the entire ``output`` field is replaced with '
+                  'the handler\'s return value at match time.  '
+                  '``output`` is still used as a comment / fallback '
+                  'if the handler is unknown.')
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

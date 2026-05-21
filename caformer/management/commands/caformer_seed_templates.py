@@ -16,8 +16,10 @@ from django.core.management.base import BaseCommand
 from caformer.models import TemplatePattern
 
 
-# (agent_color, priority, pattern, output, confidence, notes)
-TEMPLATES = [
+# (agent_color, priority, pattern, output, confidence, notes,
+#  handler_name) — handler_name is empty for plain templates;
+# templates may use [handler:name] markers in output regardless.
+TEMPLATES_RAW = [
     # ── 0 personality ─────────────────────────────────────────────
     (0, 3, 'thanks [X]',
         "You're welcome, [X].",
@@ -134,6 +136,53 @@ TEMPLATES = [
 ]
 
 
+# Live-data templates — wired via handler_name (Option A) or
+# [handler:name] markers in output (Option B).
+TEMPLATES_LIVE = [
+    # (color, priority, pattern, output, confidence, notes, handler_name)
+
+    # Option A: handler_name set — output is replaced entirely.
+    (3, 1, "what's my mood",
+        '(replaced by mood handler)',
+        0.90, 'live: identity.Tick mood', 'mood'),
+    (3, 1, "what mood are you in",
+        '(replaced by mood handler)',
+        0.90, 'live: identity.Tick mood', 'mood'),
+    (3, 1, 'how do you feel',
+        '(replaced by mood handler)',
+        0.85, 'live: identity.Tick mood', 'mood'),
+    (1, 1, 'what time is it',
+        '(replaced by now handler)',
+        0.95, 'live: server clock', 'now'),
+    (1, 1, "what's the date",
+        '(replaced by today handler)',
+        0.95, 'live: server date', 'today'),
+    (1, 1, 'what branch',
+        '(replaced by git_branch handler)',
+        0.95, 'live: git branch', 'git_branch'),
+    (1, 1, 'how many qrpairs',
+        '(replaced by qrpair_count handler)',
+        0.90, 'live: caformer QRPair count', 'qrpair_count'),
+
+    # Option B: [handler:name] markers in output, composed with
+    # literal text + slot fills.  No handler_name on the row.
+    (0, 1, 'hi [X]',
+        "Hi [X] — I'm feeling [handler:mood] today.",
+        0.80, 'live mood + slot fill', ''),
+    (1, 2, "what's up",
+        "It's [handler:now] on [handler:today].  "
+        "I'm in a [handler:mood] mood.  "
+        "We have [handler:qrpair_count] in the corpus.",
+        0.85, 'multi-handler composition', ''),
+    (3, 2, 'status report',
+        "Branch: [handler:git_branch]\n"
+        "Mood:   [handler:mood]\n"
+        "Time:   [handler:now]\n"
+        "Corpus: [handler:qrpair_count]",
+        0.85, 'multi-handler composition', ''),
+]
+
+
 class Command(BaseCommand):
     help = 'Seed starter TemplatePattern rows for the 4 boardstack4 agents.'
 
@@ -149,24 +198,50 @@ class Command(BaseCommand):
             n = TemplatePattern.objects.all().delete()[0]
             self.stdout.write(f'wiped {n} existing TemplatePattern rows')
         counts: Counter = Counter()
-        for color, priority, pattern, output, confidence, notes in TEMPLATES:
+        # Stage 1: legacy 6-tuple rows (no handler_name).
+        for color, priority, pattern, output, confidence, notes in TEMPLATES_RAW:
             row, created = TemplatePattern.objects.update_or_create(
                 agent_color=color,
                 pattern=pattern,
                 defaults={
-                    'output':     output,
-                    'priority':   priority,
-                    'confidence': confidence,
-                    'notes':      notes,
-                    'is_active':  True,
+                    'output':       output,
+                    'priority':     priority,
+                    'confidence':   confidence,
+                    'notes':        notes,
+                    'is_active':    True,
+                    'handler_name': '',
                 },
             )
             counts[(color, 'new' if created else 'upd')] += 1
+        # Stage 2: live-data rows (with handler_name and/or
+        # [handler:name] markers in output).
+        n_live_new = 0
+        n_live_upd = 0
+        for (color, priority, pattern, output, confidence, notes,
+                 handler_name) in TEMPLATES_LIVE:
+            row, created = TemplatePattern.objects.update_or_create(
+                agent_color=color,
+                pattern=pattern,
+                defaults={
+                    'output':       output,
+                    'priority':     priority,
+                    'confidence':   confidence,
+                    'notes':        notes,
+                    'is_active':    True,
+                    'handler_name': handler_name,
+                },
+            )
+            counts[(color, 'new' if created else 'upd')] += 1
+            if created: n_live_new += 1
+            else:       n_live_upd += 1
         for color in (0, 1, 2, 3):
             new = counts.get((color, 'new'), 0)
             upd = counts.get((color, 'upd'), 0)
             label = ['personality', 'information', 'command', 'meta'][color]
             self.stdout.write(
                 f'  {label:12s}  {new:>2} new  {upd:>2} updated')
+        total = len(TEMPLATES_RAW) + len(TEMPLATES_LIVE)
         self.stdout.write(self.style.SUCCESS(
-            f'Seeded {len(TEMPLATES)} TemplatePattern rows.'))
+            f'Seeded {total} TemplatePattern rows '
+            f'({len(TEMPLATES_LIVE)} live-data — '
+            f'{n_live_new} new, {n_live_upd} updated).'))

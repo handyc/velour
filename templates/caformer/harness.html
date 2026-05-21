@@ -172,6 +172,9 @@
                 {% if step.slots %}
                   · slots: {% for k, v in step.slots.items %}<b>{{ k }}</b>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}
                 {% endif %}
+                {% if step.handler %}
+                  · <span style="color:#ff7ec7;">handler: <b>{{ step.handler }}</b></span>
+                {% endif %}
               </div>
             {% endif %}
             {% if step.picm_matches %}
