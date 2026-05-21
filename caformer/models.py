@@ -507,21 +507,46 @@ class QRPair(models.Model):
 
 
 class PersonalityModule(models.Model):
-    """A named personality with its own 4-way subroute taxonomy.
+    """A named personality module — either defines one *axis* of the
+    PersonalityState 4-tuple, or *presets* one specific 4-tuple.
 
-    The boardstack4 cascade routes a prompt to *personality* (color 0)
-    as one of four top-level categories.  Within personality, each
-    PersonalityModule defines its own 4 subroutes — different modules
-    may slice that same space along very different lines.
+    The harness's PersonalityState has four axes:
 
-    Examples shipped today:
+      drive       (motivation / why-it-speaks)        — d'Ansembourg
+      expression  (rhetorical style / how-it-sounds)  — David Angel
+      relation    (intimacy / who-we-are-to-each-other) — Coaching
+      lens        (filter on incoming message)        — Schulz von Thun
 
-      Velour:       Informative · Social · Practical · Persuasive
-      David Angel:  Dialogue    · Discourse · Debate  · Diatribe
+    Each axis has 4 values (K=4 alignment).  A complete personality
+    state = (drive, expression, relation, lens) — 4 bytes, 256
+    distinct compositions.  This is the same shape as a boardstack4
+    cascade path, so the cascade's 4-tuple output can be reinterpreted
+    as a PersonalityState directly.
 
-    A HarnessProfile points to one module via personality_module_slug;
-    the harness applies that module's subroute tokens when descending
-    under the personality root."""
+    Module ``kind`` distinguishes the two roles:
+
+      'axis'   — defines one axis; subroutes are the 4 values of that
+                  axis (axis_slug must be drive/expression/relation/lens).
+                  Examples: d'Ansembourg, David Angel, Coaching,
+                  Schulz von Thun.
+      'preset' — defines a specific 4-tuple as a named personality.
+                  state_vector must be a 4-element list [d,e,r,l].
+                  Examples: Velour, Techbro, Isaacs, Grice — each
+                  also carries 4 named *modes* (one preset per
+                  subroute, since each subroute is a distinct mood).
+
+    A HarnessProfile points to a preset via personality_module_slug;
+    the harness uses that preset's state_vector as its initial /
+    default PersonalityState."""
+
+    KIND_CHOICES = (('axis', 'axis (defines one dimension)'),
+                    ('preset', 'preset (named 4-tuple)'))
+    AXIS_CHOICES = (
+        ('drive',      'drive (motivation)'),
+        ('expression', 'expression (style)'),
+        ('relation',   'relation (intimacy)'),
+        ('lens',       'lens (perception filter)'),
+    )
 
     slug = models.SlugField(
         max_length=64, unique=True,
@@ -539,6 +564,20 @@ class PersonalityModule(models.Model):
                   'tokens are short (≤ 4 char) keyword matches on '
                   'word boundaries.  Order matters — index 0..3 maps '
                   'to depth-1 branch indices under personality (0).')
+    kind = models.CharField(
+        max_length=10, choices=KIND_CHOICES, default='preset',
+        help_text='axis: defines one dimension of PersonalityState. '
+                  'preset: defines a named 4-tuple in that space.')
+    axis_slug = models.CharField(
+        max_length=20, choices=AXIS_CHOICES, blank=True,
+        help_text='If kind=axis, which dimension (drive/expression/'
+                  'relation/lens).  Otherwise empty.')
+    state_vector = models.JSONField(
+        default=list,
+        help_text='If kind=preset, the default 4-tuple [d, e, r, l] '
+                  '(each 0..3) this module evokes.  Each of the 4 '
+                  'subroutes may also carry its own state_vector — '
+                  'a different mood within this persona.')
 
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)

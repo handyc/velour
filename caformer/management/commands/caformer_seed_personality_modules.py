@@ -213,25 +213,55 @@ class Command(BaseCommand):
             n = PersonalityModule.objects.all().delete()[0]
             self.stdout.write(f'wiped {n} existing PersonalityModule rows')
 
+        # Which modules DEFINE an axis vs. PRESET a 4-tuple.
+        # Axis-modules: their 4 subroutes ARE the 4 values of the axis.
+        AXIS_MODULES = {
+            'dansembourg-intentions': 'drive',
+            'david-angel':            'expression',
+            'coaching':               'relation',
+            'schulz-von-thun':        'lens',
+        }
+        # Preset modules: pick a default (drive, expression, relation, lens)
+        # 4-tuple that captures the module's central tendency.
+        # Velour: empathic + dialogic + small-talk + relationship-lens
+        # Techbro: control + discourse + fact-sharing + appeal-lens
+        # Isaacs:  connect + inquiry/dialogue (=dialogic) + opinions + relation
+        # Grice:   inform + discourse + fact-sharing + fact-lens
+        PRESET_STATES = {
+            'velour':              [3, 0, 0, 2],     # connect, dialogue, smalltalk, relationship
+            'techbro':             [2, 1, 1, 3],     # control, discourse, fact-share, appeal
+            'isaacs-four-fields':  [3, 0, 2, 2],     # connect, dialogue, opinions, relationship
+            'grice-maxims':        [1, 1, 1, 0],     # inform, discourse, fact-share, fact
+        }
+
         n_new = n_upd = 0
         for slug, name, description, subroutes in MODULES:
             payload = [
                 {'label': lab, 'tokens': list(tok), 'notes': notes}
                 for lab, tok, notes in subroutes
             ]
+            kind = 'axis' if slug in AXIS_MODULES else 'preset'
+            axis_slug = AXIS_MODULES.get(slug, '')
+            state_vector = PRESET_STATES.get(slug, [])
             row, created = PersonalityModule.objects.update_or_create(
                 slug=slug,
                 defaults={
-                    'name':        name,
-                    'description': description,
-                    'subroutes':   payload,
+                    'name':         name,
+                    'description':  description,
+                    'subroutes':    payload,
+                    'kind':         kind,
+                    'axis_slug':    axis_slug,
+                    'state_vector': state_vector,
                 },
             )
             if created: n_new += 1
             else:       n_upd += 1
+            tag = (f'AXIS:{axis_slug}' if kind == 'axis'
+                   else f'PRESET:({",".join(str(v) for v in state_vector)})'
+                        if state_vector else 'preset')
             self.stdout.write(
-                f'  {"+" if created else "·"} {slug:<12} {name:<14} '
-                f'{len(payload)} subroutes')
+                f'  {"+" if created else "·"} {slug:<22} {name:<32} '
+                f'{tag}')
 
         self.stdout.write(self.style.SUCCESS(
             f'Seeded {len(MODULES)} PersonalityModule rows '
