@@ -241,6 +241,12 @@ function paintTick(t){
 }
 
 async function loadFromPrompt(){
+  // Loading is also used to (re)load when switching scenes back to
+  // boardstack4.  Clear any leftover meshes from a previously-active
+  // scene (pipeline / byte_router / tree / etc.) so we don't stack
+  // overlays on top of each other.
+  clearScene();
+  TOKEN_FLOWERS = [];
   const prompt = document.getElementById('v3d-prompt').value;
   const r = await fetch('/caformer/viz3d/state/?prompt='
     + encodeURIComponent(prompt) + '&ticks=8');
@@ -249,8 +255,19 @@ async function loadFromPrompt(){
   DATA = d;
   buildBoards(d.side, d.n_boards);
   paintTick(0);
-  document.getElementById('v3d-fp').textContent =
-    (d.final_cell00 || []).join('-') || '∅';
+  _setText('v3d-fp', (d.final_cell00 || []).join('-') || '∅');
+  // Re-center the camera since prior scenes may have moved it far.
+  controls.target.set(0, 12, 0);
+  camera.position.set(18, 14, 26);
+  controls.update();
+  // Also reset the meta text so the user sees they're on boardstack.
+  _setText('v3d-scene-meta',
+    'Phase 1: 4 boards × side² K=4 cells, animated tick-by-tick.');
+  // And reflect the active scene button.
+  SCENE_NAME = 'boardstack';
+  for (const btn of document.querySelectorAll('.v3d-scene-btn')) {
+    btn.classList.toggle('active', btn.dataset.scene === 'boardstack');
+  }
 }
 
 async function loadTreeScene(){
