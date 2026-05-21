@@ -553,9 +553,48 @@ def _cell8_dispatch(prompt: str, *, strict_only: bool = False) -> dict:
                 pair = best_fuzzy_pair
                 matched_prompt = best_fuzzy_pair.prompt
                 match_kind = f'fuzzy ({best_fuzzy_score:.2f})'
+
+    # Tier 5: partial-rules fuzzy fallback.  When nothing matched
+    # the byte-exact corpus, search pairs that have ANY cell8 tier
+    # rules-blob stored but didn't converge to byte-exact.  These
+    # produce approximate ("Shakespeare-ish but not quite") output
+    # — better than empty, with the sub_label flagging it as such.
+    if pair is None and not strict_only and reduced_user:
+        partial_filter = (
+            Q(cell8_b008_rules_blob__isnull=False) |
+            Q(cell8_b016_rules_blob__isnull=False) |
+            Q(cell8_b032_rules_blob__isnull=False) |
+            Q(cell8_b064_rules_blob__isnull=False) |
+            Q(cell8_b128_rules_blob__isnull=False) |
+            Q(cell8_b256_rules_blob__isnull=False))
+        best_partial_pair = None
+        best_partial_score = 0.0
+        PARTIAL_THRESHOLD = 0.50
+        PARTIAL_JACCARD_GATE = 0.40
+        # Exclude pairs already byte-exact (they were considered above).
+        exact_pks = QRPair.objects.filter(exact_filter).values('pk')
+        for cand in (QRPair.objects.filter(partial_filter)
+                     .exclude(pk__in=exact_pks).only('pk', 'prompt')):
+            cand_norm = _norm.lower_no_punct(cand.prompt)
+            if not cand_norm or len(cand_norm) < 8:
+                continue
+            jac = _norm.jaccard(prompt, cand.prompt)
+            if jac < PARTIAL_JACCARD_GATE:
+                continue
+            char_sim = difflib.SequenceMatcher(
+                None, reduced_user, cand_norm).ratio()
+            score = max(jac, char_sim)
+            if score >= PARTIAL_THRESHOLD and score > best_partial_score:
+                best_partial_score = score
+                best_partial_pair = cand
+        if best_partial_pair is not None:
+            pair = best_partial_pair
+            matched_prompt = best_partial_pair.prompt
+            match_kind = f'partial-rules ({best_partial_score:.2f})'
+
     if pair is None:
         return {'reply': '', 'sub_label':
-                'no exact / reduced / substring / fuzzy QRPair match'}
+                'no exact / reduced / substring / fuzzy / partial QRPair match'}
     tier = (pair.best_cell8_tier()
             if hasattr(pair, 'best_cell8_tier') else None)
     if tier is None:
