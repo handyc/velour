@@ -235,17 +235,44 @@ def run_turn(profile, prompt: str,
         # Safety-net fallback: when the chain produced NO reply
         # contribution (because boardstack4 routing missed the info
         # agent, but a QRPair partial / fuzzy match exists), try
-        # cell8 dispatch once more outside the chain.  Preserves
-        # byte-exact / substring / fuzzy hits regardless of routing.
+        # cell8 dispatch and templates in InformationAgent's priority
+        # order: strict cell8 → template → loose cell8.  Replicating
+        # the order here keeps the template handlers (mood, corpus
+        # state, etc.) from being drowned by noisy fuzzy QRPair
+        # matches at the fallback stage.
         if not chain_state.has_reply():
-            core_fb = _agents._cell8_dispatch(prompt)
+            from . import templates as _tpl
+            # Tier 1: strict cell8.
+            core_fb = _agents._cell8_dispatch(prompt, strict_only=True)
+            kind = 'strict'
+            if not core_fb.get('reply'):
+                # Tier 2: template — fallback searches ALL 4 agent
+                # colours, since boardstack4 routing might have
+                # missed the right agent's templates.  This is the
+                # safety-net stage: anything that matches counts.
+                best_tpl = None
+                best_spec = -1
+                for color in (0, 1, 2, 3):
+                    tpl = _tpl.match_table(prompt, color)
+                    if tpl is not None and tpl.specificity > best_spec:
+                        best_tpl = tpl
+                        best_spec = tpl.specificity
+                if best_tpl is not None:
+                    core_fb = {'reply': best_tpl.output,
+                               'sub_label': f'template {best_tpl.pattern!r}'}
+                    kind = 'template'
+                else:
+                    # Tier 3: loose cell8 (substring + fuzzy).
+                    core_fb = _agents._cell8_dispatch(prompt,
+                                                          strict_only=False)
+                    kind = 'loose'
             if core_fb.get('reply'):
                 chain_state.contributions.append(_agents.Contribution(
                     agent='information', kind='reply',
                     content=core_fb['reply'], confidence=0.85))
                 chain_state.step_log.append({
                     'agent':  'composer-fallback',
-                    'action': 'reply',
+                    'action': f'reply ({kind})',
                     'content': core_fb['reply'],
                     'detail':  core_fb.get('sub_label', ''),
                 })

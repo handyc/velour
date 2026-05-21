@@ -214,11 +214,15 @@ class InformationAgent:
     colour_code = 1
 
     def run(self, state: AgentState) -> None:
-        """Three paths, in priority order:
+        """Four paths, in priority order:
 
-          1. cell8 QRPair byte-exact dispatch (highest confidence);
-          2. template-pattern match (parametric — 'look up [X]');
-          3. PICM keyword acknowledgement (lowest — 'how many' etc.).
+          1. cell8 QRPair STRICT (exact / normalized) — byte-exact,
+             highest confidence;
+          2. template-pattern match (parametric — 'look up [X]') —
+             hand-curated patterns and live-data handlers fire here;
+          3. cell8 QRPair LOOSE (substring / fuzzy) — best-effort
+             matches when no template fired;
+          4. PICM keyword acknowledgement (lowest — 'how many' etc.).
 
         Caches across repeated chain calls via state.has_reply()."""
         tokens = _picm.vocab_for(self.colour_code)
@@ -230,7 +234,8 @@ class InformationAgent:
                 'content': '(reply already present, leaving it)',
                 'picm_matches': matched_strs})
             return
-        core = _cell8_dispatch(state.prompt)
+        # Tier 1: strict cell8 (exact + normalized only).
+        core = _cell8_dispatch(state.prompt, strict_only=True)
         if core.get('reply'):
             state.contributions.append(Contribution(
                 agent=self.name, kind='reply',
@@ -241,7 +246,16 @@ class InformationAgent:
                 'detail':  core.get('sub_label', ''),
                 'picm_matches': matched_strs})
             return
+        # Tier 2: template match — information agent ALSO consults
+        # meta-route templates (color 3) so self-introspection
+        # ('how is the corpus', 'how big are you') still wins over
+        # noisy fuzzy QRPair matches regardless of boardstack4
+        # routing accuracy.  Pick the most specific across both.
         tpl = _tpl.match_table(state.prompt, self.colour_code)
+        meta_tpl = _tpl.match_table(state.prompt, 3)
+        if meta_tpl is not None and (tpl is None
+                or meta_tpl.specificity > tpl.specificity):
+            tpl = meta_tpl
         if tpl is not None:
             state.contributions.append(Contribution(
                 agent=self.name, kind='reply',
@@ -254,6 +268,20 @@ class InformationAgent:
                 'template': tpl.pattern,
                 'slots':    tpl.slots,
                 'handler':  tpl.handler_name or '',
+                'picm_matches': matched_strs})
+            return
+        # Tier 3: loose cell8 (substring + fuzzy).  Lower priority
+        # than template so hand-curated patterns aren't drowned by
+        # noisy fuzzy QRPair matches.
+        core_loose = _cell8_dispatch(state.prompt, strict_only=False)
+        if core_loose.get('reply'):
+            state.contributions.append(Contribution(
+                agent=self.name, kind='reply',
+                content=core_loose['reply'], confidence=0.75))
+            state.step_log.append({
+                'agent': self.name, 'action': 'reply',
+                'content': core_loose['reply'],
+                'detail':  core_loose.get('sub_label', ''),
                 'picm_matches': matched_strs})
             return
         # Trailing '?' is itself a strong info-route signal even when
@@ -431,7 +459,7 @@ AGENTS_BY_COLOUR: dict[int, object] = {
 # ─── Cell8 dispatch helper (shared with composer's fallback) ───────
 
 
-def _cell8_dispatch(prompt: str) -> dict:
+def _cell8_dispatch(prompt: str, *, strict_only: bool = False) -> dict:
     """Single-prompt cell8 QRPair lookup.  Two-tier match:
 
       1. Exact prompt match (byte-identical) — preferred, highest
@@ -470,7 +498,7 @@ def _cell8_dispatch(prompt: str) -> dict:
             best_fuzzy_pair = None
             best_fuzzy_score = 0.0
             FUZZY_THRESHOLD = 0.50
-            FUZZY_JACCARD_GATE = 0.30
+            FUZZY_JACCARD_GATE = 0.40
             for cand in QRPair.objects.filter(exact_filter).only(
                     'pk', 'prompt'):
                 cand_norm = _norm.lower_no_punct(cand.prompt)
@@ -481,6 +509,12 @@ def _cell8_dispatch(prompt: str) -> dict:
                     matched_prompt = cand.prompt
                     match_kind = 'lower_no_punct'
                     break
+                if strict_only:
+                    # Strict mode: skip loose tiers (substring / fuzzy)
+                    # so a higher-priority dispatcher (e.g. template
+                    # match) can fire before we resort to noisy
+                    # matches.
+                    continue
                 if cand_norm in reduced_user:
                     # Avoid trivial matches like a 2-letter trained
                     # prompt being a substring of every user prompt.
