@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}caformer — 3D walkthrough{% endblock %}
+{% block content %}
+{% load static %}
+<style>
+  body { margin: 0; }
+  .v3d-page { max-width: none; padding: 12px 18px; }
+  .v3d-header { display: flex; gap: 14px; align-items: center;
+                 flex-wrap: wrap; margin-bottom: 8px; }
+  .v3d-header h1 { margin: 0; font-size: 1.0rem; color: #cfc; }
+  .v3d-controls { display: flex; gap: 10px; align-items: center;
+                    flex-wrap: wrap; font-family: ui-monospace, monospace;
+                    font-size: 0.82rem; }
+  .v3d-controls input[type=text] { background: #0d1117;
+        border: 1px solid #30363d; color: #cdd;
+        padding: 4px 8px; min-width: 26em;
+        font-family: inherit; font-size: 0.85rem; }
+  .v3d-controls button { background: #222; color: #cfc;
+        border: 1px solid #555; padding: 4px 12px; cursor: pointer;
+        font-family: inherit; }
+  .v3d-controls button:hover { border-color: #8b949e; }
+  .v3d-meta { color: #888; font-size: 0.78rem; }
+  #v3d-stage { width: 100%; height: 75vh;
+                background: linear-gradient(180deg, #050505 0%, #0a0a0a 100%);
+                border: 1px solid #1a1a1a; }
+  #v3d-stage canvas { display: block; }
+  .v3d-fingerprint { font-family: ui-monospace, monospace;
+                       color: #79c0ff; }
+  .v3d-legend { display: flex; gap: 16px; margin-top: 6px;
+                 font-family: ui-monospace, monospace; font-size: 0.78rem; }
+  .v3d-legend span.swatch { display: inline-block; width: 1.2em;
+                            height: 0.9em; vertical-align: middle;
+                            margin-right: 6px;
+                            border: 1px solid #2a2a2a; }
+</style>
+
+<div class="v3d-page">
+  <div class="v3d-header">
+    <h1>caformer / 3D walkthrough · boardstack4 cascade</h1>
+    <span class="v3d-meta">Phase 1: 4 boards × side² K=4 cells, animated tick-by-tick.</span>
+  </div>
+
+  <div class="v3d-controls">
+    <span>prompt:</span>
+    <input type="text" id="v3d-prompt" value="hello"
+           placeholder="prompt to cascade">
+    <button id="v3d-load">load</button>
+    <button id="v3d-play">▶ play</button>
+    <button id="v3d-pause">⏸ pause</button>
+    <button id="v3d-step">step</button>
+    <span>tick: <span id="v3d-tick">0</span></span>
+    <span>board: <span id="v3d-board">0</span></span>
+    <span>fingerprint: <span id="v3d-fp" class="v3d-fingerprint">∅</span></span>
+  </div>
+
+  <div class="v3d-legend">
+    <span><span class="swatch" style="background:#1a1a1a"></span>0</span>
+    <span><span class="swatch" style="background:#2ea043"></span>1</span>
+    <span><span class="swatch" style="background:#79c0ff"></span>2</span>
+    <span><span class="swatch" style="background:#ff7ec7"></span>3</span>
+    <span class="v3d-meta">(K=4 colours; cell (0,0) of each board's final state forms the cascade fingerprint)</span>
+  </div>
+
+  <div id="v3d-stage"></div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "{% static 'js/three-0.170/build/three.module.js' %}",
+    "three/addons/": "{% static 'js/three-0.170/addons/' %}"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const stage = document.getElementById('v3d-stage');
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050505);
+
+const camera = new THREE.PerspectiveCamera(
+  55, stage.clientWidth / stage.clientHeight, 0.1, 1000);
+camera.position.set(18, 14, 26);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(stage.clientWidth, stage.clientHeight);
+stage.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 4, 0);
+controls.update();
+
+// Lights — keyed for visibility on the dark background.
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const key = new THREE.DirectionalLight(0xffffff, 0.7);
+key.position.set(8, 16, 12);
+scene.add(key);
+
+// K=4 colour palette — must match the CSS legend swatches.
+const PALETTE = [0x1a1a1a, 0x2ea043, 0x79c0ff, 0xff7ec7];
+const cellGeom = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+
+// Materials cache keyed by colour value.
+const matCache = {};
+function matFor(v){
+  if (!matCache[v]) {
+    matCache[v] = new THREE.MeshStandardMaterial({
+      color: PALETTE[v & 3],
+      roughness: 0.55,
+      metalness: 0.05,
+      emissive: PALETTE[v & 3],
+      emissiveIntensity: 0.18,
+    });
+  }
+  return matCache[v];
+}
+
+// Each board occupies a horizontal slab; boards stack vertically.
+// SIDE is set from the JSON payload — server tells us the grid edge.
+let BOARDS = [];     // [{ meshes: [[mesh]], baseY: number }]
+let DATA = null;     // server payload
+let curTick = 0;
+let playing = false;
+
+function buildBoards(side, n_boards){
+  for (const b of BOARDS) {
+    for (const row of b.meshes) for (const m of row) scene.remove(m);
+  }
+  BOARDS = [];
+  const spacingY = side + 4;     // gap between boards
+  const offset = -(side - 1) / 2;
+  for (let bi = 0; bi < n_boards; bi++) {
+    const meshes = [];
+    const baseY = bi * spacingY;
+    for (let r = 0; r < side; r++) {
+      const row = [];
+      for (let c = 0; c < side; c++) {
+        const mesh = new THREE.Mesh(cellGeom, matFor(0));
+        mesh.position.set(offset + c, baseY, offset + r);
+        scene.add(mesh);
+        row.push(mesh);
+      }
+      meshes.push(row);
+    }
+    BOARDS.push({ meshes, baseY });
+  }
+  // Recenter camera target on the stack.
+  controls.target.set(0, ((n_boards - 1) * spacingY) / 2, 0);
+  controls.update();
+}
+
+function paintState(board_idx, state){
+  const b = BOARDS[board_idx];
+  if (!b) return;
+  for (let r = 0; r < state.length; r++) {
+    for (let c = 0; c < state[r].length; c++) {
+      b.meshes[r][c].material = matFor(state[r][c]);
+    }
+  }
+}
+
+function paintTick(t){
+  if (!DATA) return;
+  curTick = Math.max(0, Math.min(DATA.n_ticks, t));
+  document.getElementById('v3d-tick').textContent = curTick;
+  for (let bi = 0; bi < DATA.n_boards; bi++) {
+    paintState(bi, DATA.states_per_board[bi][curTick]);
+  }
+  document.getElementById('v3d-board').textContent = '(all 4)';
+}
+
+async function loadFromPrompt(){
+  const prompt = document.getElementById('v3d-prompt').value;
+  const r = await fetch('/caformer/viz3d/state/?prompt='
+    + encodeURIComponent(prompt) + '&ticks=8');
+  const d = await r.json();
+  if (d.error) { console.warn(d); return; }
+  DATA = d;
+  buildBoards(d.side, d.n_boards);
+  paintTick(0);
+  document.getElementById('v3d-fp').textContent =
+    (d.final_cell00 || []).join('-') || '∅';
+}
+
+document.getElementById('v3d-load').addEventListener('click', loadFromPrompt);
+document.getElementById('v3d-play').addEventListener('click', () => playing = true);
+document.getElementById('v3d-pause').addEventListener('click', () => playing = false);
+document.getElementById('v3d-step').addEventListener('click', () => {
+  if (!DATA) return;
+  paintTick(curTick + 1 > DATA.n_ticks ? 0 : curTick + 1);
+});
+
+// Animation loop — advance one tick every 500 ms when playing.
+let lastAdvance = 0;
+function animate(t){
+  controls.update();
+  if (playing && DATA && t - lastAdvance > 500) {
+    paintTick(curTick + 1 > DATA.n_ticks ? 0 : curTick + 1);
+    lastAdvance = t;
+  }
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = stage.clientWidth / stage.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(stage.clientWidth, stage.clientHeight);
+});
+
+requestAnimationFrame(animate);
+loadFromPrompt();
+</script>
+{% endblock %}

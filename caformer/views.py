@@ -4545,3 +4545,76 @@ def harness_reply(request):
         'br_byte_chain':     reply.byte_router_byte_chain,
         'error':             reply.error,
     })
+
+
+# ─── 3D viz ─────────────────────────────────────────────────────────
+
+
+@login_required
+def viz3d_view(request):
+    """3D walkthrough of caformer substrates (bbycroft-style).
+
+    Phase 1 scene: boardstack4 cascade — 4 boards as 8x8 K=4 grids of
+    coloured cubes, animated tick-by-tick.  Uses vendored three.js
+    0.170 + OrbitControls."""
+    return render(request, 'caformer/viz3d.html', {})
+
+
+@login_required
+def viz3d_state(request):
+    """JSON: cascade states for a prompt across all 4 boards × N ticks.
+
+    GET ?prompt=&ticks=8 → JSON {
+        side: 8,
+        n_boards: 4,
+        n_ticks: 8,
+        states: [[ticks][board][cell_row][cell_col]] — uint8 K=4 values
+        per_board_final_cell00: [c0, c1, c2, c3]
+    }
+
+    Sourced from the currently-cached BoardStack4.  If no stack is
+    trained, falls back to random states so the visualisation still
+    renders."""
+    import numpy as np
+    from caformer.router import SIDE, embed_prompt
+    from caformer.cell8 import hex_ca_step_cell8
+    from caformer.primitives import hex_ca_step
+
+    prompt = (request.GET.get('prompt') or 'hello').strip()
+    n_ticks_per_board = max(1, min(16, int(request.GET.get('ticks') or 6)))
+
+    # Load boardstack4 — soft-fail to a random-LUT demo so the page
+    # works even when no model has trained.
+    try:
+        from caformer import boardstack4 as _bs4
+        stack = _bs4.get_stack()
+        rules = [r for r in stack.rules]
+        side = stack.side
+    except Exception:                                # noqa: BLE001
+        rng = np.random.RandomState(0xCAFE)
+        rules = [rng.randint(0, 4, size=4 ** 7).astype(np.uint8)
+                 for _ in range(4)]
+        side = SIDE
+
+    state = embed_prompt(prompt, side=side)
+    # Record initial state as tick 0 of board 0, then each tick.
+    states_per_board = []   # [board_idx][tick_idx][row][col]
+    per_board_final = []
+    for b, rule in enumerate(rules):
+        board_states = [state.astype(int).tolist()]
+        s = state
+        for _t in range(n_ticks_per_board):
+            s = hex_ca_step(s, rule)
+            board_states.append(s.astype(int).tolist())
+        states_per_board.append(board_states)
+        per_board_final.append(int(s[0, 0]))
+        state = s   # cascade — next board sees this one's final state
+
+    return _json_response({
+        'prompt':           prompt,
+        'side':             int(side),
+        'n_boards':         len(rules),
+        'n_ticks':          int(n_ticks_per_board),
+        'states_per_board': states_per_board,
+        'final_cell00':     per_board_final,
+    })
