@@ -46,6 +46,32 @@ def _random_lut(rng):
     return bytes(rng.randint(0, 3) for _ in range(LUT_SIZE))
 
 
+def _fractal_mutate(lut: bytes, n_ticks: int = 1) -> bytes:
+    """Mutate by running the rule on itself as image.
+
+    A K=4 LUT for the 7-neighbour hex rule has 4^7 = 16,384 entries
+    = exactly 128 × 128.  Reshape the LUT into a square grid, then
+    tick the SAME LUT (treated as the rule) on that grid for N ticks.
+    The resulting grid, flattened back, is the new LUT — a child rule
+    that bears structural relationship to the parent (especially at
+    low N).
+
+    Per the user's insight 2026-05-21: multi-axis coordinated change,
+    preserves parent pattern more than random bit-flips, controllable
+    via N (n_ticks = 1 → near-identical; larger N → progressive
+    divergence)."""
+    from caformer.primitives import hex_ca_step
+    SIDE = 128
+    assert LUT_SIZE == SIDE * SIDE, (
+        f'_fractal_mutate assumes LUT_SIZE == 128² (got {LUT_SIZE})')
+    grid = (np.frombuffer(lut, dtype=np.uint8)
+              .reshape(SIDE, SIDE).copy() & 3)
+    rule_arr = (np.frombuffer(lut, dtype=np.uint8) & 3)
+    for _ in range(max(1, n_ticks)):
+        grid = hex_ca_step(grid, rule_arr)
+    return bytes(grid.flatten())
+
+
 def _mutate(lut, rng, n_flips):
     arr = bytearray(lut)
     for _ in range(n_flips):
@@ -70,7 +96,9 @@ def _fitness_single(lut_arr, stims, targets, ticks):
 
 
 def _evolve_single(stims, targets, ticks, iters, pop,
-                      flips_min, flips_max, seed, log, label):
+                      flips_min, flips_max, seed, log, label,
+                      fractal_prob: float = 0.0,
+                      fractal_ticks: int = 1):
     """Evolve one independent classifier LUT.  Logs at three cadences:
 
       - INIT progress: every N candidates evaluated during pool seeding
@@ -124,8 +152,12 @@ def _evolve_single(stims, targets, ticks, iters, pop,
                 f'stopping early')
             break
         parent = pop_list[rng.randrange(max(1, pop // 2))]
-        child = _mutate(parent[0], rng,
-                        rng.randint(flips_min, flips_max))
+        if fractal_prob > 0 and rng.random() < fractal_prob:
+            # Coherent multi-axis mutation: run the rule on itself.
+            child = _fractal_mutate(parent[0], n_ticks=fractal_ticks)
+        else:
+            child = _mutate(parent[0], rng,
+                            rng.randint(flips_min, flips_max))
         carr = np.frombuffer(child, dtype=np.uint8) & 3
         fit = _fitness_single(carr, stims, targets, ticks)
         worst_idx = 0
@@ -201,7 +233,9 @@ def _fitness_joint(luts_arr, stims, targets, ticks,
 
 
 def _evolve_joint(luts, stims, targets, ticks, iters, flips_min,
-                      flips_max, seed, diversity_weight, log):
+                      flips_max, seed, diversity_weight, log,
+                      fractal_prob: float = 0.0,
+                      fractal_ticks: int = 1):
     """Joint cascade fine-tune.  Single-genome hill climb (no pop),
     one board mutated per iter.  Same logging shape as _evolve_single:
     ACCEPT on improvement, heartbeat at fixed intervals so flat
@@ -221,7 +255,11 @@ def _evolve_joint(luts, stims, targets, ticks, iters, flips_min,
     for it in range(iters):
         which = rng.randrange(N_BOARDS)
         n_flips = rng.randint(flips_min, flips_max)
-        new_lut = _mutate(best_luts[which], rng, n_flips)
+        if fractal_prob > 0 and rng.random() < fractal_prob:
+            new_lut = _fractal_mutate(best_luts[which],
+                                          n_ticks=fractal_ticks)
+        else:
+            new_lut = _mutate(best_luts[which], rng, n_flips)
         cand = list(best_luts)
         cand[which] = new_lut
         cand_arr = [np.frombuffer(l, dtype=np.uint8).copy() & 3
@@ -265,14 +303,25 @@ class Command(BaseCommand):
                                      '(Stage B)')
         parser.add_argument('--flips-min', type=int, default=4)
         parser.add_argument('--flips-max', type=int, default=200)
+        parser.add_argument('--fractal-prob', type=float, default=0.0,
+                              help='probability per iter of using fractal '
+                                     'mutation (rule applied to itself as '
+                                     'image) instead of random bit-flips.  '
+                                     '0.0 = pure random (default); 0.2 is '
+                                     'a useful mix for breaking out of '
+                                     'local basins via coherent moves.')
+        parser.add_argument('--fractal-ticks', type=int, default=1,
+                              help='N ticks for fractal mutation when it '
+                                     'fires.  1 = near-identical child; '
+                                     'larger = more divergent.')
         parser.add_argument('--diversity-weight', type=float, default=0.15)
         parser.add_argument('--out-dir', type=str,
                               default='.artifacts/boardstack4_v1')
         parser.add_argument('--seed', type=int, default=0xB04D5AC4)
 
     def handle(self, *, ticks, side, pop, cell_iters, joint_iters,
-                 flips_min, flips_max, diversity_weight, out_dir, seed,
-                 **opts):
+                 flips_min, flips_max, fractal_prob, fractal_ticks,
+                 diversity_weight, out_dir, seed, **opts):
         def log(msg):
             sys.stdout.write(str(msg) + '\n'); sys.stdout.flush()
 
@@ -303,7 +352,9 @@ class Command(BaseCommand):
                 iters=cell_iters, pop=pop,
                 flips_min=flips_min, flips_max=flips_max,
                 seed=seed ^ (b * 0x1234ABCD),
-                log=log, label=f'board{b}')
+                log=log, label=f'board{b}',
+                fractal_prob=fractal_prob,
+                fractal_ticks=fractal_ticks)
             luts.append(best_lut)
             stage_a_acc.append(best_n / M)
             log(f'  board {b}: {best_n}/{M} = {best_n/M:.3f}')
@@ -317,7 +368,9 @@ class Command(BaseCommand):
             flips_min=flips_min, flips_max=flips_max,
             seed=seed ^ 0xA0F1B2C3,
             diversity_weight=diversity_weight,
-            log=log)
+            log=log,
+            fractal_prob=fractal_prob,
+            fractal_ticks=fractal_ticks)
 
         wall = time.time() - t_global
 
