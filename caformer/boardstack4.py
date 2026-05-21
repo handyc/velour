@@ -67,6 +67,28 @@ class BoardStack4:
                     f'boardstack4 board {i} LUT must be {LUT_SIZE} bytes; '
                     f'got {arr.size}')
             self.rules.append(arr)
+        # Optional trained permutation: path-tuple → category.  When
+        # present, classify_prompt() prefers it over mode-projection.
+        perm_path = self.model_dir / 'permutation.json'
+        self.permutation: dict[tuple[int, ...], int] = {}
+        if perm_path.exists():
+            raw = json.loads(perm_path.read_text())
+            for k, v in raw.items():
+                # Keys are '0-1-2-3' strings.
+                tup = tuple(int(c) for c in k.split('-'))
+                self.permutation[tup] = int(v)
+
+    def classify_prompt(self, prompt: str) -> dict:
+        """Return {category, path, permutation_loaded}.  Uses
+        permutation when available, else mode-projection."""
+        path = self.cascade(prompt)
+        if self.permutation:
+            cat = self.permutation.get(path, path_to_category(path))
+            return {'category': cat, 'path': path,
+                    'permutation_loaded': True}
+        return {'category': path_to_category(path),
+                'path': path,
+                'permutation_loaded': False}
 
     def cascade(self, prompt: str) -> tuple[int, int, int, int]:
         """Run the cascade and return the 4-colour path."""
@@ -118,12 +140,26 @@ _CACHE: dict[str, BoardStack4] = {}
 _LOCK = threading.Lock()
 
 
+_DEFAULT_SEARCH_ORDER = (
+    '.artifacts/boardstack4_v3',          # 92.5 % with permutation
+    '.artifacts/boardstack4_v1',          # 65 % v1 (legacy fallback)
+)
+
+
 def get_stack(model_dir: str | Path | None = None,
                  ticks: int = TICKS) -> BoardStack4:
-    """Load a BoardStack4 from disk, cached.  If model_dir is None,
-    looks under .artifacts/boardstack4_v1/."""
+    """Load a BoardStack4 from disk, cached.  When ``model_dir`` is
+    None, search the default order — prefer the highest-accuracy
+    trained artifact first, fall back to legacy."""
     if model_dir is None:
-        model_dir = '.artifacts/boardstack4_v1'
+        for candidate in _DEFAULT_SEARCH_ORDER:
+            if (Path(candidate) / 'boardstack4_meta.json').exists():
+                model_dir = candidate
+                break
+        else:
+            raise FileNotFoundError(
+                'no boardstack4 artifact found in default search order: '
+                f'{_DEFAULT_SEARCH_ORDER}')
     key = str(model_dir)
     with _LOCK:
         if key not in _CACHE:

@@ -71,14 +71,19 @@ def _classify_boardstack4(prompt: str) -> PrefilterResult:
         if result.available:
             result.mode = 'router (boardstack4 missing)'
         return result
-    path = stack.cascade(prompt)
-    cat = bs4.path_to_category(path)
+    # Prefer the trained permutation when present; else fall back to
+    # mode-projection.  Permutation lifts mode-acc 42.5% → 92.5% on v3.
+    info = stack.classify_prompt(prompt)
+    path = info['path']
+    cat = info['category']
+    mode = ('boardstack4 (permutation)' if info['permutation_loaded']
+            else 'boardstack4 (mode-projection)')
     return PrefilterResult(
         category=cat,
         name=CATEGORY_NAMES.get(cat, '?'),
         colour=CATEGORY_COLOURS.get(cat, 'ffffff'),
         available=True,
-        mode='boardstack4',
+        mode=mode,
         path=path)
 
 
