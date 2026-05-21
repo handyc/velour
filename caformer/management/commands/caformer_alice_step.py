@@ -78,13 +78,28 @@ class Command(BaseCommand):
                 if not b.name.startswith(base_slug): continue
                 m = re.match(rf'^{re.escape(base_slug)}(\d+)$', b.name)
                 if not m: continue
+                # Read manifest to know the expected array size — used
+                # to detect partial / still-running bundles.
+                expected = 0
+                manifest_path = b / 'manifest.json'
+                if manifest_path.exists():
+                    try:
+                        expected = int(json.loads(
+                            manifest_path.read_text()).get('array_size', 0))
+                    except (json.JSONDecodeError, OSError, ValueError):
+                        pass
+                outputs_dir = b / 'outputs'
+                n_rules = (len(list(outputs_dir.glob('*.rules')))
+                           if outputs_dir.is_dir() else 0)
                 bundles.append({
-                    'slug':       b.name,
-                    'version':    int(m.group(1)),
-                    'path':       b,
-                    'has_outputs': (b / 'outputs').is_dir()
-                                    and any((b / 'outputs').glob('*.rules')),
-                    'ingested':   (b / 'INGESTED.txt').exists(),
+                    'slug':        b.name,
+                    'version':     int(m.group(1)),
+                    'path':        b,
+                    'has_outputs': n_rules > 0,
+                    'n_rules':     n_rules,
+                    'expected':    expected,
+                    'complete':    expected > 0 and n_rules >= expected,
+                    'ingested':    (b / 'INGESTED.txt').exists(),
                 })
         bundles.sort(key=lambda b: b['version'])
 
@@ -93,12 +108,17 @@ class Command(BaseCommand):
         log(f'  existing bundles: {len(bundles)}')
         for b in bundles:
             tags = []
-            if b['has_outputs']: tags.append('outputs')
-            if b['ingested']:    tags.append('ingested')
+            tags.append(f"{b['n_rules']}/{b['expected'] or '?'} rules")
+            if b['complete']: tags.append('complete')
+            if b['ingested']: tags.append('ingested')
             log(f"    v{b['version']:>2}  {b['slug']:<30}  "
-                f"{','.join(tags) or '(no outputs yet)'}")
+                f"{', '.join(tags)}")
 
-        # ── 2. Pull + ingest any pending bundle ─────────────────
+        # ── 2. Pull + ingest any COMPLETED bundle ──────────────
+        # Crucially: skip ingest if the bundle isn't yet complete on
+        # ALICE (e.g. v3 still running while v4 sits in the queue).
+        # Without this check we'd ingest a partial bundle, mark it
+        # done, and never come back for the rest.
         for b in bundles:
             if b['ingested']:
                 continue
@@ -113,19 +133,31 @@ class Command(BaseCommand):
                     except subprocess.CalledProcessError as e:
                         log(f"  rsync failed: {e} — skipping ingest")
                         continue
-                    # Refresh has_outputs after pull.
-                    b['has_outputs'] = (b['path'] / 'outputs').is_dir() \
-                        and any((b['path'] / 'outputs').glob('*.rules'))
+                    # Refresh counts after pull.
+                    outputs_dir = b['path'] / 'outputs'
+                    b['n_rules'] = (len(list(outputs_dir.glob('*.rules')))
+                                    if outputs_dir.is_dir() else 0)
+                    b['has_outputs'] = b['n_rules'] > 0
+                    b['complete'] = (b['expected'] > 0
+                                     and b['n_rules'] >= b['expected'])
             if not b['has_outputs']:
                 log(f"  {b['slug']}: no .rules files yet — leaving "
-                    f"un-ingested (likely still running on ALICE)")
+                    f"un-ingested (likely still queued on ALICE)")
+                continue
+            if not b['complete']:
+                log(f"  {b['slug']}: PARTIAL "
+                    f"({b['n_rules']}/{b['expected']} rules) — still "
+                    f"running on ALICE.  Skipping ingest so we can "
+                    f"re-pull when it finishes.")
                 continue
             log(f"")
-            log(f"-- ingesting {b['slug']} --")
+            log(f"-- ingesting {b['slug']} "
+                f"({b['n_rules']}/{b['expected']} rules — complete) --")
             try:
                 call_command('alice_ingest_cell8', b['slug'])
                 (b['path'] / 'INGESTED.txt').write_text(
-                    f"ingested via caformer_alice_step\n")
+                    f"ingested via caformer_alice_step\n"
+                    f"n_rules={b['n_rules']} expected={b['expected']}\n")
                 b['ingested'] = True
             except Exception as e:                  # noqa: BLE001
                 log(f"  ingest failed: {e}")
