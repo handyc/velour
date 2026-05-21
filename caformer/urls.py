@@ -59,6 +59,8 @@ urlpatterns = [
                                                                     name='viz3d_token_rules_state'),
     path('viz3d/chain-trace/',            views.viz3d_chain_trace_state,
                                                                     name='viz3d_chain_trace_state'),
+    path('viz3d/harness/',                views.viz3d_harness_state,
+                                                                    name='viz3d_harness_state'),
     path('concept-system/',               views.concept_system_view,
                                                                     name='concept_system'),
     path('concept-system/encode/',        views.concept_system_encode,

@@ -67,6 +67,7 @@
     <button id="v3d-scene-byterouter" class="v3d-scene-btn" data-scene="byterouter">byte_router</button>
     <button id="v3d-scene-tokenrules" class="v3d-scene-btn" data-scene="tokenrules">token rules</button>
     <button id="v3d-scene-chain" class="v3d-scene-btn" data-scene="chain">chain trace</button>
+    <button id="v3d-scene-harness" class="v3d-scene-btn" data-scene="harness">harness</button>
   </div>
 
   <div class="v3d-controls" id="v3d-bs-controls">
@@ -352,26 +353,134 @@ async function loadPipelineScene(){
     out:   0xaaaaff,
   };
   const byNode = {};
+  // Status → wireframe tint so unfinished primitives are visible.
+  const STATUS_OPACITY = { working: 1.0, partial: 0.55, sketch: 0.30 };
+  // K=4 LUT colours for the inner histogram bars (must match the
+  // boardstack4 palette used elsewhere).
+  const LUT_COLORS = [0x1a1a1a, 0x2ea043, 0x79c0ff, 0xff7ec7];
   for (const n of d.nodes) {
-    const mat = new THREE.MeshStandardMaterial({
+    // Outer translucent shell — sized larger to host sub-blocks.
+    const outerSize = 4.0;
+    const shellMat = new THREE.MeshStandardMaterial({
       color: PHASE_COLOR[n.phase] || 0xcccccc,
       emissive: PHASE_COLOR[n.phase] || 0x444444,
-      emissiveIntensity: 0.25,
+      emissiveIntensity: 0.15,
       roughness: 0.5, metalness: 0.1,
+      transparent: true,
+      opacity: 0.35 * (STATUS_OPACITY[n.status] || 1.0),
     });
-    const box = new THREE.Mesh(
-      new THREE.BoxGeometry(n.w, n.h, n.d), mat);
-    box.position.set(n.x, n.y, n.z);
-    box.userData = { label: n.label, phase: n.phase, desc: n.desc };
-    scene.add(box);
-    SCENE_OBJECTS.push(box);
+    const shell = new THREE.Mesh(
+      new THREE.BoxGeometry(outerSize, outerSize, outerSize), shellMat);
+    shell.position.set(n.x, n.y, n.z);
+    shell.userData = {
+      label: n.label, phase: n.phase, desc: n.desc,
+      // Richer info for the click panel: real-LLM blurb, status,
+      // and the list of caformer.primitives.X sub-functions.
+      _extra: n,
+    };
+    scene.add(shell);
+    SCENE_OBJECTS.push(shell);
     byNode[n.slug] = n;
-    // Label sprite.
+    // Label sprite above the shell.
     const label = makeTextSprite(n.label,
       '#' + (PHASE_COLOR[n.phase] || 0xffffff).toString(16).padStart(6, '0'));
-    label.position.set(n.x, n.y + n.h * 0.8 + 0.6, n.z);
+    label.position.set(n.x, n.y + outerSize * 0.7, n.z);
     scene.add(label);
     SCENE_OBJECTS.push(label);
+
+    // Status pill below the label.
+    const statusColors = {
+      working: '#2ea043', partial: '#d29922', sketch: '#888' };
+    const statusLab = makeTextSprite(
+      `[${n.status || 'sketch'}]`,
+      statusColors[n.status] || '#888');
+    statusLab.position.set(n.x, n.y + outerSize * 0.7 - 0.7, n.z);
+    statusLab.scale.set(2.5, 0.7, 1);
+    scene.add(statusLab);
+    SCENE_OBJECTS.push(statusLab);
+
+    // Sub-function cubes — one tiny pink cube per
+    // caformer.primitives.X referenced by this component.  Lay out
+    // in a row inside the shell, slightly below centre.
+    const subfns = n.subfns || [];
+    for (let si = 0; si < subfns.length; si++) {
+      const sub = subfns[si];
+      const subSize = 0.55;
+      const cubeMat = new THREE.MeshStandardMaterial({
+        color: 0xffe3a0, emissive: 0xffe3a0,
+        emissiveIntensity: 0.4,
+        roughness: 0.3, metalness: 0.15,
+      });
+      const cube = new THREE.Mesh(
+        new THREE.BoxGeometry(subSize, subSize, subSize), cubeMat);
+      const rowLen = Math.max(1, subfns.length);
+      const ox = (si - (rowLen - 1) / 2) * 0.75;
+      cube.position.set(n.x + ox, n.y - 0.4, n.z);
+      cube.userData = {
+        label: sub.fn, phase: n.label,
+        desc: sub.note || `caformer.primitives.${sub.fn}`,
+      };
+      scene.add(cube);
+      SCENE_OBJECTS.push(cube);
+      // Tiny label under each sub-cube.  Keep text small enough
+      // to be legible only on zoom-in.
+      const subLab = makeTextSprite(sub.fn, '#ffe3a0');
+      subLab.position.set(n.x + ox, n.y - 1.1, n.z);
+      subLab.scale.set(2.4, 0.55, 1);
+      scene.add(subLab);
+      SCENE_OBJECTS.push(subLab);
+    }
+
+    // LUT board — actual 8×8 grid of K=4 cells inside the shell.
+    // Each cell is the majority colour of 256 LUT entries — a
+    // visual fingerprint of the rule table the model uses for
+    // this slot.  Anchored to the back wall of the shell so the
+    // sub-function cubes stay in front.
+    if (n.lut && n.lut.board8) {
+      const cellSize = 0.25;
+      const grid = n.lut.board8;
+      for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+          const v = (grid[row] && grid[row][col]) | 0;
+          const cellGeomSmall = new THREE.BoxGeometry(
+            cellSize, cellSize, cellSize * 0.4);
+          const cellMat = new THREE.MeshStandardMaterial({
+            color: LUT_COLORS[v & 3],
+            emissive: LUT_COLORS[v & 3],
+            emissiveIntensity: 0.35,
+            roughness: 0.4, metalness: 0.05,
+          });
+          const cell = new THREE.Mesh(cellGeomSmall, cellMat);
+          // Lay out in an 8×8 board centred horizontally, anchored
+          // to the back face of the outer shell.
+          const gridSize = 8 * cellSize;
+          cell.position.set(
+            n.x + (col - 3.5) * cellSize,
+            n.y + 0.55 + (3.5 - row) * cellSize,
+            n.z - outerSize / 2 + 0.06);
+          scene.add(cell);
+          SCENE_OBJECTS.push(cell);
+        }
+      }
+    } else if (n.lut && n.lut.hist) {
+      // Fall-back: histogram bars when no board8 was computed.
+      const total = n.lut.hist.reduce((a, b) => a + b, 0) || 1;
+      for (let k = 0; k < 4; k++) {
+        const h = 1.6 * n.lut.hist[k] / total;
+        const barGeom = new THREE.BoxGeometry(0.35, Math.max(h, 0.02), 0.35);
+        const barMat = new THREE.MeshStandardMaterial({
+          color: LUT_COLORS[k], emissive: LUT_COLORS[k],
+          emissiveIntensity: 0.35,
+          roughness: 0.4, metalness: 0.1,
+        });
+        const bar = new THREE.Mesh(barGeom, barMat);
+        bar.position.set(n.x + (k - 1.5) * 0.45,
+                          n.y + 0.4 + h / 2 - 0.8,
+                          n.z - outerSize / 2 + 0.2);
+        scene.add(bar);
+        SCENE_OBJECTS.push(bar);
+      }
+    }
   }
   // Edges.
   for (const e of d.edges) {
@@ -590,6 +699,137 @@ async function loadChainTraceScene(){
     `Phase 6: chain trace · ${prompt || ''} — three substrate paths.`;
 }
 
+// ── Scene: harness architecture ───────────────────────────────
+//
+// Three vertical layers: prompt input (Y=12) → 4 prefilters (Y=6)
+// → 4 agents (Y=0) → assembler/reply (Y=-6..-10).  The information
+// agent expands downward to expose its 5 cell8 dispatch tiers
+// (Y=-3) plus template/handler nodes.  Edges colour-coded by kind:
+// broadcast (prompt → prefilter) = white; route (boardstack4 →
+// agent) = green; dispatch (info → cell8) = blue; contribution
+// (agent → assembler) = pink; output (assembler → reply) = yellow.
+
+async function loadHarnessScene(){
+  clearScene();
+  TOKEN_FLOWERS = [];
+  const prompt = document.getElementById('v3d-prompt').value || 'hello';
+  const r = await fetch('/caformer/viz3d/harness/?q=' +
+                          encodeURIComponent(prompt));
+  const d = await r.json();
+
+  const KIND_COLOR = {
+    input:      0xffffff,
+    prefilter:  0x79c0ff,
+    agent:      0x2ea043,
+    cell8_tier: 0xffd070,
+    template:   0xff7ec7,
+    assembler:  0xaaaaff,
+    output:     0xffd0a0,
+  };
+  const EDGE_COLOR = {
+    broadcast:    0xffffff,
+    route:        0x2ea043,
+    dispatch:     0x79c0ff,
+    invoke:       0xffd070,
+    contribution: 0xff7ec7,
+    output:       0xffd0a0,
+  };
+
+  const byNode = {};
+  for (const n of d.nodes) {
+    const color = KIND_COLOR[n.kind] || 0xcccccc;
+    let geom;
+    if (n.kind === 'input' || n.kind === 'output') {
+      geom = new THREE.BoxGeometry(4, 1.2, 1.2);
+    } else if (n.kind === 'agent') {
+      geom = new THREE.BoxGeometry(2.5, 2.0, 1.8);
+    } else if (n.kind === 'prefilter') {
+      geom = new THREE.BoxGeometry(2.5, 1.6, 1.6);
+    } else if (n.kind === 'cell8_tier' || n.kind === 'template') {
+      geom = new THREE.BoxGeometry(1.4, 1.0, 1.0);
+    } else {
+      geom = new THREE.BoxGeometry(2.5, 1.0, 1.4);
+    }
+    const mat = new THREE.MeshStandardMaterial({
+      color, emissive: color, emissiveIntensity: 0.3,
+      roughness: 0.45, metalness: 0.1,
+      transparent: true, opacity: 0.85,
+    });
+    const box = new THREE.Mesh(geom, mat);
+    box.position.set(n.x || 0, n.y || 0, n.z || 0);
+    box.userData = {
+      label: n.label, phase: n.kind,
+      desc: n.category ? `routed → ${n.category}; path ${(n.path||[]).join('-')}`
+                       : '',
+    };
+    scene.add(box);
+    SCENE_OBJECTS.push(box);
+    byNode[n.slug] = n;
+    // Label sprite.
+    const lab = makeTextSprite(n.label, '#' + color.toString(16).padStart(6, '0'));
+    lab.position.set(n.x || 0, (n.y || 0) + 1.3, n.z || 0);
+    lab.scale.set(4.0, 1.0, 1);
+    scene.add(lab);
+    SCENE_OBJECTS.push(lab);
+    // For prefilters with a live category, surface it below the box.
+    if (n.kind === 'prefilter' && n.category) {
+      const catLab = makeTextSprite(`→ ${n.category}`, '#cdd');
+      catLab.position.set(n.x, (n.y || 0) - 1.3, n.z || 0);
+      catLab.scale.set(3.0, 0.8, 1);
+      scene.add(catLab);
+      SCENE_OBJECTS.push(catLab);
+    }
+  }
+
+  // Edges.
+  for (const e of d.edges) {
+    const a = byNode[e.from], b = byNode[e.to];
+    if (!a || !b) continue;
+    const color = EDGE_COLOR[e.kind] || 0x666666;
+    const geom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(a.x || 0, a.y || 0, a.z || 0),
+      new THREE.Vector3(b.x || 0, b.y || 0, b.z || 0),
+    ]);
+    const line = new THREE.Line(geom, new THREE.LineBasicMaterial({
+      color, transparent: true, opacity: 0.55 }));
+    scene.add(line);
+    SCENE_OBJECTS.push(line);
+  }
+
+  // Trace ribbon: thick polyline showing which agents fired.
+  if (d.trace && d.trace.used_agents) {
+    const points = [
+      new THREE.Vector3(0, 12, 0),                  // prompt
+      new THREE.Vector3(0, 6, 0),                   // boardstack4
+    ];
+    for (const ag of d.trace.used_agents) {
+      const agNode = byNode['ag_' + ag];
+      if (agNode) {
+        points.push(new THREE.Vector3(
+          agNode.x || 0, agNode.y || 0, agNode.z || 0));
+      }
+    }
+    points.push(new THREE.Vector3(0, -6, 0));       // assembler
+    points.push(new THREE.Vector3(0, -10, 0));      // reply
+    const ribGeom = new THREE.BufferGeometry().setFromPoints(points);
+    const ribbon = new THREE.Line(ribGeom,
+      new THREE.LineBasicMaterial({
+        color: 0xffaa00, transparent: true, opacity: 0.95,
+        linewidth: 3 }));
+    scene.add(ribbon);
+    SCENE_OBJECTS.push(ribbon);
+  }
+
+  controls.target.set(0, 0, 0);
+  camera.position.set(0, 2, 24);
+  controls.update();
+  let meta = `Phase 7: harness · ${prompt}`;
+  if (d.trace && d.trace.reply) {
+    meta += ` → "${d.trace.reply.slice(0, 60)}"`;
+  }
+  document.getElementById('v3d-scene-meta').textContent = meta;
+}
+
 // ── Click info panel (Phase 5: annotations) ───────────────────
 //
 // Mouse-click hits a raycaster against the current scene's meshes.
@@ -617,11 +857,39 @@ stage.addEventListener('pointerdown', (ev) => {
   const hits = _raycaster.intersectObjects(SCENE_OBJECTS, false);
   for (const h of hits) {
     const ud = h.object.userData || {};
-    if (ud.label || ud.desc) {
-      _showInfo(
-        `<h3>${ud.label || ''}</h3>` +
-        (ud.phase ? `<div class="phase">${ud.phase}</div>` : '') +
-        (ud.desc  ? `<div class="desc">${ud.desc}</div>` : ''));
+    if (ud.label || ud.desc || ud._extra) {
+      let html = '';
+      if (ud._extra) {
+        const x = ud._extra;
+        html  = `<h3>${x.label}</h3>`;
+        html += `<div class="phase">${x.component_name || x.phase || ''} `
+              + `· status: ${x.status || ''}</div>`;
+        if (x.real_llm) {
+          html += `<div class="desc"><b>real LLM:</b> ${x.real_llm}</div>`;
+        }
+        if (x.desc) {
+          html += `<div class="desc"><b>CA design:</b> ${x.desc}</div>`;
+        }
+        if ((x.subfns || []).length) {
+          html += `<div class="desc"><b>sub-functions:</b><br>`;
+          for (const s of x.subfns) {
+            html += `&nbsp;&nbsp;<code>caformer.primitives.${s.fn}</code>`
+                  + (s.note ? ` <span style="color:#888">— ${s.note}</span>` : '')
+                  + `<br>`;
+          }
+          html += `</div>`;
+        }
+        if (x.lut && x.lut.hist) {
+          html += `<div class="desc"><b>trained LUT:</b> ${x.lut.size} entries `
+                + `· K=4 counts (${x.lut.hist.join(', ')})`
+                + ` · group ${x.lut.group_idx}</div>`;
+        }
+      } else {
+        html  = `<h3>${ud.label || ''}</h3>`;
+        if (ud.phase) html += `<div class="phase">${ud.phase}</div>`;
+        if (ud.desc)  html += `<div class="desc">${ud.desc}</div>`;
+      }
+      _showInfo(html);
       return;
     }
   }
@@ -659,6 +927,9 @@ function switchScene(name){
   } else if (name === 'chain') {
     playing = false;
     loadChainTraceScene();
+  } else if (name === 'harness') {
+    playing = false;
+    loadHarnessScene();
   }
   _hideInfo();
 }

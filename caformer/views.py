@@ -4841,79 +4841,71 @@ def stats_view(request):
 
 @login_required
 def viz3d_pipeline_state(request):
-    """JSON for the 8-primitive caformer pipeline scene.
+    """JSON for the 8-primitive caformer pipeline scene with
+    subcomponents.
 
-    Returns a linear topology of the canonical caformer architecture:
-    embed → norm → q/k/v → score → mix → merge → mlp → output.
-    Each node has a position, label, slug, description, and a
-    relative size (some primitives are "fat" — attention has 4
-    sub-rules)."""
+    Each top-level node carries its actual sub-functions extracted
+    from caformer.components.Component.related — so when the user
+    drills in they see the real ca_embedding / ca_qkv_project /
+    ca_attention_score / etc. references that are in the codebase
+    right now.  Latest TrainedModel's diversity is surfaced so
+    collapsed slots show up visually."""
+    import re
+    from caformer.components import COMPONENTS
 
-    # The 10-rule slot ordering used by ga.FULL_STACK_NAMES.
-    # Group by phase so the scene has visual sections.
+    # Map each pipeline slot to a (Component slug, label, phase, desc).
+    # The Component model groups attention sub-rules under one slug
+    # ('self_attention'), but for the visual we keep Q/K/V/Score as
+    # siblings at the same phase.
     pipeline = [
-        {'slug': 'embed',  'label': 'Embedding',     'phase': 'in',
-         'desc': 'Tokens → CA state via LCG seed + ticks.'},
-        {'slug': 'norm',   'label': 'Layer norm',    'phase': 'in',
-         'desc': 'Idealised uniform OR ca_layer_norm_iterative.'},
-        # Attention sub-rules render as siblings at the same phase.
-        {'slug': 'q',      'label': 'Q project',     'phase': 'attn'},
-        {'slug': 'k',      'label': 'K project',     'phase': 'attn'},
-        {'slug': 'v',      'label': 'V project',     'phase': 'attn'},
-        {'slug': 'score',  'label': 'Score',         'phase': 'attn',
-         'desc': 'Pair-wise CA score.'},
-        {'slug': 'mix',    'label': 'Mix',           'phase': 'merge'},
-        {'slug': 'merge',  'label': 'Merge',         'phase': 'merge',
-         'desc': 'Residual merge.'},
-        {'slug': 'mlp',    'label': 'MLP',           'phase': 'mlp',
-         'desc': 'Feed-forward CA.'},
-        {'slug': 'output', 'label': 'Output head',   'phase': 'out',
-         'desc': 'Sample / argmax over K=4 cells.'},
+        {'slug': 'embed',  'label': 'Embedding',  'phase': 'in',
+         'component_slug': 'embedding'},
+        {'slug': 'norm',   'label': 'Layer norm', 'phase': 'in',
+         'component_slug': 'layer_norm'},
+        {'slug': 'q',      'label': 'Q project',  'phase': 'attn',
+         'component_slug': 'self_attention',
+         'desc': 'One CA tick projection from the normalised state.'},
+        {'slug': 'k',      'label': 'K project',  'phase': 'attn',
+         'component_slug': 'self_attention',
+         'desc': 'Sibling projection (same component as Q/V).'},
+        {'slug': 'v',      'label': 'V project',  'phase': 'attn',
+         'component_slug': 'self_attention',
+         'desc': 'Value projection — content carried through.'},
+        {'slug': 'score',  'label': 'Score',      'phase': 'attn',
+         'component_slug': 'self_attention',
+         'desc': 'Pair-wise CA attention score over Q × K.'},
+        {'slug': 'mix',    'label': 'Mix',        'phase': 'merge',
+         'component_slug': 'projection',
+         'desc': 'Combine score-weighted V into mixed activations.'},
+        {'slug': 'merge',  'label': 'Merge',      'phase': 'merge',
+         'component_slug': 'projection',
+         'desc': 'Residual merge — block input XOR-blended back in.'},
+        {'slug': 'mlp',    'label': 'MLP',        'phase': 'mlp',
+         'component_slug': 'mlp'},
+        {'slug': 'output', 'label': 'Output head','phase': 'out',
+         'component_slug': 'output'},
     ]
-    # Lay out positions: phases stack along X, siblings stack along Z.
-    phase_x = {'in': 0, 'attn': 12, 'merge': 24, 'mlp': 32, 'out': 40}
-    by_phase: dict = {}
-    for p in pipeline:
-        by_phase.setdefault(p['phase'], []).append(p)
-    nodes = []
-    for phase, items in by_phase.items():
-        base_x = phase_x[phase]
-        n = len(items)
-        for i, item in enumerate(items):
-            z = (i - (n - 1) / 2.0) * 4
-            x = base_x
-            y = 0
-            nodes.append({
-                'slug':  item['slug'],
-                'label': item['label'],
-                'desc':  item.get('desc', ''),
-                'phase': phase,
-                'x': float(x), 'y': float(y), 'z': float(z),
-                'w': 2.5, 'h': 2.5, 'd': 2.5,
-            })
 
-    # Edges: data flow.  Sequential between phases; attention forks
-    # out to Q/K/V and rejoins at Score → Mix.
-    edges = []
-    # in chain
-    edges.append({'from': 'embed', 'to': 'norm'})
-    # norm → Q, K, V
-    for s in ('q', 'k', 'v'):
-        edges.append({'from': 'norm', 'to': s})
-    # Q & K → Score
-    edges.append({'from': 'q', 'to': 'score'})
-    edges.append({'from': 'k', 'to': 'score'})
-    # Score & V → Mix
-    edges.append({'from': 'score', 'to': 'mix'})
-    edges.append({'from': 'v',     'to': 'mix'})
-    # Mix → Merge → MLP → Output
-    edges.append({'from': 'mix',    'to': 'merge'})
-    edges.append({'from': 'merge',  'to': 'mlp'})
-    edges.append({'from': 'mlp',    'to': 'output'})
+    comp_by_slug = {c.slug: c for c in COMPONENTS}
 
-    # If a TrainedModel exists, surface its diversity stats so the
-    # scene can show "collapsed slots" visibly.
+    def _parse_subfunctions(related: list[str]) -> list[dict]:
+        """Extract caformer.primitives.X references from a Component's
+        related[] field and produce a structured list."""
+        out = []
+        for r in related:
+            m = re.match(
+                r'caformer\.primitives\.([a-z0-9_]+)\s*(?:\((.*)\))?',
+                r)
+            if m:
+                out.append({
+                    'fn':   m.group(1),
+                    'note': (m.group(2) or '').strip(),
+                })
+        return out
+
+    # Pull latest TrainedModel for per-slot LUT info.
     diversity = None
+    slot_luts: dict[str, dict] = {}
     try:
         from caformer.models import TrainedModel
         tm = TrainedModel.objects.order_by('-final_fitness').first()
@@ -4926,8 +4918,84 @@ def viz3d_pipeline_state(request):
                 'mean_pairwise':      d['mean_pairwise_match'],
                 'groups':             d['groups'],
             }
+            # Per-slot LUT histogram (K=4 counts) — tiny payload.
+            from caformer.ga import FULL_STACK_NAMES
+            import numpy as _np
+            # Downsample factor: 16384 LUT entries → 8x8 = 64 visual
+            # cells.  Each cell = majority K=4 colour over 256 entries.
+            for slot in FULL_STACK_NAMES:
+                blob = getattr(tm, f'rule_{slot}', None)
+                if not blob: continue
+                arr = _np.frombuffer(bytes(blob), dtype=_np.uint8)
+                if arr.size == 0: continue
+                arr3 = arr & 3
+                # Per-block majority colour (8×8 board).
+                board8 = None
+                if arr.size >= 64:
+                    block = arr.size // 64
+                    truncated = arr3[: block * 64].reshape(64, block)
+                    # argmax over per-K count: stack bool masks then
+                    # vote.  K=4 → 4-column count table → argmax.
+                    counts = _np.stack(
+                        [(truncated == k).sum(axis=1) for k in range(4)],
+                        axis=1)        # shape (64, 4)
+                    board8 = counts.argmax(axis=1).reshape(8, 8).tolist()
+                slot_luts[slot] = {
+                    'size':      int(arr.size),
+                    'hist':      [int((arr3 == k).sum()) for k in range(4)],
+                    'board8':    board8,
+                    'group_idx': next(
+                        (i for i, g in enumerate(d['groups']) if slot in g),
+                        -1),
+                }
     except Exception:                                # noqa: BLE001
         pass
+
+    # Layout positions.
+    phase_x = {'in': 0, 'attn': 12, 'merge': 24, 'mlp': 32, 'out': 40}
+    by_phase: dict = {}
+    for p in pipeline:
+        by_phase.setdefault(p['phase'], []).append(p)
+    nodes = []
+    for phase, items in by_phase.items():
+        base_x = phase_x[phase]
+        n = len(items)
+        for i, item in enumerate(items):
+            z = (i - (n - 1) / 2.0) * 4
+            x = base_x
+            y = 0
+            comp = comp_by_slug.get(item['component_slug'])
+            subfns = _parse_subfunctions(
+                list(comp.related) if comp else [])
+            nodes.append({
+                'slug':         item['slug'],
+                'label':        item['label'],
+                'phase':        phase,
+                'desc':         item.get('desc',
+                                 comp.one_liner if comp else ''),
+                'component':    item['component_slug'],
+                'component_name': comp.name if comp else '',
+                'real_llm':     (comp.real_llm[:140] + '…') if comp
+                                  and len(comp.real_llm) > 140
+                                  else (comp.real_llm if comp else ''),
+                'status':       comp.status if comp else 'sketch',
+                'subfns':       subfns,
+                'lut':          slot_luts.get(item['slug']),
+                'x': float(x), 'y': float(y), 'z': float(z),
+                'w': 2.5, 'h': 2.5, 'd': 2.5,
+            })
+
+    edges = []
+    edges.append({'from': 'embed', 'to': 'norm'})
+    for s in ('q', 'k', 'v'):
+        edges.append({'from': 'norm', 'to': s})
+    edges.append({'from': 'q', 'to': 'score'})
+    edges.append({'from': 'k', 'to': 'score'})
+    edges.append({'from': 'score', 'to': 'mix'})
+    edges.append({'from': 'v',     'to': 'mix'})
+    edges.append({'from': 'mix',    'to': 'merge'})
+    edges.append({'from': 'merge',  'to': 'mlp'})
+    edges.append({'from': 'mlp',    'to': 'output'})
 
     return _json_response({
         'nodes':     nodes,
@@ -5106,4 +5174,141 @@ def viz3d_chain_trace_state(request):
             'picm_tree':   tree_path,
         },
         'tree_labels': tree_labels,
+    })
+
+
+@login_required
+def viz3d_harness_state(request):
+    """JSON for the harness architecture scene.
+
+    Three layers laid out vertically (Y axis):
+      Y = +12 → input prompt
+      Y =  +6 → 4 prefilters (router, boardstack4, byte_router, picm_tree)
+      Y =   0 → 4 agents (personality, information, command, meta)
+      Y =  -6 → assembler + reply
+    Edges show data flow.  When a ?q=PROMPT is supplied, the prefilter
+    nodes light up with their actual category outputs for that prompt
+    and the chain trace edges are emphasised."""
+    prompt = (request.GET.get('q') or '').strip()
+    from caformer.harness import prefilter as _pf
+
+    # Nodes per layer.
+    nodes = [
+        {'slug': 'prompt',  'label': 'prompt input',
+         'layer': 'in', 'y': 12, 'x': 0, 'kind': 'input'},
+    ]
+    # Prefilters.
+    prefilters = [
+        ('router',      'router (71%)',      _pf._classify_router),
+        ('boardstack4', 'boardstack4 (92%)', _pf._classify_boardstack4),
+        ('byte_router', 'byte_router (84%)', _pf._classify_byte_router),
+        ('picm_tree',   'picm_tree',         None),
+    ]
+    for i, (slug, label, fn) in enumerate(prefilters):
+        x = (i - 1.5) * 5
+        node = {'slug': f'pre_{slug}', 'label': label, 'kind': 'prefilter',
+                'layer': 'prefilter', 'x': x, 'y': 6,
+                'path': None, 'category': None}
+        if prompt and fn is not None:
+            try:
+                res = fn(prompt)
+                node['path']     = list(res.path or []) if res.path else []
+                node['category'] = res.name
+            except Exception:                        # noqa: BLE001
+                pass
+        if prompt and slug == 'picm_tree':
+            try:
+                from caformer.harness import picm_tree as _tree
+                d = _tree.descend(prompt)
+                node['path'] = list(d.path_tuple())
+                node['category'] = (d.label_chain[0]
+                                     if d.label_chain else '?')
+            except Exception:                        # noqa: BLE001
+                pass
+        nodes.append(node)
+    # Agents.
+    agents = [
+        ('personality', '😊 personality'),
+        ('information', '📚 information'),
+        ('command',     '⚙ command'),
+        ('meta',        '🪞 meta'),
+    ]
+    for i, (slug, label) in enumerate(agents):
+        x = (i - 1.5) * 5
+        nodes.append({'slug': f'ag_{slug}', 'label': label,
+                      'kind': 'agent', 'layer': 'agent',
+                      'x': x, 'y': 0})
+    # Cell8 dispatch tiers — shown inside / beneath the information
+    # agent as nested sub-nodes (a "drill-in").
+    tiers = ['exact', 'normalized', 'substring', 'fuzzy', 'partial-rules']
+    for i, t in enumerate(tiers):
+        z = (i - 2) * 1.6
+        nodes.append({'slug': f'cell8_{t}', 'label': t,
+                      'kind': 'cell8_tier',
+                      'layer': 'cell8', 'x': -2.5, 'y': -3, 'z': z})
+    # Templates / handlers sit beside the information agent's cell8.
+    for j, t in enumerate(['template', 'handler']):
+        nodes.append({'slug': f'tpl_{t}', 'label': t,
+                      'kind': 'template', 'layer': 'cell8',
+                      'x': 2.5, 'y': -3, 'z': (j - 0.5) * 2})
+    # Assembler + reply.
+    nodes.append({'slug': 'assembler', 'label': 'assembler',
+                  'kind': 'assembler', 'layer': 'out', 'x': 0, 'y': -6})
+    nodes.append({'slug': 'reply', 'label': 'reply',
+                  'kind': 'output', 'layer': 'out', 'x': 0, 'y': -10})
+
+    # Edges.
+    edges = []
+    # prompt → every prefilter
+    for slug, _, _ in prefilters:
+        edges.append({'from': 'prompt', 'to': f'pre_{slug}',
+                      'kind': 'broadcast'})
+    # boardstack4 path → 4 agents (one of these wins per prompt)
+    for slug, _ in agents:
+        edges.append({'from': 'pre_boardstack4', 'to': f'ag_{slug}',
+                      'kind': 'route'})
+    # information agent → cell8 tiers
+    for t in tiers:
+        edges.append({'from': 'ag_information',
+                      'to': f'cell8_{t}', 'kind': 'dispatch'})
+    edges.append({'from': 'ag_information', 'to': 'tpl_template',
+                  'kind': 'dispatch'})
+    edges.append({'from': 'tpl_template', 'to': 'tpl_handler',
+                  'kind': 'invoke'})
+    # All 4 agents → assembler
+    for slug, _ in agents:
+        edges.append({'from': f'ag_{slug}', 'to': 'assembler',
+                      'kind': 'contribution'})
+    # Assembler → reply
+    edges.append({'from': 'assembler', 'to': 'reply',
+                  'kind': 'output'})
+
+    # Live trace if a prompt was supplied: which agents actually fired?
+    trace = None
+    if prompt:
+        try:
+            from caformer.harness import composer as _comp
+            from caformer.models import HarnessProfile
+            profile = HarnessProfile.objects.filter(
+                slug='velour-boardstack').first()
+            if profile is not None:
+                reply = _comp.run_turn(profile, prompt)
+                used_agents: list[str] = []
+                for c in reply.chain_steps or []:
+                    if str(c.get('action', '')).startswith('reply'):
+                        used_agents.append(c.get('agent', ''))
+                trace = {
+                    'reply':        (reply.reply or '')[:200],
+                    'used_agents':  used_agents,
+                    'sub_label':    reply.sub_label,
+                    'path':         reply.path,
+                }
+        except Exception as e:                       # noqa: BLE001
+            trace = {'error': f'{type(e).__name__}: {e}'}
+
+    return _json_response({
+        'prompt': prompt,
+        'nodes':  nodes,
+        'edges':  edges,
+        'trace':  trace,
     })
