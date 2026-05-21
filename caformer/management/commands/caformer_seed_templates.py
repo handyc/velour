@@ -180,6 +180,20 @@ TEMPLATES_LIVE = [
         "Time:   [handler:now]\n"
         "Corpus: [handler:qrpair_count]",
         0.85, 'multi-handler composition', ''),
+
+    # ── Conditional command templates ('if X then Y') ────────────
+    # The cond_act handler parses the cond slot against the live
+    # handler registry, returns act when condition is true, an
+    # explicit trace when false.
+    (2, 2, 'if [cond] then [act]',
+        '(resolved by cond_act handler)',
+        0.80, 'conditional execution', 'cond_act'),
+    (2, 2, 'when [cond] then [act]',
+        '(resolved by cond_act handler)',
+        0.80, 'conditional execution (synonym)', 'cond_act'),
+    (2, 3, 'do [act] if [cond]',
+        '(resolved by cond_act handler)',
+        0.75, 'conditional execution (inverted order)', 'cond_act'),
 ]
 
 

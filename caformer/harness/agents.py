@@ -194,7 +194,13 @@ class InformationAgent:
                 'handler':  tpl.handler_name or '',
                 'picm_matches': matched_strs})
             return
-        if matches and not state.first('announce'):
+        # Trailing '?' is itself a strong info-route signal even when
+        # no PICM token fires (e.g. 'truth?' has no 5W stem).  Treat
+        # it as a synthetic '?' match alongside any real PICM hits.
+        ends_with_q = state.prompt.rstrip().endswith('?')
+        if ends_with_q:
+            matched_strs = matched_strs + ['?']
+        if (matches or ends_with_q) and not state.first('announce'):
             announce = (f"Recognised query stem(s): "
                         f"{', '.join(matched_strs)} — but no "
                         f"byte-exact answer in the QRPair store yet.")

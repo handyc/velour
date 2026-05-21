@@ -129,6 +129,66 @@ def _h_latest_dream(slots: dict[str, str]) -> str:
         return '(dream lookup failed)'
 
 
+def _h_cond_act(slots: dict[str, str]) -> str:
+    """Conditional execution.  Used by templates of the shape:
+
+        pattern = 'if [cond] then [act]'
+        output  = (anything; replaced by this handler)
+        handler_name = 'cond_act'
+
+    cond is parsed for one of: '<source> is <value>',
+    '<source> is not <value>', '<source> = <value>', '<source>
+    equals <value>'.  <source> must be the NAME of another
+    registered handler.  We invoke that handler and check whether
+    <value> appears (case-insensitive substring) in its result.
+
+    On true → return ``act`` text.  On false → a short trace
+    string showing actual vs expected.  On parse failure → an
+    explicit error so authoring mistakes surface."""
+    cond = (slots.get('cond') or '').strip().lower()
+    act  = (slots.get('act')  or '').strip()
+    if not cond or not act:
+        return '(if-then template missing cond or act slot)'
+
+    is_not = False
+    separator: str | None = None
+    for sep in (' is not ', ' is ', ' equals ', ' = '):
+        if sep in cond:
+            separator = sep
+            is_not = (sep == ' is not ')
+            break
+    if separator is None:
+        return f'(could not parse condition: {cond!r})'
+    left, _, right = cond.partition(separator)
+    left = left.strip()
+    right = right.strip().strip('"').strip("'").lower()
+    # Friendly aliases for handler names so users can say 'branch'
+    # instead of 'git_branch' or 'time' instead of 'now'.
+    HANDLER_ALIASES = {
+        'branch':   'git_branch',
+        'time':     'now',
+        'date':     'today',
+        'profiles': 'harness_profiles',
+        'corpus':   'qrpair_count',
+        'pairs':    'qrpair_count',
+        'chat':     'recent_chat',
+        'dream':    'latest_dream',
+        'feeling':  'mood',
+    }
+    if left in HANDLER_ALIASES:
+        left = HANDLER_ALIASES[left]
+    if left not in HANDLERS:
+        return f'(unknown cond source: {left!r}; '\
+               f'try one of {sorted(HANDLERS.keys())})'
+    actual = invoke(left, {}).lower()
+    matched = right in actual
+    if is_not:
+        matched = not matched
+    if matched:
+        return act
+    return f'(condition false: {left}={actual!r}, expected {right!r})'
+
+
 # ─── Registry ──────────────────────────────────────────────────────
 
 
@@ -141,6 +201,7 @@ HANDLERS: dict[str, Callable[[dict], str]] = {
     'harness_profiles': _h_harness_profiles,
     'recent_chat':      _h_recent_chat,
     'latest_dream':     _h_latest_dream,
+    'cond_act':         _h_cond_act,
 }
 
 
