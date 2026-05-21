@@ -26,8 +26,23 @@
   .v3d-meta { color: #888; font-size: 0.78rem; }
   #v3d-stage { width: 100%; height: 75vh;
                 background: linear-gradient(180deg, #050505 0%, #0a0a0a 100%);
-                border: 1px solid #1a1a1a; }
+                border: 1px solid #1a1a1a; position: relative; }
   #v3d-stage canvas { display: block; }
+  #v3d-info {
+      position: absolute; right: 14px; top: 14px;
+      max-width: 28em; min-width: 18em;
+      padding: 10px 14px;
+      background: rgba(10, 10, 10, 0.85);
+      border: 1px solid #2a2a2a; color: #cdd;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.82rem; line-height: 1.45;
+      pointer-events: none;       /* don't block orbit drags */
+  }
+  #v3d-info h3 { margin: 0 0 4px; color: #cfc;
+                  font-size: 0.95rem; font-weight: 600; }
+  #v3d-info .phase { font-size: 0.72rem; color: #888;
+                      text-transform: uppercase; letter-spacing: 0.08em; }
+  #v3d-info .desc  { color: #b8c4cc; margin-top: 4px; }
   .v3d-fingerprint { font-family: ui-monospace, monospace;
                        color: #79c0ff; }
   .v3d-legend { display: flex; gap: 16px; margin-top: 6px;
@@ -48,6 +63,10 @@
     <span>scene:</span>
     <button id="v3d-scene-boardstack" class="v3d-scene-btn" data-scene="boardstack">boardstack4</button>
     <button id="v3d-scene-tree" class="v3d-scene-btn" data-scene="tree">PICM tree</button>
+    <button id="v3d-scene-pipeline" class="v3d-scene-btn" data-scene="pipeline">caformer pipeline</button>
+    <button id="v3d-scene-byterouter" class="v3d-scene-btn" data-scene="byterouter">byte_router</button>
+    <button id="v3d-scene-tokenrules" class="v3d-scene-btn" data-scene="tokenrules">token rules</button>
+    <button id="v3d-scene-chain" class="v3d-scene-btn" data-scene="chain">chain trace</button>
   </div>
 
   <div class="v3d-controls" id="v3d-bs-controls">
@@ -70,7 +89,9 @@
     <span class="v3d-meta">(K=4 colours; cell (0,0) of each board's final state forms the cascade fingerprint)</span>
   </div>
 
-  <div id="v3d-stage"></div>
+  <div id="v3d-stage">
+    <div id="v3d-info" style="display:none;"></div>
+  </div>
 </div>
 
 <script type="importmap">
@@ -285,16 +306,318 @@ async function loadTreeScene(){
     `Phase 2: PICM tree (${nodes.length} nodes; leaves marked ★)`;
 }
 
+// ── Scene: caformer 8-primitive pipeline ──────────────────────
+//
+// Renders the canonical caformer architecture as labelled boxes
+// connected by data-flow lines, plus 5 animated token spheres
+// flowing through the edges.  Token-flow animation = scene 2.
+
+let PIPELINE_DATA = null;
+let TOKEN_FLOWERS = [];   // animated spheres on edges
+
+async function loadPipelineScene(){
+  clearScene();
+  TOKEN_FLOWERS = [];
+  const r = await fetch('/caformer/viz3d/pipeline/');
+  const d = await r.json();
+  PIPELINE_DATA = d;
+
+  // Phase tint per K=4 colour (visual grouping).
+  const PHASE_COLOR = {
+    in:    0x2ea043,
+    attn:  0x79c0ff,
+    merge: 0xffd070,
+    mlp:   0xff7ec7,
+    out:   0xaaaaff,
+  };
+  const byNode = {};
+  for (const n of d.nodes) {
+    const mat = new THREE.MeshStandardMaterial({
+      color: PHASE_COLOR[n.phase] || 0xcccccc,
+      emissive: PHASE_COLOR[n.phase] || 0x444444,
+      emissiveIntensity: 0.25,
+      roughness: 0.5, metalness: 0.1,
+    });
+    const box = new THREE.Mesh(
+      new THREE.BoxGeometry(n.w, n.h, n.d), mat);
+    box.position.set(n.x, n.y, n.z);
+    box.userData = { label: n.label, phase: n.phase, desc: n.desc };
+    scene.add(box);
+    SCENE_OBJECTS.push(box);
+    byNode[n.slug] = n;
+    // Label sprite.
+    const label = makeTextSprite(n.label,
+      '#' + (PHASE_COLOR[n.phase] || 0xffffff).toString(16).padStart(6, '0'));
+    label.position.set(n.x, n.y + n.h * 0.8 + 0.6, n.z);
+    scene.add(label);
+    SCENE_OBJECTS.push(label);
+  }
+  // Edges.
+  for (const e of d.edges) {
+    const a = byNode[e.from], b = byNode[e.to];
+    if (!a || !b) continue;
+    const geom = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(a.x, a.y, a.z),
+      new THREE.Vector3(b.x, b.y, b.z),
+    ]);
+    const line = new THREE.Line(geom,
+      new THREE.LineBasicMaterial({
+        color: PHASE_COLOR[b.phase] || 0x666666,
+        transparent: true, opacity: 0.55 }));
+    scene.add(line);
+    SCENE_OBJECTS.push(line);
+    // Animated token: one sphere per edge, starts at `a`, moves to `b`,
+    // loops with phase offset so the whole graph pulses.
+    const flowerGeom = new THREE.SphereGeometry(0.35, 12, 10);
+    const flowerMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.7,
+      roughness: 0.3, metalness: 0.2,
+    });
+    const flower = new THREE.Mesh(flowerGeom, flowerMat);
+    flower.userData = {
+      a: new THREE.Vector3(a.x, a.y, a.z),
+      b: new THREE.Vector3(b.x, b.y, b.z),
+      phase: Math.random(),       // each edge has random initial offset
+    };
+    scene.add(flower);
+    SCENE_OBJECTS.push(flower);
+    TOKEN_FLOWERS.push(flower);
+  }
+
+  // Center camera on the pipeline.
+  controls.target.set(20, 0, 0);
+  camera.position.set(20, 18, 28);
+  controls.update();
+  document.getElementById('v3d-scene-meta').textContent =
+    'Phase 3: caformer 8-primitive pipeline with animated token flow.';
+}
+
+// ── Scene: byte_router cascade ────────────────────────────────
+
+async function loadByteRouterScene(){
+  clearScene();
+  TOKEN_FLOWERS = [];
+  const promptByte = document.getElementById('v3d-prompt').value
+                        .charCodeAt(0) || 0x68;
+  const r = await fetch('/caformer/viz3d/byte-router/?byte=' + promptByte);
+  const d = await r.json();
+  if (!d.available) {
+    document.getElementById('v3d-scene-meta').textContent =
+      'byte_router scene unavailable: ' + (d.error || '');
+    return;
+  }
+  // 4 layers stacked vertically.  Each layer has 4 boards side-by-side.
+  const SIDE = 8, gap = 1.5, boardW = SIDE + gap;
+  for (let li = 0; li < d.layers.length; li++) {
+    const layer = d.layers[li];
+    const y0 = li * (SIDE + 6);
+    // Layer label.
+    const lab = makeTextSprite(
+      `layer ${li}  →  byte ${layer.byte_out}`, '#79c0ff');
+    lab.position.set(- boardW * 2 - 2, y0 + SIDE + 2, 0);
+    lab.scale.set(8, 2, 1);
+    scene.add(lab);
+    SCENE_OBJECTS.push(lab);
+    for (let bi = 0; bi < layer.boards.length; bi++) {
+      const board = layer.boards[bi];
+      const x0 = (bi - 1.5) * boardW;
+      for (let r = 0; r < SIDE; r++) {
+        for (let c = 0; c < SIDE; c++) {
+          const v = board.final_state[r][c];
+          const m = new THREE.Mesh(cellGeom, matFor(v));
+          m.position.set(x0 + c - SIDE / 2, y0 + (SIDE / 2 - r), 0);
+          scene.add(m);
+          SCENE_OBJECTS.push(m);
+        }
+      }
+      // Per-board fingerprint indicator (output K=4 value) on top.
+      const fp = new THREE.Mesh(
+        new THREE.SphereGeometry(0.6, 12, 10),
+        matFor(board.output));
+      fp.position.set(x0, y0 + SIDE / 2 + 1.5, 0);
+      scene.add(fp);
+      SCENE_OBJECTS.push(fp);
+    }
+  }
+  // Frame the scene.
+  controls.target.set(0, d.layers.length * (SIDE + 6) / 2, 0);
+  camera.position.set(0, d.layers.length * (SIDE + 6) / 2,
+                      d.layers.length * 8 + 24);
+  controls.update();
+  document.getElementById('v3d-scene-meta').textContent =
+    `Phase 3: byte_router cascade — byte ${d.byte_in} → ` +
+    `${d.layers[d.layers.length-1].byte_out} ` +
+    `(4 layers × 4 cell8 boards).`;
+}
+
+// ── Scene: token-rule cascade ─────────────────────────────────
+
+async function loadTokenRulesScene(){
+  clearScene();
+  TOKEN_FLOWERS = [];
+  const prompt = document.getElementById('v3d-prompt').value;
+  const r = await fetch('/caformer/viz3d/token-rules/?q=' +
+                          encodeURIComponent(prompt || 'I am going home'));
+  const d = await r.json();
+  if (!d.available) {
+    document.getElementById('v3d-scene-meta').textContent =
+      'token rules unavailable: ' + (d.error || '');
+    return;
+  }
+  // One 8x8 grid per cascade step, stacked along X.
+  const SIDE = 8, gap = 4;
+  for (let si = 0; si < d.steps.length; si++) {
+    const step = d.steps[si];
+    const x0 = si * (SIDE + gap);
+    for (let r = 0; r < SIDE; r++) {
+      for (let c = 0; c < SIDE; c++) {
+        const v = step.state[r][c];
+        const m = new THREE.Mesh(cellGeom, matFor(v));
+        m.position.set(x0 + c - SIDE / 2, SIDE / 2 - r, 0);
+        scene.add(m);
+        SCENE_OBJECTS.push(m);
+      }
+    }
+    const lab = makeTextSprite(step.name, '#ff7ec7');
+    lab.position.set(x0, -SIDE / 2 - 1.5, 0);
+    lab.scale.set(4, 1, 1);
+    scene.add(lab);
+    SCENE_OBJECTS.push(lab);
+  }
+  controls.target.set((d.steps.length - 1) * (SIDE + gap) / 2, 0, 0);
+  camera.position.set((d.steps.length - 1) * (SIDE + gap) / 2,
+                       4, SIDE * 2.5);
+  controls.update();
+  document.getElementById('v3d-scene-meta').textContent =
+    `Phase 4: token-rule cascade — concept ${d.concept.surface} ` +
+    `= ${d.concept.gloss}; ${d.steps.length} rules fired.`;
+}
+
+// ── Scene: chain trace (Phase 6) ──────────────────────────────
+//
+// Renders the prefilter paths as three 3D polylines in the K=4
+// alphabet space.  Boardstack4 path = green; byte_router fingerprint
+// = pink; PICM tree path = blue.  X = step index; Y = K=4 value.
+
+async function loadChainTraceScene(){
+  clearScene();
+  TOKEN_FLOWERS = [];
+  const prompt = document.getElementById('v3d-prompt').value || 'hello';
+  const r = await fetch('/caformer/viz3d/chain-trace/?q=' +
+                          encodeURIComponent(prompt));
+  const d = await r.json();
+
+  // Lay out a 4-symbol path along X with Y = K=4 value.
+  const stepX = 4, valY = 3;
+  const tracks = [
+    { name: 'boardstack4', color: 0x2ea043, path: d.paths.boardstack4,
+      offsetZ: -3 },
+    { name: 'byte_router', color: 0xff7ec7, path: d.paths.byte_router,
+      offsetZ:  0 },
+    { name: 'picm_tree',   color: 0x79c0ff, path: d.paths.picm_tree,
+      offsetZ:  3 },
+  ];
+  for (const tr of tracks) {
+    if (!tr.path || tr.path.length === 0) continue;
+    // Spheres per step.
+    const points = [];
+    for (let i = 0; i < tr.path.length; i++) {
+      const v = (tr.path[i] | 0) & 3;
+      const x = i * stepX;
+      const y = v * valY;
+      const z = tr.offsetZ;
+      points.push(new THREE.Vector3(x, y, z));
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.6, 16, 12),
+        new THREE.MeshStandardMaterial({
+          color: tr.color, emissive: tr.color, emissiveIntensity: 0.5,
+          roughness: 0.3, metalness: 0.1,
+        }));
+      sphere.position.set(x, y, z);
+      scene.add(sphere);
+      SCENE_OBJECTS.push(sphere);
+    }
+    // Connecting polyline.
+    if (points.length >= 2) {
+      const geom = new THREE.BufferGeometry().setFromPoints(points);
+      const line = new THREE.Line(geom,
+        new THREE.LineBasicMaterial({
+          color: tr.color, transparent: true, opacity: 0.6,
+          linewidth: 2 }));
+      scene.add(line);
+      SCENE_OBJECTS.push(line);
+    }
+    // Track label.
+    const lab = makeTextSprite(tr.name,
+      '#' + tr.color.toString(16).padStart(6, '0'));
+    lab.position.set(-3, valY * 1.5, tr.offsetZ);
+    scene.add(lab);
+    SCENE_OBJECTS.push(lab);
+  }
+  // K=4 value axis labels (0 at bottom, 3 at top).
+  for (let v = 0; v < 4; v++) {
+    const lab = makeTextSprite(`K=${v}`, '#888');
+    lab.position.set(- stepX, v * valY, -6);
+    lab.scale.set(2, 1, 1);
+    scene.add(lab);
+    SCENE_OBJECTS.push(lab);
+  }
+  controls.target.set(stepX * 2, valY * 1.5, 0);
+  camera.position.set(stepX * 2, valY * 3 + 4, 18);
+  controls.update();
+  document.getElementById('v3d-scene-meta').textContent =
+    `Phase 6: chain trace · ${prompt!r ? prompt : ''} — three substrate paths.`;
+}
+
+// ── Click info panel (Phase 5: annotations) ───────────────────
+//
+// Mouse-click hits a raycaster against the current scene's meshes.
+// If the hit object has a userData.desc / userData.label, show it
+// in the floating info panel.
+
+const _raycaster = new THREE.Raycaster();
+const _mouse = new THREE.Vector2();
+const _infoPanel = document.getElementById('v3d-info');
+
+function _showInfo(html){
+  if (!_infoPanel) return;
+  _infoPanel.style.display = '';
+  _infoPanel.innerHTML = html;
+}
+function _hideInfo(){
+  if (_infoPanel) _infoPanel.style.display = 'none';
+}
+
+stage.addEventListener('pointerdown', (ev) => {
+  const rect = renderer.domElement.getBoundingClientRect();
+  _mouse.x =  ((ev.clientX - rect.left) / rect.width)  * 2 - 1;
+  _mouse.y = -((ev.clientY - rect.top)  / rect.height) * 2 + 1;
+  _raycaster.setFromCamera(_mouse, camera);
+  const hits = _raycaster.intersectObjects(SCENE_OBJECTS, false);
+  for (const h of hits) {
+    const ud = h.object.userData || {};
+    if (ud.label || ud.desc) {
+      _showInfo(
+        `<h3>${ud.label || ''}</h3>` +
+        (ud.phase ? `<div class="phase">${ud.phase}</div>` : '') +
+        (ud.desc  ? `<div class="desc">${ud.desc}</div>` : ''));
+      return;
+    }
+  }
+  _hideInfo();
+});
+
 function switchScene(name){
   SCENE_NAME = name;
   // Toggle button highlight.
   for (const btn of document.querySelectorAll('.v3d-scene-btn')) {
     btn.classList.toggle('active', btn.dataset.scene === name);
   }
-  // Show/hide the boardstack-specific controls.
+  // Show/hide the boardstack-specific controls (load/play/step
+  // only meaningful for the boardstack scene; prompt is reused).
   const bsControls = document.getElementById('v3d-bs-controls');
-  if (bsControls) bsControls.style.display = (name === 'boardstack')
-    ? '' : 'none';
+  if (bsControls) bsControls.style.display = (name === 'boardstack'
+    || name === 'byterouter' || name === 'tokenrules') ? '' : 'none';
   if (name === 'boardstack') {
     document.getElementById('v3d-scene-meta').textContent =
       'Phase 1: 4 boards × side² K=4 cells, animated tick-by-tick.';
@@ -303,7 +626,20 @@ function switchScene(name){
   } else if (name === 'tree') {
     playing = false;
     loadTreeScene();
+  } else if (name === 'pipeline') {
+    playing = false;
+    loadPipelineScene();
+  } else if (name === 'byterouter') {
+    playing = false;
+    loadByteRouterScene();
+  } else if (name === 'tokenrules') {
+    playing = false;
+    loadTokenRulesScene();
+  } else if (name === 'chain') {
+    playing = false;
+    loadChainTraceScene();
   }
+  _hideInfo();
 }
 
 for (const btn of document.querySelectorAll('.v3d-scene-btn')) {
@@ -319,12 +655,24 @@ document.getElementById('v3d-step').addEventListener('click', () => {
 });
 
 // Animation loop — advance one tick every 500 ms when playing.
+// Also drives the pipeline scene's token-flow spheres (always on).
 let lastAdvance = 0;
 function animate(t){
   controls.update();
   if (playing && DATA && t - lastAdvance > 500) {
     paintTick(curTick + 1 > DATA.n_ticks ? 0 : curTick + 1);
     lastAdvance = t;
+  }
+  // Token-flow animation for the pipeline scene.  Each sphere
+  // ping-pongs between its edge endpoints with its own phase
+  // offset, creating a continuous data-flow shimmer.
+  if (SCENE_NAME === 'pipeline' && TOKEN_FLOWERS.length) {
+    const periodMs = 1800;
+    for (const f of TOKEN_FLOWERS) {
+      const u = (((t + f.userData.phase * periodMs) % periodMs) /
+                  periodMs);
+      f.position.lerpVectors(f.userData.a, f.userData.b, u);
+    }
   }
   renderer.render(scene, camera);
   requestAnimationFrame(animate);

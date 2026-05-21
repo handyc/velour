@@ -4834,3 +4834,276 @@ def stats_view(request):
         'counts':            counts,
         'bundles':           bundles,
     })
+
+
+# ─── viz3d Phase 3+: pipeline / byte_router / token-rules scenes ──
+
+
+@login_required
+def viz3d_pipeline_state(request):
+    """JSON for the 8-primitive caformer pipeline scene.
+
+    Returns a linear topology of the canonical caformer architecture:
+    embed → norm → q/k/v → score → mix → merge → mlp → output.
+    Each node has a position, label, slug, description, and a
+    relative size (some primitives are "fat" — attention has 4
+    sub-rules)."""
+
+    # The 10-rule slot ordering used by ga.FULL_STACK_NAMES.
+    # Group by phase so the scene has visual sections.
+    pipeline = [
+        {'slug': 'embed',  'label': 'Embedding',     'phase': 'in',
+         'desc': 'Tokens → CA state via LCG seed + ticks.'},
+        {'slug': 'norm',   'label': 'Layer norm',    'phase': 'in',
+         'desc': 'Idealised uniform OR ca_layer_norm_iterative.'},
+        # Attention sub-rules render as siblings at the same phase.
+        {'slug': 'q',      'label': 'Q project',     'phase': 'attn'},
+        {'slug': 'k',      'label': 'K project',     'phase': 'attn'},
+        {'slug': 'v',      'label': 'V project',     'phase': 'attn'},
+        {'slug': 'score',  'label': 'Score',         'phase': 'attn',
+         'desc': 'Pair-wise CA score.'},
+        {'slug': 'mix',    'label': 'Mix',           'phase': 'merge'},
+        {'slug': 'merge',  'label': 'Merge',         'phase': 'merge',
+         'desc': 'Residual merge.'},
+        {'slug': 'mlp',    'label': 'MLP',           'phase': 'mlp',
+         'desc': 'Feed-forward CA.'},
+        {'slug': 'output', 'label': 'Output head',   'phase': 'out',
+         'desc': 'Sample / argmax over K=4 cells.'},
+    ]
+    # Lay out positions: phases stack along X, siblings stack along Z.
+    phase_x = {'in': 0, 'attn': 12, 'merge': 24, 'mlp': 32, 'out': 40}
+    by_phase: dict = {}
+    for p in pipeline:
+        by_phase.setdefault(p['phase'], []).append(p)
+    nodes = []
+    for phase, items in by_phase.items():
+        base_x = phase_x[phase]
+        n = len(items)
+        for i, item in enumerate(items):
+            z = (i - (n - 1) / 2.0) * 4
+            x = base_x
+            y = 0
+            nodes.append({
+                'slug':  item['slug'],
+                'label': item['label'],
+                'desc':  item.get('desc', ''),
+                'phase': phase,
+                'x': float(x), 'y': float(y), 'z': float(z),
+                'w': 2.5, 'h': 2.5, 'd': 2.5,
+            })
+
+    # Edges: data flow.  Sequential between phases; attention forks
+    # out to Q/K/V and rejoins at Score → Mix.
+    edges = []
+    # in chain
+    edges.append({'from': 'embed', 'to': 'norm'})
+    # norm → Q, K, V
+    for s in ('q', 'k', 'v'):
+        edges.append({'from': 'norm', 'to': s})
+    # Q & K → Score
+    edges.append({'from': 'q', 'to': 'score'})
+    edges.append({'from': 'k', 'to': 'score'})
+    # Score & V → Mix
+    edges.append({'from': 'score', 'to': 'mix'})
+    edges.append({'from': 'v',     'to': 'mix'})
+    # Mix → Merge → MLP → Output
+    edges.append({'from': 'mix',    'to': 'merge'})
+    edges.append({'from': 'merge',  'to': 'mlp'})
+    edges.append({'from': 'mlp',    'to': 'output'})
+
+    # If a TrainedModel exists, surface its diversity stats so the
+    # scene can show "collapsed slots" visibly.
+    diversity = None
+    try:
+        from caformer.models import TrainedModel
+        tm = TrainedModel.objects.order_by('-final_fitness').first()
+        if tm is not None:
+            d = tm.rule_diversity()
+            diversity = {
+                'model':              tm.name,
+                'final_fitness':      tm.final_fitness,
+                'distinct_count':     d['distinct_count'],
+                'mean_pairwise':      d['mean_pairwise_match'],
+                'groups':             d['groups'],
+            }
+    except Exception:                                # noqa: BLE001
+        pass
+
+    return _json_response({
+        'nodes':     nodes,
+        'edges':     edges,
+        'diversity': diversity,
+    })
+
+
+@login_required
+def viz3d_byte_router_state(request):
+    """JSON for the byte_router cascade scene: 4 layers × 4 boards.
+
+    Returns a stack of 4 layers stacked vertically.  Each layer has
+    4 cell8 boards arranged side by side.  Optional ?byte=72 routes
+    a specific byte and returns per-board outputs at each layer."""
+    import numpy as np
+    byte_in_raw = (request.GET.get('byte') or '').strip()
+    try:
+        byte_in = int(byte_in_raw) & 0xFF if byte_in_raw else 0x68  # 'h'
+    except ValueError:
+        byte_in = 0x68
+
+    layers = []
+    try:
+        from caformer import byte_router as _br
+        from caformer.cell8 import (hex_ca_step_cell8, broadcast_input)
+        SIDE = 8
+        router = _br.get_router()
+        ticks = router.ticks
+        current = byte_in
+        for li, layer in enumerate(router.layer_luts):
+            chunks = ((current >> 6) & 3, (current >> 4) & 3,
+                      (current >> 2) & 3,  current       & 3)
+            boards = []
+            outs = []
+            base = (np.arange(SIDE * SIDE, dtype=np.uint8)
+                    .reshape(SIDE, SIDE) & 3)
+            for bi, board_lut in enumerate(layer):
+                state = base.copy()
+                state[0, 0] = chunks[bi] & 3
+                inp = broadcast_input(SIDE, chunks[bi])
+                for _ in range(ticks):
+                    state = hex_ca_step_cell8(state, inp, board_lut)
+                outs.append(int(state[0, 0]))
+                boards.append({
+                    'chunk_in':   int(chunks[bi]),
+                    'final_state': state.astype(int).tolist(),
+                    'output':      int(state[0, 0]),
+                })
+            current = (((outs[0] & 3) << 6) | ((outs[1] & 3) << 4)
+                       | ((outs[2] & 3) << 2) | (outs[3] & 3))
+            layers.append({
+                'layer_idx':  li,
+                'byte_in':    int(byte_in if li == 0 else
+                                  (((outs[0] & 3) << 6) | 0)),  # filled by client
+                'boards':     boards,
+                'byte_out':   int(current),
+            })
+        available = True
+    except Exception as e:                              # noqa: BLE001
+        available = False
+        layers = []
+        return _json_response({
+            'available': False,
+            'error': f'{type(e).__name__}: {e}',
+        })
+
+    return _json_response({
+        'available': True,
+        'byte_in':   byte_in,
+        'layers':    layers,
+    })
+
+
+@login_required
+def viz3d_token_rules_state(request):
+    """JSON for the token-rule cascade scene.
+
+    GET ?concept=<verb>[,<preverb>][,<suffix>] returns the cascade
+    state at each step.  Default: encode the GET ``q`` prompt (or
+    'I am going home') via the concept_system encoder and cascade
+    its first concept."""
+    import numpy as np
+    prompt = (request.GET.get('q') or 'I am going home').strip()
+    try:
+        from caformer.concept_system import encode, surface, decode
+        from caformer.concept_system.token_rules import (
+            get_rules, fire, _BASE_STATE,
+            _ID_OFFSET_VERB, _ID_OFFSET_PREVERB, _ID_OFFSET_SUFFIX)
+        rules, meta = get_rules()
+        concepts = encode(prompt)
+        if not concepts:
+            return _json_response({'available': False,
+                                   'error': f'no concept in {prompt!r}'})
+        c = concepts[0]
+        from caformer.concept_system import (preverb_by_id, verb_by_id,
+                                                       suffix_by_id)
+        sequence = []
+        if c.preverb_id:
+            p = preverb_by_id(c.preverb_id)
+            if p is not None:
+                sequence.append((_ID_OFFSET_PREVERB + p.id, p.form))
+        if c.verb_id:
+            v = verb_by_id(c.verb_id)
+            if v is not None:
+                sequence.append((_ID_OFFSET_VERB + v.id, v.root))
+        if c.suffix_id:
+            s = suffix_by_id(c.suffix_id)
+            if s is not None:
+                sequence.append((_ID_OFFSET_SUFFIX + s.id,
+                                 s.form.lstrip('-')))
+        steps = []
+        state = _BASE_STATE.copy()
+        for tid, name in sequence:
+            rule = rules.get(tid)
+            if rule is None:
+                continue
+            state = fire(rule, state, n_ticks=4)
+            steps.append({
+                'token_id':  tid,
+                'name':      name,
+                'state':     state.astype(int).tolist(),
+            })
+        return _json_response({
+            'available': True,
+            'prompt':    prompt,
+            'concept':   {
+                'surface': surface(c),
+                'gloss':   decode(c),
+                'preverb_id': c.preverb_id,
+                'verb_id':    c.verb_id,
+                'suffix_id':  c.suffix_id,
+            },
+            'steps':     steps,
+        })
+    except FileNotFoundError:
+        return _json_response({'available': False,
+                               'error': 'token rules not trained yet'})
+    except Exception as e:                              # noqa: BLE001
+        return _json_response({'available': False,
+                               'error': f'{type(e).__name__}: {e}'})
+
+
+@login_required
+def viz3d_chain_trace_state(request):
+    """Run all three prefilters on the prompt and return their 4-colour
+    paths so the chain-trace scene can render them as 3D polylines."""
+    prompt = (request.GET.get('q') or 'hello').strip()
+    from caformer.harness import prefilter as _pf
+    try:
+        from caformer import boardstack4 as _bs4
+        bs = _pf._classify_boardstack4(prompt)
+        bs_path = list(bs.path or [])
+    except Exception:                                # noqa: BLE001
+        bs_path = []
+    try:
+        from caformer import byte_router as _br
+        br = _br.get_router()
+        br_result = br.route_prompt(prompt)
+        br_path = list(br_result['fingerprint']) if br_result else []
+    except Exception:                                # noqa: BLE001
+        br_path = []
+    try:
+        from caformer.harness import picm_tree as _tree
+        descent = _tree.descend(prompt)
+        tree_path = list(descent.path_tuple())
+        tree_labels = list(descent.label_chain)
+    except Exception:                                # noqa: BLE001
+        tree_path = []
+        tree_labels = []
+    return _json_response({
+        'prompt':     prompt,
+        'paths': {
+            'boardstack4': bs_path,
+            'byte_router': br_path,
+            'picm_tree':   tree_path,
+        },
+        'tree_labels': tree_labels,
+    })
