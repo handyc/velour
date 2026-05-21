@@ -226,6 +226,33 @@ def _h_to_sanskrit(slots: dict[str, str]) -> str:
     return ' '.join(surface(c) for c in concepts)
 
 
+def _h_concept_cascade(slots: dict[str, str]) -> str:
+    """Encode slot 'X' into Sanskrit concepts, run each concept's
+    token-rule cascade, return target → produced for inspection.
+    Phase 2 of the token-per-CA-rule substrate."""
+    text = (slots.get('text') or slots.get('X') or '').strip()
+    if not text:
+        return '(no text to cascade)'
+    try:
+        from caformer.concept_system import encode
+        from caformer.concept_system.token_rules import cascade_concept
+    except Exception:                                # noqa: BLE001
+        return '(token-rules substrate unavailable)'
+    concepts = encode(text)
+    if not concepts:
+        return '(no Sanskrit concept recognised)'
+    parts = []
+    for c in concepts:
+        try:
+            out = cascade_concept(c)
+        except FileNotFoundError:
+            return '(token rules not trained yet — run caformer_train_token_rules)'
+        parts.append(
+            f'{out["surface_target"]}→{out["surface_produced"]!r} '
+            f'(n_steps={out["n_steps"]})')
+    return ' | '.join(parts)
+
+
 def _h_concept_gloss(slots: dict[str, str]) -> str:
     """Render slot 'X' as English glosses only (no Sanskrit surface).
     For 'what does X mean' style templates."""
@@ -439,6 +466,7 @@ HANDLERS: dict[str, Callable[[dict], str]] = {
     'recognised_concepts': _h_recognised_concepts,
     'to_sanskrit':      _h_to_sanskrit,
     'concept_gloss':    _h_concept_gloss,
+    'concept_cascade':  _h_concept_cascade,
     'prefilter_state':  _h_prefilter_state,
     'capabilities':     _h_capabilities,
     'describe_self':    _h_describe_self,

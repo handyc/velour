@@ -233,6 +233,12 @@ TEMPLATES_LIVE = [
     (1, 3, 'gloss [X]',
         '(resolved by concept_gloss handler)',
         0.80, 'concept gloss only', 'concept_gloss'),
+    (1, 3, 'cascade [X]',
+        '(resolved by concept_cascade handler)',
+        0.80, 'fire token-rule cascade for [X]', 'concept_cascade'),
+    (1, 3, 'fire rules for [X]',
+        '(resolved by concept_cascade handler)',
+        0.80, 'fire token-rule cascade for [X]', 'concept_cascade'),
 
     (3, 1, 'what can you do',
         '(resolved by capabilities handler)',
