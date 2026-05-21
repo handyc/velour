@@ -63,6 +63,13 @@ class AgentState:
     step_log: list[dict] = field(default_factory=list)
                                               # one dict per step in the
                                               # chain — for UI tracing
+    delegation_depth: int = 0                 # incremented on each
+                                              # delegate_to() call;
+                                              # bounded to prevent
+                                              # infinite recursion when
+                                              # meta invokes meta
+
+    MAX_DELEGATION_DEPTH = 4
 
     def has_reply(self) -> bool:
         return any(c.kind == 'reply' for c in self.contributions)
@@ -75,6 +82,32 @@ class AgentState:
             if c.kind == kind:
                 return c
         return None
+
+    def delegate_to(self, target_colour: int) -> bool:
+        """Invoke another agent's run() against this state.  Used by
+        an agent that wants to consult its peers (e.g. personality
+        agent delegating to information for the factual half of a
+        greeting+question prompt).
+
+        Returns True iff the delegated agent actually ran.  Bounded
+        by MAX_DELEGATION_DEPTH (4) so meta-invoking-meta loops can't
+        explode."""
+        if self.delegation_depth >= self.MAX_DELEGATION_DEPTH:
+            self.step_log.append({
+                'agent': 'delegation',
+                'action': 'rejected',
+                'content': f'(max depth {self.MAX_DELEGATION_DEPTH} reached)'})
+            return False
+        target = AGENTS_BY_COLOUR.get(int(target_colour) & 3)
+        if target is None:
+            return False
+        self.delegation_depth += 1
+        self.step_log.append({
+            'agent': 'delegation', 'action': 'invoke',
+            'content': f'→ {target.name} (depth {self.delegation_depth})'})
+        target.run(self)
+        self.delegation_depth -= 1
+        return True
 
 
 # ─── Agents ────────────────────────────────────────────────────────
@@ -129,6 +162,35 @@ class PersonalityAgent:
         is_greeting = (bool(matches)
                        or first_token in _GREETING_KEYWORDS
                        or len(prompt) <= 4)
+        # Cross-route delegation: when the prompt is a greeting +
+        # a follow-on question ('hi velour, what time is it?'),
+        # delegate the substantive part to the information agent
+        # so we can wrap the factual answer in personality voice.
+        starts_with_greeting = first_token in _GREETING_KEYWORDS
+        has_question_marker = (state.prompt.rstrip().endswith('?')
+                               or any(m in prompt for m in
+                                      ('what', 'how', 'when', 'who',
+                                       'why', 'where')))
+        if (starts_with_greeting and has_question_marker
+                and not state.has_reply()):
+            delegated = state.delegate_to(1)   # information
+            if delegated and state.has_reply():
+                persona = getattr(state.profile, 'persona_name', '') or ''
+                wrap = (f'Hi! {{reply}}' if not persona
+                        else f"Hi, I'm {persona}. {{reply}}")
+                # The wrapper contribution prepends the greeting;
+                # the assembler will fold reply + wrapper together.
+                greeting = ('Hi!' if not persona
+                            else f"Hi, I'm {persona}.")
+                state.contributions.append(Contribution(
+                    agent=self.name, kind='wrapper',
+                    content=greeting, confidence=0.8))
+                state.step_log.append({
+                    'agent': self.name, 'action': 'wrapper',
+                    'content': greeting,
+                    'detail': 'delegated to information agent',
+                    'picm_matches': picm_strs})
+                return
         if is_greeting and not any(c.kind == 'wrapper'
                                    for c in state.contributions):
             persona = getattr(state.profile, 'persona_name', '') or ''
