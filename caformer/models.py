@@ -546,6 +546,7 @@ class HarnessProfile(models.Model):
         ('router',      'router (single CA classifier, majority vote)'),
         ('boardstack4', 'boardstack4 (4-board sequential cascade)'),
         ('multiscale',  'multiscale boardstack4 (sides 4/8/16/32, XOR combined)'),
+        ('byte_router', 'byte_router (4×4 cell8 cascade with trained permutation)'),
     )
     prefilter_mode = models.CharField(
         max_length=16, choices=PREFILTER_CHOICES, default='router',

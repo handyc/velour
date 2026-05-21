@@ -75,9 +75,15 @@ class ByteRouter:
     """Stateless cascade: one byte → one 4-symbol fingerprint."""
 
     def __init__(self, layer_luts: Sequence[Sequence[np.ndarray]],
-                       ticks: int = TICKS):
+                       ticks: int = TICKS,
+                       permutation: dict[int, int] | None = None,
+                       n_bytes_train: int = 4):
         self.layer_luts = [list(layer) for layer in layer_luts]
         self.ticks = ticks
+        # permutation: trained 256-byte → 4-category map.  When
+        # None, the router can produce fingerprints but not categories.
+        self.permutation: dict[int, int] = dict(permutation or {})
+        self.n_bytes_train = int(n_bytes_train)
         if len(self.layer_luts) != N_LAYERS:
             raise ValueError(
                 f'byte_router expects {N_LAYERS} layers, got {len(self.layer_luts)}')
@@ -144,6 +150,56 @@ class ByteRouter:
         )
         return fp, intermediates
 
+    def _aggregate_byte(self, prompt: str, n_bytes: int) -> int:
+        """XOR-aggregate the first n_bytes routed bytes.  The result
+        is a single byte in [0, 255]; the trained permutation maps
+        this to a K=4 category."""
+        raw = prompt.encode('utf-8')[:max(1, n_bytes)]
+        if not raw:
+            return 0
+        agg = 0
+        for b in raw:
+            out_byte = self._route_byte_to_byte(int(b))
+            agg ^= out_byte
+        return agg & 0xFF
+
+    def _route_byte_to_byte(self, byte_val: int) -> int:
+        """Same as route_byte but returns the final byte (not the
+        fingerprint tuple).  Used by classify_prompt for the
+        permutation lookup path."""
+        current = int(byte_val) & 0xFF
+        for layer in self.layer_luts:
+            chunks = (
+                (current >> 6) & 3, (current >> 4) & 3,
+                (current >> 2) & 3,  current       & 3)
+            outs = [self._board_output(layer[b], chunks[b])
+                    for b in range(N_BOARDS)]
+            current = ((outs[0] & 3) << 6 | (outs[1] & 3) << 4
+                       | (outs[2] & 3) << 2 |  outs[3] & 3)
+        return current
+
+    def classify_prompt(self, prompt: str,
+                              n_bytes: int | None = None) -> dict:
+        """Use the trained permutation to map an input prompt to a
+        K=4 category + report fingerprint + the aggregated byte.
+
+        Returns a dict {category, fingerprint, agg_byte,
+        permutation_loaded}.  When no permutation is loaded, category
+        is None and the caller should fall back to mode-projection
+        or another prefilter."""
+        n = n_bytes if n_bytes is not None else self.n_bytes_train
+        agg_byte = self._aggregate_byte(prompt, n)
+        fp = ((agg_byte >> 6) & 3, (agg_byte >> 4) & 3,
+              (agg_byte >> 2) & 3,  agg_byte       & 3)
+        cat = self.permutation.get(agg_byte) if self.permutation else None
+        return {
+            'category':           cat,
+            'fingerprint':        fp,
+            'agg_byte':           agg_byte,
+            'permutation_loaded': bool(self.permutation),
+            'n_bytes':            n,
+        }
+
     def route_prompt(self, prompt: str, n_bytes: int = 4
                           ) -> dict | None:
         """Route the first ``n_bytes`` of the prompt and aggregate the
@@ -188,22 +244,32 @@ class ByteRouter:
 
 
 def save_router(router: ByteRouter, model_dir: str | Path) -> Path:
-    """Write the router's 16 LUTs to disk plus a meta.json.  Layout:
+    """Write the router's 16 LUTs + meta.json + (optional) trained
+    permutation.json.  Layout:
 
       ``layer_<L>_board_<B>.lut``  (raw bytes, 65,536 entries per file)
-      ``meta.json``                (architecture + ticks + provenance)"""
+      ``meta.json``                (architecture + ticks + provenance)
+      ``permutation.json``         (trained 256-byte → 4-category map,
+                                    written only when router.permutation
+                                    is populated)"""
     md = Path(model_dir).resolve()
     md.mkdir(parents=True, exist_ok=True)
     for l, layer in enumerate(router.layer_luts):
         for b, lut in enumerate(layer):
             (md / f'layer_{l}_board_{b}.lut').write_bytes(bytes(lut))
     (md / 'meta.json').write_text(json.dumps({
-        'n_layers': N_LAYERS,
-        'n_boards': N_BOARDS,
-        'side':     SIDE,
-        'ticks':    router.ticks,
-        'lut_size': LUT_SIZE_8,
+        'n_layers':       N_LAYERS,
+        'n_boards':       N_BOARDS,
+        'side':           SIDE,
+        'ticks':          router.ticks,
+        'lut_size':       LUT_SIZE_8,
+        'n_bytes_train':  router.n_bytes_train,
     }, indent=2))
+    if router.permutation:
+        # JSON keys must be strings; convert byte → category dict.
+        (md / 'permutation.json').write_text(json.dumps(
+            {str(k): int(v) for k, v in router.permutation.items()},
+            indent=2))
     return md
 
 
@@ -219,7 +285,55 @@ def load_router(model_dir: str | Path) -> ByteRouter:
             arr = np.frombuffer(lp.read_bytes(), dtype=np.uint8).copy() & 3
             layer.append(arr)
         luts.append(layer)
-    return ByteRouter(luts, ticks=int(meta.get('ticks', TICKS)))
+    permutation: dict[int, int] = {}
+    perm_path = md / 'permutation.json'
+    if perm_path.exists():
+        raw = json.loads(perm_path.read_text())
+        permutation = {int(k): int(v) for k, v in raw.items()}
+    return ByteRouter(
+        luts, ticks=int(meta.get('ticks', TICKS)),
+        permutation=permutation,
+        n_bytes_train=int(meta.get('n_bytes_train', 4)))
+
+
+# ─── Permutation derivation ────────────────────────────────────────
+
+
+def compute_permutation_for_corpus(router: ByteRouter,
+                                          corpus: list[tuple[str, int]],
+                                          n_bytes: int | None = None
+                                          ) -> tuple[dict[int, int], int]:
+    """Walk the corpus through the router and derive a many-to-one
+    output-byte → category mapping via greedy max-count assignment.
+
+    Each prompt's aggregated output byte is bucketed against its
+    target category; each bucket is then assigned to whichever
+    category appears most in it.  Returns (mapping, n_correct).
+
+    Use this when an existing router_v* artifact lacks a saved
+    permutation — recompute against ``caformer.router_corpus.CORPUS``
+    and persist via save_router()."""
+    n = n_bytes if n_bytes is not None else router.n_bytes_train
+    bag: dict[int, list[int]] = {}
+    for prompt, target in corpus:
+        agg = router._aggregate_byte(prompt, n)
+        b = bag.get(agg)
+        if b is None:
+            b = [0, 0, 0, 0]
+            bag[agg] = b
+        b[int(target) & 3] += 1
+    mapping: dict[int, int] = {}
+    n_correct = 0
+    for v, counts in bag.items():
+        best_cat = 0
+        best_count = counts[0]
+        for t in range(1, 4):
+            if counts[t] > best_count:
+                best_count = counts[t]
+                best_cat = t
+        mapping[v] = best_cat
+        n_correct += best_count
+    return mapping, n_correct
 
 
 _CACHE: dict[str, ByteRouter] = {}

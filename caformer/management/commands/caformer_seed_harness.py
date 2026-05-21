@@ -45,6 +45,23 @@ PROFILES = [
         inject_identity=True,
     ),
     dict(
+        slug='velour-byterouter',
+        persona_name='Velour (byte_router)',
+        is_default=False,
+        prefilter_mode='byte_router',
+        persona_description=(
+            "Velour persona routed via the byte_router substrate "
+            "(4 layers × 4 cell8 boards) with a trained 256-byte → "
+            "4-category permutation.  Reported ~84% accuracy on the "
+            "router corpus.  Operates on the first 4 bytes of the "
+            "prompt — XOR aggregation across them."),
+        system_prompt_extra='',
+        inject_cwd=False,
+        inject_time=True,
+        inject_git=False,
+        inject_identity=True,
+    ),
+    dict(
         slug='velour-multiscale',
         persona_name='Velour (multiscale)',
         is_default=False,

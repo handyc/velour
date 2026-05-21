@@ -82,6 +82,45 @@ def _classify_boardstack4(prompt: str) -> PrefilterResult:
         path=path)
 
 
+def _classify_byte_router(prompt: str) -> PrefilterResult:
+    """byte_router prefilter: 4-layer × 4-board cell8 cascade with
+    a TRAINED permutation that maps the aggregated output byte to a
+    K=4 category.  Trained accuracy on the 80-example router corpus:
+    ~84 %.  Soft-falls to single-LUT router when no byte_router
+    artifact has been persisted yet, or to fingerprint-only when the
+    artifact lacks permutation.json."""
+    try:
+        from caformer import byte_router as _br
+        router = _br.get_router()
+    except (FileNotFoundError, Exception):           # noqa: BLE001
+        return _classify_router(prompt)
+    if not router.permutation:
+        # Artifact found but permutation not yet computed — degrade
+        # to the (mode-projected) classifier path via fingerprint
+        # chunk[0] for a usable fallback.
+        result = router.classify_prompt(prompt)
+        fp = result['fingerprint']
+        cat = int(fp[0]) & 3
+        return PrefilterResult(
+            category=cat,
+            name=CATEGORY_NAMES.get(cat, '?'),
+            colour=CATEGORY_COLOURS.get(cat, 'ffffff'),
+            available=True,
+            mode='byte_router (no permutation — chunk[0])',
+            path=fp)
+    result = router.classify_prompt(prompt)
+    fp = result['fingerprint']
+    cat = result['category'] if result['category'] is not None else 0
+    return PrefilterResult(
+        category=cat,
+        name=CATEGORY_NAMES.get(cat, '?'),
+        colour=CATEGORY_COLOURS.get(cat, 'ffffff'),
+        available=True,
+        mode=f'byte_router (n_bytes={result["n_bytes"]}, '
+             f'agg_byte={result["agg_byte"]:#04x})',
+        path=fp)
+
+
 def _classify_multiscale(prompt: str) -> PrefilterResult:
     """Multi-scale variant: load multiple BoardStack4 instances at
     different sides, XOR-combine their per-scale paths.  Soft-falls
@@ -122,4 +161,6 @@ def classify(prompt: str, mode: str = 'router') -> PrefilterResult:
         return _classify_boardstack4(prompt)
     if mode == 'multiscale':
         return _classify_multiscale(prompt)
+    if mode == 'byte_router':
+        return _classify_byte_router(prompt)
     return _classify_router(prompt)
